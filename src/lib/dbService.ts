@@ -304,13 +304,83 @@ class DbService {
         rows: result[0].values || []
       };
     } catch (error) {
-      console.error("Query execution error:", error);
-      toast({
-        title: "SQL Error",
-        description: String(error),
-        variant: "destructive"
-      });
-      return null;
+      console.error("Error executing query:", error);
+      throw error;
+    }
+  }
+
+  executeBatchOperations(sqlStatements: string[], useTransaction = true): { success: boolean; affectedTables: string[]; errors: string[] } {
+    if (!this.db) {
+      return { success: false, affectedTables: [], errors: ["No database loaded"] };
+    }
+    
+    // Track tables that might be affected by the operations
+    const affectedTables: Set<string> = new Set();
+    const errors: string[] = [];
+    
+    try {
+      // Start transaction if requested
+      if (useTransaction) {
+        this.db.exec("BEGIN TRANSACTION");
+      }
+      
+      // Execute each statement
+      for (let i = 0; i < sqlStatements.length; i++) {
+        const sql = sqlStatements[i].trim();
+        if (!sql) continue; // Skip empty statements
+        
+        try {
+          // Execute the statement
+          this.db.exec(sql);
+          
+          // Try to identify affected tables from the SQL
+          const tableMatches = sql.match(/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE)\s+`?(\w+)`?/i);
+          if (tableMatches && tableMatches[1]) {
+            affectedTables.add(tableMatches[1]);
+          }
+        } catch (error) {
+          const errorMessage = `Error in statement #${i + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+          errors.push(errorMessage);
+          
+          // If we're in a transaction, we should abort
+          if (useTransaction) {
+            this.db.exec("ROLLBACK");
+            return {
+              success: false,
+              affectedTables: [],
+              errors: [`Batch operation failed and was rolled back. ${errorMessage}`]
+            };
+          }
+          
+          // If not in transaction, continue with next statement
+        }
+      }
+      
+      // If we made it here with a transaction, commit it
+      if (useTransaction) {
+        this.db.exec("COMMIT");
+      }
+      
+      return {
+        success: errors.length === 0,
+        affectedTables: Array.from(affectedTables),
+        errors
+      };
+    } catch (error) {
+      // Handle any unexpected errors
+      if (useTransaction) {
+        try {
+          this.db.exec("ROLLBACK");
+        } catch (rollbackError) {
+          console.error("Error rolling back transaction:", rollbackError);
+        }
+      }
+      
+      return {
+        success: false,
+        affectedTables: [],
+        errors: [error instanceof Error ? error.message : "Unknown error occurred during batch operation"]
+      };
     }
   }
 
