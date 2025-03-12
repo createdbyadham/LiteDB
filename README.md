@@ -56,6 +56,9 @@ npm run build
 
 ## Usage
 
+### Important Note
+⚠️ **Run as Administrator**: The application requires administrator privileges to properly handle file paths and enable real-time updates. Right-click the application and select "Run as Administrator" when launching.
+
 ### Basic Database Operations
 
 1. Launch the application
