@@ -17,7 +17,8 @@ import {
   Info, 
   Database, 
   ChevronLeft, 
-  ChevronRight 
+  ChevronRight,
+  Save
 } from 'lucide-react';
 import { ColumnInfo, RowData, dbService } from '@/lib/dbService';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -293,6 +294,7 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
                 }
               }}
             >
+              <Save className= "h-4 w-4" />
               Save Changes
             </Button>
             <div className="relative w-64">
@@ -406,8 +408,9 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
               ) : (
                 <TableRow>
                   <TableCell 
-                    colSpan={columns.length} 
+                    colSpan={columns.length + 1} 
                     className="h-32 text-center text-muted-foreground"
+                    style={{ width: '100%' }}
                   >
                     No results found
                   </TableCell>

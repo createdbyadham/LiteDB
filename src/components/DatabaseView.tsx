@@ -118,10 +118,6 @@ const DatabaseView = () => {
           Back
         </Button>
         <div className="flex gap-2">
-          <Button onClick={handleSaveDatabase}>
-            <Save className="mr-2 h-4 w-4" />
-            Save Database
-          </Button>
           <Button onClick={() => setExportDialogOpen(true)} variant="outline">
             <Download className="mr-2 h-4 w-4" />
             Export
@@ -130,7 +126,7 @@ const DatabaseView = () => {
       </div>
 
       <Tabs defaultValue="browse">
-        <TabsList>
+        <TabsList className="mb-2">
           <TabsTrigger value="browse">Browse</TabsTrigger>
           <TabsTrigger value="query">Batch Operations</TabsTrigger>
         </TabsList>
