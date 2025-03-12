@@ -39,6 +39,7 @@ declare global {
     initSqlJs: (config: { locateFile: (file: string) => string }) => Promise<SqlJs>;
     electron?: {
       saveDatabase: (filePath: string, data: Uint8Array) => Promise<{ success: boolean; error?: string }>;
+      exportDatabase: (data: string, format: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
     };
   }
 }
@@ -456,6 +457,81 @@ class DbService {
     const currentData = this.db.export();
     this.lastSavedData = currentData;
     return currentData;
+  }
+
+  // Export database to different formats
+  exportToFormat(format: 'csv' | 'json' | 'xlsx'): string | null {
+    if (!this.db) return null;
+    
+    // Get all tables
+    const tables = this.getTables();
+    
+    if (format === 'json') {
+      // Export all tables to JSON
+      const result: Record<string, any> = {};
+      
+      for (const table of tables) {
+        const data = this.getTableData(table.name);
+        result[table.name] = data.rows;
+      }
+      
+      return JSON.stringify(result, null, 2);
+    }
+    
+    if (format === 'csv') {
+      // Export all tables to CSV (one file with all tables)
+      let result = '';
+      
+      for (const table of tables) {
+        const data = this.getTableData(table.name);
+        
+        // Add table name as header
+        result += `Table: ${table.name}\n`;
+        
+        // Add column headers
+        result += data.columns.join(',') + '\n';
+        
+        // Add rows
+        for (const row of data.rows) {
+          const values = data.columns.map(col => {
+            const value = row[col];
+            if (value === null) return '';
+            if (typeof value === 'string') {
+              // Escape quotes and wrap in quotes if contains comma
+              if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                return `"${value.replace(/"/g, '""')}"`;
+              }
+              return value;
+            }
+            return String(value);
+          });
+          result += values.join(',') + '\n';
+        }
+        
+        // Add separator between tables
+        result += '\n\n';
+      }
+      
+      return result;
+    }
+    
+    if (format === 'xlsx') {
+      // For Excel, we'll return a JSON representation that the frontend can convert
+      // using a library like xlsx or exceljs
+      const result: Record<string, any> = {};
+      
+      for (const table of tables) {
+        const data = this.getTableData(table.name);
+        result[table.name] = {
+          columns: data.columns,
+          rows: data.rows
+        };
+      }
+      
+      return JSON.stringify(result);
+    }
+    
+    return null;
   }
 
   // Add method to load database from last saved state

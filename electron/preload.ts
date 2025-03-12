@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld(
       console.log('Calling readDatabase from preload:', filePath);
       return ipcRenderer.invoke('read-database', filePath);
     },
+    exportDatabase: async (data: string, format: string) => {
+      console.log('Calling exportDatabase from preload:', format);
+      return ipcRenderer.invoke('export-database', data, format);
+    },
     minimizeWindow: () => {
       return ipcRenderer.invoke('minimize-window');
     },

@@ -169,6 +169,41 @@ electron_1.ipcMain.handle('read-database', async (_event, filePath) => {
         };
     }
 });
+// Handle exporting database to different formats
+electron_1.ipcMain.handle('export-database', async (_event, data, format) => {
+    try {
+        console.log('Received export request:', { format, dataLength: data.length });
+        // Define file extension based on format
+        const fileExtension = format.toLowerCase();
+        // Show save dialog
+        const result = await electron_1.dialog.showSaveDialog({
+            title: 'Export Database',
+            defaultPath: `export.${fileExtension}`,
+            filters: [
+                { name: format.toUpperCase(), extensions: [fileExtension] },
+                { name: 'All Files', extensions: ['*'] }
+            ]
+        });
+        if (result.canceled || !result.filePath) {
+            return { success: false, error: 'Export cancelled' };
+        }
+        // Ensure the directory exists
+        const directory = path.dirname(result.filePath);
+        await fs.promises.mkdir(directory, { recursive: true });
+        // Write the file
+        console.log('Writing file to:', result.filePath);
+        await fs.promises.writeFile(result.filePath, data);
+        console.log('File exported successfully');
+        return { success: true, filePath: result.filePath };
+    }
+    catch (error) {
+        console.error('Error exporting database:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error occurred'
+        };
+    }
+});
 // Handle file dialog
 electron_1.ipcMain.on('open-file-dialog', (event) => {
     const options = {

@@ -6,11 +6,13 @@ import { useDatabase } from '@/hooks/useDatabase';
 import { dbService, RowData } from '@/lib/dbService';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Database, ArrowLeft, Save } from 'lucide-react';
+import { Database, ArrowLeft, Save, Download } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { ExportDialog } from '@/components/ExportDialog';
 
 const DatabaseView = () => {
   const [selectedTable, setSelectedTable] = useState<string>('');
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const { isLoaded, isLoading, tables, getTableData, getTableColumns } = useDatabase();
   const navigate = useNavigate();
 
@@ -115,10 +117,16 @@ const DatabaseView = () => {
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back
         </Button>
-        <Button onClick={handleSaveDatabase}>
-          <Save className="mr-2 h-4 w-4" />
-          Save Database
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleSaveDatabase}>
+            <Save className="mr-2 h-4 w-4" />
+            Save Database
+          </Button>
+          <Button onClick={() => setExportDialogOpen(true)} variant="outline">
+            <Download className="mr-2 h-4 w-4" />
+            Export
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="browse">
@@ -160,6 +168,11 @@ const DatabaseView = () => {
           <BatchOperations />
         </TabsContent>
       </Tabs>
+
+      <ExportDialog 
+        open={exportDialogOpen} 
+        onOpenChange={setExportDialogOpen} 
+      />
     </div>
   );
 };

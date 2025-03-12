@@ -13,6 +13,10 @@ electron_1.contextBridge.exposeInMainWorld('electron', {
         console.log('Calling readDatabase from preload:', filePath);
         return electron_1.ipcRenderer.invoke('read-database', filePath);
     },
+    exportDatabase: async (data, format) => {
+        console.log('Calling exportDatabase from preload:', format);
+        return electron_1.ipcRenderer.invoke('export-database', data, format);
+    },
     minimizeWindow: () => {
         return electron_1.ipcRenderer.invoke('minimize-window');
     },

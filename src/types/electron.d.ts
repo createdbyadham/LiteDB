@@ -1,6 +1,7 @@
 interface ElectronAPI {
   saveDatabase: (filePath: string, data: Uint8Array) => Promise<{ success: boolean; error?: string }>;
   readDatabase: (filePath: string) => Promise<{ success: boolean; data?: Buffer; error?: string; filePath?: string }>;
+  exportDatabase: (data: string, format: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
   minimizeWindow: () => Promise<void>;
   maximizeWindow: () => Promise<void>;
   closeWindow: () => Promise<void>;
