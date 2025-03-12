@@ -29,93 +29,58 @@ const UploadView = () => {
     
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      await processFile(files[0]);
-    }
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      await processFile(files[0]);
-    }
-  };
-
-  const processFile = async (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.db') && 
-        !file.name.toLowerCase().endsWith('.sqlite') && 
-        !file.name.toLowerCase().endsWith('.sqlite3')) {
-      toast({
-        title: "Invalid file",
-        description: "Please select a SQLite database file (.db, .sqlite, or .sqlite3)",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    
-    try {
-      // Check if we're in Electron
-      if (!window.electron) {
+      const file = files[0];
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        await processFile(arrayBuffer);
+      } catch (error) {
         toast({
           title: "Error",
-          description: "This feature requires the desktop app. Please use the Electron version.",
+          description: error instanceof Error ? error.message : "Failed to process file",
           variant: "destructive"
         });
-        return;
       }
+    }
+  };
 
-      // Get the file path - try different ways depending on how the file was selected
-      let filePath = '';
-      
-      // Try getting path from Electron's file object
-      if ('path' in file) {
-        filePath = (file as ElectronFile).path;
-      }
-      
-      // If that didn't work, try getting it from the webkitRelativePath
-      if (!filePath && file.webkitRelativePath) {
-        filePath = file.webkitRelativePath;
-      }
-      
-      // If still no path, try using the name (this is a fallback and might not work)
-      if (!filePath) {
-        filePath = file.name;
-      }
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.files?.[0]) return;
 
-      console.log('Processing file with path:', filePath);
-      
-      // Use the native file API
-      console.log('Using electron readDatabase with path:', filePath);
-      const result = await window.electron.readDatabase(filePath);
-      if (result.success && result.data) {
-        // Use the returned absolute file path for consistency
-        const actualFilePath = result.filePath || filePath;
-        console.log('Using file path for database:', actualFilePath);
-        
-        const success = await loadDatabase(result.data, actualFilePath);
-        if (success) {
-          toast({
-            title: "Success",
-            description: "Database loaded successfully, redirecting to view...",
-          });
-          
-          setTimeout(() => {
-            navigate('/database', { replace: true });
-          }, 100);
-        }
+    const file = event.target.files[0];
+    
+    try {
+      setIsLoading(true);
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await processFile(arrayBuffer);
+      if (result.success) {
+        navigate('/database');
       } else {
-        throw new Error(result.error || 'Failed to read database file');
+        toast({
+          title: "Error",
+          description: result.error || "Failed to process file",
+          variant: "destructive"
+        });
       }
     } catch (error) {
-      console.error("Error processing file:", error);
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to process database file",
+        description: error instanceof Error ? error.message : "Failed to process file",
         variant: "destructive"
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const processFile = async (arrayBuffer: ArrayBuffer) => {
+    try {
+      const result = await loadDatabase(arrayBuffer);
+      return { success: true };
+    } catch (error) {
+      return { 
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to process file"
+      };
     }
   };
 
