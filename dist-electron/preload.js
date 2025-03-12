@@ -22,5 +22,15 @@ electron_1.contextBridge.exposeInMainWorld('electron', {
     closeWindow: () => {
         return electron_1.ipcRenderer.invoke('close-window');
     },
+    openFileDialog: (callback) => {
+        const subscription = (_event, filePath) => {
+            callback(filePath);
+        };
+        electron_1.ipcRenderer.on('selected-file', subscription);
+        electron_1.ipcRenderer.send('open-file-dialog');
+        return () => {
+            electron_1.ipcRenderer.removeListener('selected-file', subscription);
+        };
+    }
 });
 console.log('Preload script completed, electron API exposed');

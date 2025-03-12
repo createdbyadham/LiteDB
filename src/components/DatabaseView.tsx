@@ -36,7 +36,7 @@ const DatabaseView = () => {
     return success;
   };
 
-  const handleSaveDatabase = () => {
+  const handleSaveDatabase = async () => {
     const data = dbService.exportDatabase();
     if (!data) {
       toast({
@@ -47,21 +47,36 @@ const DatabaseView = () => {
       return;
     }
 
-    // Create blob and download
-    const blob = new Blob([data], { type: 'application/x-sqlite3' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'database_updated.db';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    if (!dbService.currentFilePath || !window.electron) {
+      toast({
+        title: "Error",
+        description: "No database file loaded. Please load a database file first.",
+        variant: "destructive"
+      });
+      return;
+    }
 
-    toast({
-      title: "Success",
-      description: "Database saved successfully"
-    });
+    try {
+      const result = await window.electron.saveDatabase(dbService.currentFilePath, data);
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: "Database saved successfully"
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: result.error || "Failed to save database",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save database",
+        variant: "destructive"
+      });
+    }
   };
 
   if (isLoading) {

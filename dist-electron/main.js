@@ -26,6 +26,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
 let mainWindow = null;
 const isDev = process.env.NODE_ENV === 'development';
 const getAssetPath = (...paths) => {
@@ -166,5 +167,31 @@ electron_1.ipcMain.handle('read-database', async (_event, filePath) => {
             success: false,
             error: error instanceof Error ? error.message : 'Unknown error occurred'
         };
+    }
+});
+// Handle file dialog
+electron_1.ipcMain.on('open-file-dialog', (event) => {
+    const options = {
+        properties: ['openFile'],
+        filters: [
+            { name: 'SQLite Database', extensions: ['db', 'sqlite', 'sqlite3'] }
+        ]
+    };
+    if (os.platform() === 'linux' || os.platform() === 'win32') {
+        electron_1.dialog.showOpenDialog(options).then(result => {
+            if (!result.canceled && result.filePaths.length > 0) {
+                event.reply('selected-file', result.filePaths[0]);
+            }
+        });
+    }
+    else {
+        electron_1.dialog.showOpenDialog({
+            ...options,
+            properties: ['openFile', 'openDirectory']
+        }).then(result => {
+            if (!result.canceled && result.filePaths.length > 0) {
+                event.reply('selected-file', result.filePaths[0]);
+            }
+        });
     }
 });

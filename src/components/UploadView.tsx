@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Database, Upload, FileUp, ArrowRight } from 'lucide-react';
+import { Database, Upload, FileUp } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useDatabase } from '@/hooks/useDatabase';
 import { ElectronFile } from '@/types/electron';
@@ -11,8 +11,17 @@ const UploadView = () => {
   const { loadDatabase } = useDatabase();
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Cleanup function for file dialog subscription
+    let unsubscribe: (() => void) | undefined;
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, []);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -29,98 +38,79 @@ const UploadView = () => {
     
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      await processFile(files[0]);
+      const file = files[0];
+      try {
+        console.log('Drag and drop file:', { name: file.name, path: (file as ElectronFile).path, type: file.type });
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await processFile(arrayBuffer, (file as ElectronFile).path);
+        console.log('Drag and drop process result:', result);
+        if (result.success) {
+          navigate('/database');
+        }
+      } catch (error) {
+        console.error('Drag and drop error:', error);
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to process file",
+          variant: "destructive"
+        });
+      }
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      await processFile(files[0]);
-    }
-  };
-
-  const processFile = async (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.db') && 
-        !file.name.toLowerCase().endsWith('.sqlite') && 
-        !file.name.toLowerCase().endsWith('.sqlite3')) {
+  const handleButtonClick = () => {
+    if (!window.electron) {
       toast({
-        title: "Invalid file",
-        description: "Please select a SQLite database file (.db, .sqlite, or .sqlite3)",
+        title: "Error",
+        description: "Electron API not available",
         variant: "destructive"
       });
       return;
     }
 
     setIsLoading(true);
-    
-    try {
-      // Check if we're in Electron
-      if (!window.electron) {
+    const unsubscribe = window.electron.openFileDialog(async (filePath: string) => {
+      try {
+        console.log('Selected file:', filePath);
+        if (!window.electron) {
+          throw new Error('Electron API not available');
+        }
+        const result = await window.electron.readDatabase(filePath);
+        if (result.success && result.data) {
+          const arrayBuffer = result.data.buffer;
+          const processResult = await processFile(arrayBuffer, filePath);
+          if (processResult.success) {
+            navigate('/database');
+          }
+        } else {
+          throw new Error(result.error || 'Failed to read database file');
+        }
+      } catch (error) {
+        console.error('File selection error:', error);
         toast({
           title: "Error",
-          description: "This feature requires the desktop app. Please use the Electron version.",
+          description: error instanceof Error ? error.message : "Failed to process file",
           variant: "destructive"
         });
-        return;
+      } finally {
+        setIsLoading(false);
       }
-
-      // Get the file path - try different ways depending on how the file was selected
-      let filePath = '';
-      
-      // Try getting path from Electron's file object
-      if ('path' in file) {
-        filePath = (file as ElectronFile).path;
-      }
-      
-      // If that didn't work, try getting it from the webkitRelativePath
-      if (!filePath && file.webkitRelativePath) {
-        filePath = file.webkitRelativePath;
-      }
-      
-      // If still no path, try using the name (this is a fallback and might not work)
-      if (!filePath) {
-        filePath = file.name;
-      }
-
-      console.log('Processing file with path:', filePath);
-      
-      // Use the native file API
-      console.log('Using electron readDatabase with path:', filePath);
-      const result = await window.electron.readDatabase(filePath);
-      if (result.success && result.data) {
-        // Use the returned absolute file path for consistency
-        const actualFilePath = result.filePath || filePath;
-        console.log('Using file path for database:', actualFilePath);
-        
-        const success = await loadDatabase(result.data, actualFilePath);
-        if (success) {
-          toast({
-            title: "Success",
-            description: "Database loaded successfully, redirecting to view...",
-          });
-          
-          setTimeout(() => {
-            navigate('/database', { replace: true });
-          }, 100);
-        }
-      } else {
-        throw new Error(result.error || 'Failed to read database file');
-      }
-    } catch (error) {
-      console.error("Error processing file:", error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to process database file",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    });
   };
 
-  const handleButtonClick = () => {
-    fileInputRef.current?.click();
+  const processFile = async (arrayBuffer: ArrayBuffer, filePath?: string) => {
+    try {
+      console.log('Processing file with path:', filePath);
+      const result = await loadDatabase(arrayBuffer, filePath);
+      console.log('Database load result:', { success: result, filePath });
+      return { success: true };
+    } catch (error) {
+      console.error('Process file error:', error);
+      return { 
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to process file"
+      };
+    }
   };
 
   return (
@@ -179,13 +169,6 @@ const UploadView = () => {
               </div>
             )}
           </Button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept=".db,.sqlite,.sqlite3"
-            className="hidden"
-          />
           <div className="text-xs text-center text-muted-foreground">
             Your data remains local and is not uploaded to any server
           </div>
