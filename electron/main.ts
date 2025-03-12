@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -155,5 +156,32 @@ ipcMain.handle('read-database', async (_event, filePath: string) => {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error occurred'
     };
+  }
+});
+
+// Handle file dialog
+ipcMain.on('open-file-dialog', (event) => {
+  const options: Electron.OpenDialogOptions = {
+    properties: ['openFile'] as const,
+    filters: [
+      { name: 'SQLite Database', extensions: ['db', 'sqlite', 'sqlite3'] }
+    ]
+  };
+
+  if (os.platform() === 'linux' || os.platform() === 'win32') {
+    dialog.showOpenDialog(options).then(result => {
+      if (!result.canceled && result.filePaths.length > 0) {
+        event.reply('selected-file', result.filePaths[0]);
+      }
+    });
+  } else {
+    dialog.showOpenDialog({
+      ...options,
+      properties: ['openFile', 'openDirectory'] as const
+    }).then(result => {
+      if (!result.canceled && result.filePaths.length > 0) {
+        event.reply('selected-file', result.filePaths[0]);
+      }
+    });
   }
 }); 

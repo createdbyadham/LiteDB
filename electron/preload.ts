@@ -24,6 +24,16 @@ contextBridge.exposeInMainWorld(
     closeWindow: () => {
       return ipcRenderer.invoke('close-window');
     },
+    openFileDialog: (callback: (filePath: string) => void) => {
+      const subscription = (_event: any, filePath: string) => {
+        callback(filePath);
+      };
+      ipcRenderer.on('selected-file', subscription);
+      ipcRenderer.send('open-file-dialog');
+      return () => {
+        ipcRenderer.removeListener('selected-file', subscription);
+      };
+    }
   }
 );
 
