@@ -35,29 +35,23 @@ A modern, fast, and user-friendly SQLite database viewer/editor built with React
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/sleek-database-viewer.git
-cd sleek-database-viewer
+git clone https://github.com/createdbyadham/SQLite-Editor
 ```
 
 2. Install dependencies:
+```bash
 npm install
-# or
-yarn install
 ```
 
 3. Start the development server:
 ```bash
 npm run dev
-# or
-yarn dev
 ```
 
 ### Building for Production
 
 ```bash
 npm run build
-# or
-yarn build
 ```
 
 ## Usage
