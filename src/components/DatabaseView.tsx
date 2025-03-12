@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import TableView from '@/components/TableView';
+import BatchOperations from '@/components/QueryEditor';
 import { useDatabase } from '@/hooks/useDatabase';
 import { dbService, RowData } from '@/lib/dbService';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -108,7 +109,7 @@ const DatabaseView = () => {
       <Tabs defaultValue="browse">
         <TabsList>
           <TabsTrigger value="browse">Browse</TabsTrigger>
-          <TabsTrigger value="query">Query</TabsTrigger>
+          <TabsTrigger value="query">Batch Operations</TabsTrigger>
         </TabsList>
         
         <TabsContent value="browse" className="space-y-4">
@@ -141,9 +142,7 @@ const DatabaseView = () => {
         </TabsContent>
         
         <TabsContent value="query">
-          <div className="text-center text-muted-foreground">
-            Query editor coming soon...
-          </div>
+          <BatchOperations />
         </TabsContent>
       </Tabs>
     </div>
