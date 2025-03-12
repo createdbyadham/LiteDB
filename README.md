@@ -30,36 +30,28 @@ A modern, fast, and user-friendly SQLite database viewer/editor built with React
 ### Prerequisites
 
 - Node.js (v16 or higher)
-- npm or yarn
 
 ### Installation
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/sleek-database-viewer.git
-cd sleek-database-viewer
+git clone https://github.com/createdbyadham/SQLite-Editor
 ```
 
 2. Install dependencies:
 ```bash
 npm install
-# or
-yarn install
 ```
 
 3. Start the development server:
 ```bash
 npm run dev
-# or
-yarn dev
 ```
 
 ### Building for Production
 
 ```bash
 npm run build
-# or
-yarn build
 ```
 
 ## Usage
@@ -71,7 +63,8 @@ yarn build
 3. Browse tables using the table selector
 4. Use the search bar to filter data
 5. Double-click any row to edit
-6. Click "Save Changes" to persist modifications
+6. Check multiple rows at once then click "Delete" to remove them
+7. Click "Save Changes" to persist modifications
 
 ### Batch Operations & SQL Scripting
 
