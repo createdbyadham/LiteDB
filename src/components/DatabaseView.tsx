@@ -8,7 +8,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Database, ArrowLeft, Save } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import SchemaVisualization from '@/components/SchemaVisualization';
 
 const DatabaseView = () => {
   const [selectedTable, setSelectedTable] = useState<string>('');
@@ -126,7 +125,6 @@ const DatabaseView = () => {
         <TabsList>
           <TabsTrigger value="browse">Browse</TabsTrigger>
           <TabsTrigger value="query">Batch Operations</TabsTrigger>
-          <TabsTrigger value="schema">Schema Diagram</TabsTrigger>
         </TabsList>
         
         <TabsContent value="browse" className="space-y-4">
@@ -160,10 +158,6 @@ const DatabaseView = () => {
         
         <TabsContent value="query">
           <BatchOperations />
-        </TabsContent>
-        
-        <TabsContent value="schema" className="h-[calc(100vh-200px)]">
-          <SchemaVisualization tables={tables} />
         </TabsContent>
       </Tabs>
     </div>
