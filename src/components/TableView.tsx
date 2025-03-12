@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Table, 
   TableBody, 
@@ -7,6 +7,7 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +24,16 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { EditDialog } from '@/components/EditDialog';
 import { toast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface TableViewProps {
   tableName: string;
@@ -39,6 +50,8 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [editingRow, setEditingRow] = useState<RowData | null>(null);
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const rowsPerPage = 100;
   
   // Reset state when table changes
@@ -156,6 +169,57 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
     setEditingRow({ ...row });
   };
 
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Delete' && selectedRows.size > 0) {
+      setShowDeleteDialog(true);
+    }
+  }, [selectedRows]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
+  const handleDeleteRows = async () => {
+    try {
+      // Delete each selected row individually
+      for (const rowId of selectedRows) {
+        const row = rows.find(r => 
+          String(r[primaryKeyColumn || '']) === rowId
+        );
+        if (!row || !primaryKeyColumn) continue;
+        
+        const sql = `DELETE FROM ${tableName} WHERE ${primaryKeyColumn} = '${row[primaryKeyColumn]}'`;
+        const result = dbService.executeBatchOperations([sql]);
+        if (!result.success) {
+          throw new Error(result.errors.join(', '));
+        }
+      }
+
+      // Update the UI state
+      const newRows = filteredRows.filter(row => {
+        const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
+        return !selectedRows.has(rowId);
+      });
+      setFilteredRows(newRows);
+      setSelectedRows(new Set());
+      toast({
+        title: "Success",
+        description: `${selectedRows.size} row(s) deleted successfully`,
+      });
+
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete rows",
+        variant: "destructive"
+      });
+    } finally {
+      setShowDeleteDialog(false);
+    }
+  };
+
   const handleRowUpdate = async (updatedRow: RowData) => {
     if (!editingRow || !onUpdateRow) return;
     
@@ -249,6 +313,28 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
           <Table className="min-w-max">
             <TableHeader className="sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 z-10">
               <TableRow>
+              <TableHead className="w-[40px] px-4">
+  <div className="flex items-center h-full">
+    <Checkbox
+      checked={paginatedRows.length > 0 && paginatedRows.every(row =>
+        selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))
+      )}
+      onCheckedChange={(checked) => {
+        const newSelected = new Set(selectedRows);
+        paginatedRows.forEach(row => {
+          const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
+          if (checked) {
+            newSelected.add(rowId);
+          } else {
+            newSelected.delete(rowId);
+          }
+        });
+        setSelectedRows(newSelected);
+      }}
+      className="translate-y-[2px]"
+    />
+  </div>
+</TableHead>
                 {columns.map((column) => (
                   <TableHead key={column} className="whitespace-nowrap">
                     <div className="flex items-center space-x-1">
@@ -293,6 +379,23 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
                     className="hover:bg-muted/30 cursor-pointer"
                     onDoubleClick={() => handleRowDoubleClick(row)}
                   >
+                    <TableCell className="px-4 py-2">
+                      <div className="flex items-center h-full">
+                        <Checkbox
+                          checked={selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))}
+                          onCheckedChange={(checked) => {
+                            const newSelected = new Set(selectedRows);
+                            const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
+                            if (checked) {
+                              newSelected.add(rowId);
+                            } else {
+                              newSelected.delete(rowId);
+                            }
+                            setSelectedRows(newSelected);
+                          }}
+                        />
+                      </div>
+                    </TableCell>
                     {columns.map((column) => (
                       <TableCell key={column} className="whitespace-nowrap">
                         {formatCellValue(row[column])}
@@ -351,6 +454,21 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
         columnInfo={columnInfo}
         onSave={handleRowUpdate}
       />
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action will delete {selectedRows.size} selected row(s). This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteRows}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
