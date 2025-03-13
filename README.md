@@ -2,7 +2,7 @@
 
 A modern, fast, and user-friendly SQLite database viewer/editor built with React and Electron. View, edit, and manage your SQLite databases with a beautiful interface.
 
-![LightDB](./ss.png)
+![LightDB](./s.png)
 
 ## Features
 
