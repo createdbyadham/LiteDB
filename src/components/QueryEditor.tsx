@@ -10,7 +10,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { dbService } from '@/lib/dbService';
 import { pgService } from '@/lib/pgService';
 import { toast } from '@/hooks/use-toast';
-import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info } from 'lucide-react';
+import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Code2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 interface BatchOperationsProps {
   isPostgres?: boolean;
@@ -211,16 +212,29 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
   }, []);
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      <Tabs defaultValue="editor" className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="editor">Script Editor</TabsTrigger>
-          <TabsTrigger value="savedScripts">Saved Scripts</TabsTrigger>
-        </TabsList>
+    <div className="h-[calc(100vh-220px)] flex flex-col animate-fade-in">
+      <Tabs defaultValue="editor" className="flex-1 flex flex-col">
+        <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center space-x-2">
+              <Code2 className="h-5 w-5 text-primary/80" />
+              <h1 className="text-xl font-semibold tracking-tight">SQL Editor</h1>
+              {isPostgres && (
+                <Badge variant="outline" className="ml-2">
+                  PostgreSQL
+                </Badge>
+              )}
+            </div>
+          </div>
+          <TabsList className="ml-4 mb-4">
+            <TabsTrigger value="editor">Editor</TabsTrigger>
+            <TabsTrigger value="savedScripts">Saved Scripts</TabsTrigger>
+          </TabsList>
+        </div>
         
-        <TabsContent value="editor" className="space-y-4">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
+        <TabsContent value="editor" className="data-[state=inactive]:hidden flex-1 flex flex-col p-4 pt-0">
+          <div className="flex-1 flex flex-col gap-4">
+            <div className="flex items-center justify-between py-2">
               <div className="flex items-center space-x-4">
                 {!isPostgres && (
                   <div className="flex items-center space-x-2">
@@ -234,18 +248,13 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
                     </Label>
                   </div>
                 )}
-                {isPostgres && (
-                  <div className="text-sm text-muted-foreground italic">
-                    PostgreSQL Mode
-                  </div>
-                )}
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-center space-x-2">
                   <input
                     type="text"
                     placeholder="Script name"
-                    className="flex h-9 w-[250px] rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-10 w-[250px] rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     value={scriptName}
                     onChange={(e) => setScriptName(e.target.value)}
                   />
@@ -261,104 +270,112 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
               </div>
             </div>
             
-            <Textarea
-              ref={textareaRef}
-              placeholder={isPostgres ? 
-                "Enter PostgreSQL statements (each statement must end with a semicolon)..." : 
-                "Enter SQL statements separated by semicolons (;)..."
-              }
-              className="font-mono min-h-[300px] resize-y"
-              value={sqlScript}
-              onChange={(e) => setSqlScript(e.target.value)}
-            />
-            
-            {results && (
-              <div className="space-y-2">
-                <Alert variant={results.success ? "default" : "destructive"}>
-                  <div className="flex items-center gap-2">
-                    {results.success ? (
-                      <CheckCircle2 className="h-4 w-4" />
-                    ) : (
-                      <AlertCircle className="h-4 w-4" />
-                    )}
-                    <AlertTitle>
-                      {results.success ? 'Script executed successfully' : 'Script execution failed'}
-                    </AlertTitle>
-                  </div>
-                  <AlertDescription>
-                    <div className="mt-2">
-                      <p>Execution time: {results.executionTime}ms</p>
-                      
-                      {results.affectedTables.length > 0 && (
-                        <div className="mt-2">
-                          <p>Affected tables:</p>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {results.affectedTables.map(table => (
-                              <span key={table} className="inline-flex items-center px-2 py-1 bg-secondary text-secondary-foreground rounded-md text-xs">
-                                {table}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
+            <div className="flex-1 flex flex-col min-h-0">
+              <Textarea
+                ref={textareaRef}
+                placeholder={isPostgres ? 
+                  "Enter PostgreSQL statements (each statement must end with a semicolon)..." : 
+                  "Enter SQL statements separated by semicolons (;)..."
+                }
+                className="flex-1 font-mono text-base min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                value={sqlScript}
+                onChange={(e) => setSqlScript(e.target.value)}
+              />
+              
+              {results && (
+                <div className="mt-4 space-y-2">
+                  <Alert variant={results.success ? "default" : "destructive"}>
+                    <div className="flex items-center gap-2">
+                      {results.success ? (
+                        <CheckCircle2 className="h-4 w-4" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4" />
                       )}
-                      
-                      {results.errors.length > 0 && (
-                        <div className="mt-2">
-                          <p>Errors:</p>
-                          <div className="mt-1 space-y-1">
-                            {results.errors.map((error, idx) => (
-                              <div key={idx} className="text-sm p-2 bg-destructive/10 rounded-md">
-                                {error}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      <AlertTitle>
+                        {results.success ? 'Script executed successfully' : 'Script execution failed'}
+                      </AlertTitle>
                     </div>
-                  </AlertDescription>
-                </Alert>
-              </div>
-            )}
+                    <AlertDescription>
+                      <div className="mt-2 space-y-2">
+                        <p className="text-sm">Execution time: {results.executionTime}ms</p>
+                        
+                        {results.affectedTables.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">Affected tables:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {results.affectedTables.map(table => (
+                                <Badge key={table} variant="outline">
+                                  {table}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {results.errors.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium">Errors:</p>
+                            <div className="space-y-1">
+                              {results.errors.map((error, idx) => (
+                                <div key={idx} className="text-sm p-2 bg-destructive/10 rounded-md">
+                                  {error}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              )}
+            </div>
           </div>
         </TabsContent>
         
-        <TabsContent value="savedScripts">
-          {savedScripts.length === 0 ? (
-            <div className="text-center py-8">
-              <Info className="mx-auto h-12 w-12 text-muted-foreground opacity-50" />
-              <h3 className="mt-2 text-lg font-medium">No saved scripts</h3>
-              <p className="text-muted-foreground mt-1">
-                Save your SQL scripts to reuse them later
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {savedScripts.map((script) => (
-                <Card key={script.name} className="overflow-hidden">
-                  <CardHeader className="p-4 pb-2">
-                    <CardTitle className="text-base font-medium">{script.name}</CardTitle>
-                    <CardDescription className="text-xs truncate">
-                      {script.sql.length > 50 ? `${script.sql.substring(0, 50)}...` : script.sql}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-4 pt-0">
-                    <ScrollArea className="h-[100px] w-full rounded border p-2">
-                      <pre className="text-xs font-mono">{script.sql}</pre>
-                    </ScrollArea>
-                  </CardContent>
-                  <div className="flex justify-end p-2 pt-0 space-x-2">
-                    <Button variant="ghost" size="sm" onClick={() => deleteScript(script)}>
-                      <Trash className="h-4 w-4 mr-1" />
-                      Delete
-                    </Button>
-                    <Button size="sm" onClick={() => loadScript(script)}>
-                      Load
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
+        <TabsContent value="savedScripts" className="flex-1 overflow-auto">
+          <div className="p-4 pt-2">
+            {savedScripts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center min-h-[200px]">
+                <div className="p-6 rounded-lg border-2 border-dashed text-center">
+                  <Info className="mx-auto h-10 w-10 text-muted-foreground/50" />
+                  <h3 className="mt-3 text-lg font-medium">No saved scripts</h3>
+                  <p className="text-muted-foreground mt-1 max-w-sm text-center text-sm">
+                    Save your frequently used SQL scripts here for quick access
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {savedScripts.map((script) => (
+                  <Card key={script.name} className="flex flex-col">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3">
+                      <div>
+                        <CardTitle className="text-sm font-medium">{script.name}</CardTitle>
+                        <CardDescription className="text-xs mt-0.5">
+                          {script.sql.split('\n').length} line{script.sql.split('\n').length !== 1 ? 's' : ''}
+                        </CardDescription>
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={() => deleteScript(script)} className="h-8 w-8 -mr-2">
+                        <Trash className="h-4 w-4" />
+                        <span className="sr-only">Delete script</span>
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <ScrollArea className="h-[100px] w-full rounded-md border bg-muted/40 p-2">
+                        <pre className="text-xs font-mono text-muted-foreground">{script.sql}</pre>
+                      </ScrollArea>
+                    </CardContent>
+                    <div className="p-3 pt-0">
+                      <Button size="sm" onClick={() => loadScript(script)} className="w-full">
+                        Load Script
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
     </div>

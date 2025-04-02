@@ -64,7 +64,7 @@ const TableSidebar = ({
               placeholder="Search tables..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-sidebar-accent text-black"
+              className="pl-8"
             />
           </div>
         </div>
