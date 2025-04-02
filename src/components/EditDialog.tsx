@@ -103,33 +103,40 @@ export function EditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl h-[80vh]">
+        <DialogHeader className="border-b pb-6">
           <DialogTitle>Edit Row</DialogTitle>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
-          {columns.map((column) => {
-            const info = columnInfo.find(col => col.name === column);
-            const isPK = info?.pk === 1;
-            return (
-              <div key={column} className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor={column} className="text-right">
-                  {column}
-                  {info?.notnull && <span className="text-destructive">*</span>}
-                </Label>
-                <Input
-                  id={column}
-                  value={editedValues[column] === null ? '' : String(editedValues[column])}
-                  onChange={(e) => handleInputChange(column, e.target.value)}
-                  className="col-span-3"
-                  disabled={isPK}
-                  placeholder={info?.type || 'text'}
-                />
-              </div>
-            );
-          })}
+        <div className="overflow-y-auto py-4 px-2" style={{ maxHeight: "calc(80vh - 140px)" }}>
+          <div className="grid gap-3">
+            {columns.map((column) => {
+              const info = columnInfo.find(col => col.name === column);
+              const isPK = info?.pk === 1;
+              return (
+                <div key={column} className="grid grid-cols-12 items-center gap-3">
+                  <Label htmlFor={column} className="text-right col-span-3">
+                    <div className="truncate">
+                      {column}
+                      {info?.notnull && <span className="text-destructive">*</span>}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                      {info?.type || 'text'}
+                    </div>
+                  </Label>
+                  <Input
+                    id={column}
+                    value={editedValues[column] === null ? '' : String(editedValues[column])}
+                    onChange={(e) => handleInputChange(column, e.target.value)}
+                    className="col-span-9"
+                    disabled={isPK}
+                    placeholder={info?.type || 'text'}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="border-t pt-6 mt-auto">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>

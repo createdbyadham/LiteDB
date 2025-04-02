@@ -9,10 +9,12 @@ import { Button } from '@/components/ui/button';
 import { Database, ArrowLeft, Save, Download } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { ExportDialog } from '@/components/ExportDialog';
+import TableSidebar from '@/components/TableSidebar';
 
 const DatabaseView = () => {
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { isLoaded, isLoading, tables, getTableData, getTableColumns } = useDatabase();
   const navigate = useNavigate();
 
@@ -111,8 +113,8 @@ const DatabaseView = () => {
   }
 
   return (
-    <div className="container py-4 space-y-4 animate-fade-in">
-      <div className="flex items-center justify-between">
+    <div className="h-screen flex flex-col py-2 px-4 animate-fade-in">
+      <div className="flex items-center justify-between mb-4 sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <Button variant="ghost" onClick={handleBackClick}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back
@@ -125,42 +127,48 @@ const DatabaseView = () => {
         </div>
       </div>
 
-      <Tabs defaultValue="browse">
-        <TabsList className="mb-2">
+      <Tabs defaultValue="browse" className="h-[calc(100vh-120px)] flex flex-col">
+        <TabsList className="mb-2 sticky top-14 z-40 bg-background">
           <TabsTrigger value="browse">Browse</TabsTrigger>
           <TabsTrigger value="query">Batch Operations</TabsTrigger>
         </TabsList>
         
-        <TabsContent value="browse" className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {tables.map((table) => (
-              <Button
-                key={table.name}
-                variant={selectedTable === table.name ? "default" : "outline"}
-                onClick={() => {
-                  // Clear current table before switching
-                  setSelectedTable('');
-                  // Use setTimeout to ensure state is cleared before loading new table
-                  setTimeout(() => setSelectedTable(table.name), 0);
-                }}
-              >
-                {table.name}
-              </Button>
-            ))}
-          </div>
-          
-          {selectedTable && (
-            <TableView 
-              key={selectedTable} // Add key to force remount on table switch
-              tableName={selectedTable}
-              {...getTableData(selectedTable)}
-              columnInfo={getTableColumns(selectedTable)}
-              onUpdateRow={handleUpdateRow}
+        <TabsContent value="browse" className="flex-1 h-full overflow-hidden">
+          <div className="flex h-full">
+            <TableSidebar 
+              tables={tables}
+              activeTable={selectedTable}
+              onSelectTable={(tableName) => {
+                // Clear current table before switching
+                setSelectedTable('');
+                // Use setTimeout to ensure state is cleared before loading new table
+                setTimeout(() => setSelectedTable(tableName), 0);
+              }}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
-          )}
+            
+            <div className={`flex-1 ${sidebarCollapsed ? 'pl-2' : 'pl-4'} overflow-hidden`}>
+              {selectedTable ? (
+                <div className="h-full flex flex-col">
+                  <TableView 
+                    key={selectedTable}
+                    tableName={selectedTable}
+                    {...getTableData(selectedTable)}
+                    columnInfo={getTableColumns(selectedTable)}
+                    onUpdateRow={handleUpdateRow}
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-full text-muted-foreground">
+                  <p>Select a table to view its data</p>
+                </div>
+              )}
+            </div>
+          </div>
         </TabsContent>
         
-        <TabsContent value="query">
+        <TabsContent value="query" className="flex-1 overflow-hidden">
           <BatchOperations />
         </TabsContent>
       </Tabs>

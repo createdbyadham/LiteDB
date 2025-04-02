@@ -1,10 +1,9 @@
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Database, Search, Table2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Database, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { TableInfo } from '@/lib/dbService';
 import { cn } from '@/lib/utils';
 
@@ -32,11 +31,11 @@ const TableSidebar = ({
   return (
     <div 
       className={cn(
-        "h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out flex flex-col",
+        "h-full bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out flex flex-col",
         collapsed ? "w-16" : "w-64"
       )}
     >
-      <div className="flex items-center justify-between p-4">
+      <div className="flex items-center justify-between p-3">
         {!collapsed && (
           <div className="flex items-center space-x-2">
             <Database className="w-5 h-5 text-sidebar-primary" />
@@ -47,8 +46,8 @@ const TableSidebar = ({
           variant="ghost"
           size="icon"
           className={cn(
-            "ml-auto text-sidebar-foreground hover:text-sidebar-primary hover:bg-sidebar-accent",
-            collapsed && "mx-auto"
+            "text-sidebar-foreground hover:text-sidebar-primary hover:bg-sidebar-accent",
+            collapsed ? "mx-auto" : "ml-auto"
           )}
           onClick={onToggleCollapse}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -58,14 +57,14 @@ const TableSidebar = ({
       </div>
       
       {!collapsed && (
-        <div className="px-4 mb-2">
+        <div className="px-3 mb-2">
           <div className="relative">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search tables..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 bg-sidebar-accent border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/50"
+              className="pl-9 bg-sidebar-accent text-black"
             />
           </div>
         </div>
@@ -73,8 +72,8 @@ const TableSidebar = ({
       
       <Separator className="bg-sidebar-border" />
       
-      <ScrollArea className="flex-1">
-        <div className={cn("py-2", collapsed ? "px-2" : "px-2")}>
+      <ScrollArea className="flex-1 h-full">
+        <div className="py-2">
           {filteredTables.length > 0 ? (
             filteredTables.map((table) => (
               <Button
@@ -82,14 +81,14 @@ const TableSidebar = ({
                 variant="ghost"
                 className={cn(
                   "w-full justify-start mb-1 transition-colors",
-                  collapsed ? "px-2" : "px-3",
+                  collapsed ? "mx-auto" : "px-3",
                   activeTable === table.name 
                     ? "bg-sidebar-accent text-sidebar-primary font-medium" 
                     : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary"
                 )}
-                onClick={() => onSelectTable(table.name)}
+                onClick={collapsed ? undefined : () => onSelectTable(table.name)}
+                disabled={collapsed}
               >
-                <Table2 className={cn("h-4 w-4", collapsed ? "mr-0" : "mr-2")} />
                 {!collapsed && (
                   <span className="truncate">{table.name}</span>
                 )}

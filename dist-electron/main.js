@@ -35,7 +35,7 @@ const getAssetPath = (...paths) => {
 };
 const createWindow = () => {
     mainWindow = new electron_1.BrowserWindow({
-        width: 1200,
+        width: 1400,
         height: 800,
         frame: false, // Remove default window frame
         icon: getAssetPath('public', 'appicon.png'),

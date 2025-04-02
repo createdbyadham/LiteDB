@@ -44,3 +44,11 @@ release
 yarn.lock
 package-lock.json
 bun.lockb
+
+*.db
+*.db-journal
+*.db-trace
+*.db-wal
+*.db-shm
+*.db-lock
+*.db-trace

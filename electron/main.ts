@@ -13,7 +13,7 @@ const getAssetPath = (...paths: string[]): string => {
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
-    width: 1200,
+    width: 1400,
     height: 800,
     frame: false, // Remove default window frame
     icon: getAssetPath('public', 'appicon.png'),

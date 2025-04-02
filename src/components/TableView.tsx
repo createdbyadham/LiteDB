@@ -254,8 +254,8 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
   };
 
   return (
-    <div className="flex flex-col h-screen animate-fade-in">
-      <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
+    <div className="flex flex-col h-full animate-fade-in">
+      <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center space-x-2">
             <Database className="h-5 w-5 text-primary/80" />
@@ -310,35 +310,35 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
         </div>
       </div>
       
-      <ScrollArea className="flex-1">
-        <div className="relative">
-          <Table className="min-w-max">
-            <TableHeader className="sticky top-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 z-10">
+      <div className="flex-1 overflow-hidden">
+        <div className="h-full overflow-auto">
+          <Table>
+            <TableHeader>
               <TableRow>
-              <TableHead className="w-[40px] px-4">
-  <div className="flex items-center h-full">
-    <Checkbox
-      checked={paginatedRows.length > 0 && paginatedRows.every(row =>
-        selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))
-      )}
-      onCheckedChange={(checked) => {
-        const newSelected = new Set(selectedRows);
-        paginatedRows.forEach(row => {
-          const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
-          if (checked) {
-            newSelected.add(rowId);
-          } else {
-            newSelected.delete(rowId);
-          }
-        });
-        setSelectedRows(newSelected);
-      }}
-      className="translate-y-[2px]"
-    />
-  </div>
-</TableHead>
+                <TableHead className="w-[40px] px-4 sticky top-0 bg-background z-40">
+                  <div className="flex items-center h-full">
+                    <Checkbox
+                      checked={paginatedRows.length > 0 && paginatedRows.every(row =>
+                        selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))
+                      )}
+                      onCheckedChange={(checked) => {
+                        const newSelected = new Set(selectedRows);
+                        paginatedRows.forEach(row => {
+                          const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
+                          if (checked) {
+                            newSelected.add(rowId);
+                          } else {
+                            newSelected.delete(rowId);
+                          }
+                        });
+                        setSelectedRows(newSelected);
+                      }}
+                      className="translate-y-[2px]"
+                    />
+                  </div>
+                </TableHead>
                 {columns.map((column) => (
-                  <TableHead key={column} className="whitespace-nowrap">
+                  <TableHead key={column} className="whitespace-nowrap sticky top-0 bg-background z-40">
                     <div className="flex items-center space-x-1">
                       <Button
                         variant="ghost"
@@ -410,7 +410,6 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
                   <TableCell 
                     colSpan={columns.length + 1} 
                     className="h-32 text-center text-muted-foreground"
-                    style={{ width: '100%' }}
                   >
                     No results found
                   </TableCell>
@@ -419,10 +418,10 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
             </TableBody>
           </Table>
         </div>
-      </ScrollArea>
-      
+      </div>
+
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-2 border-t">
+        <div className="flex items-center justify-between px-4 py-2 border-t bg-background">
           <div className="text-sm text-muted-foreground">
             Page {currentPage} of {totalPages}
           </div>

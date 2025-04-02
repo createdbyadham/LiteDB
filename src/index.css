@@ -110,6 +110,7 @@
 /* Global Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -124,4 +125,9 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--primary));
+}
+
+/* Corner where scrollbars meet */
+::-webkit-scrollbar-corner {
+  background: hsl(var(--muted));
 }
