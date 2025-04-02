@@ -2,10 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Database, Upload, FileUp } from 'lucide-react';
+import { Database, Upload, FileUp, Server } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useDatabase } from '@/hooks/useDatabase';
 import { ElectronFile } from '@/types/electron';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import PostgresConnectionForm from '@/components/PostgresConnectionForm';
 
 const UploadView = () => {
   const { loadDatabase } = useDatabase();
@@ -113,6 +115,10 @@ const UploadView = () => {
     }
   };
 
+  const handlePostgresConnect = () => {
+    navigate('/database');
+  };
+
   return (
     <div className="absolute inset-0 flex items-center justify-center p-6 bg-gradient-to-b from-background to-background/70 animate-fade-in">
       <Card className="w-full max-w-md mx-auto glass animate-scale-in">
@@ -121,55 +127,69 @@ const UploadView = () => {
             <Database className="w-8 h-8 text-primary" />
           </div>
           <CardTitle className="text-2xl font-semibold tracking-tight">
-            <span className="text-gradient">SQLite Viewer</span>
+            <span className="text-gradient">Database Viewer</span>
           </CardTitle>
           <CardDescription>
-            Upload a SQLite database to view and edit its content
+            Connect to a database to view and edit its content
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 transition-all duration-200 ease-in-out ${
-              isDragging 
-                ? 'border-primary/80 bg-primary/5' 
-                : 'border-border hover:border-primary/40 hover:bg-primary/5'
-            }`}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            <div className="flex flex-col items-center justify-center space-y-3 text-center">
-              <div className="mb-2 p-3 rounded-full bg-primary/10">
-                <Upload className={`w-6 h-6 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+          <Tabs defaultValue="sqlite" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="sqlite">SQLite</TabsTrigger>
+              <TabsTrigger value="postgres">PostgreSQL</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="sqlite" className="space-y-4 mt-4">
+              <div
+                className={`border-2 border-dashed rounded-lg p-8 transition-all duration-200 ease-in-out ${
+                  isDragging 
+                    ? 'border-primary/80 bg-primary/5' 
+                    : 'border-border hover:border-primary/40 hover:bg-primary/5'
+                }`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <div className="flex flex-col items-center justify-center space-y-3 text-center">
+                  <div className="mb-2 p-3 rounded-full bg-primary/10">
+                    <Upload className={`w-6 h-6 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div className="text-sm">
+                    <span className="font-medium">Drag and drop</span> your SQLite database here
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Supports .db, .sqlite, and .sqlite3 files
+                  </div>
+                </div>
               </div>
-              <div className="text-sm">
-                <span className="font-medium">Drag and drop</span> your SQLite database here
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Supports .db, .sqlite, and .sqlite3 files
-              </div>
-            </div>
-          </div>
+              
+              <Button 
+                className="w-full transition-all" 
+                onClick={handleButtonClick}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                    <span>Loading...</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-2">
+                    <FileUp className="w-4 h-4" />
+                    <span>Browse Files</span>
+                  </div>
+                )}
+              </Button>
+            </TabsContent>
+            
+            <TabsContent value="postgres" className="mt-4">
+              <PostgresConnectionForm onConnectionSuccess={handlePostgresConnect} />
+            </TabsContent>
+          </Tabs>
         </CardContent>
-        <CardFooter className="flex flex-col space-y-3">
-          <Button 
-            className="w-full transition-all" 
-            onClick={handleButtonClick}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <div className="flex items-center space-x-2">
-                <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                <span>Loading...</span>
-              </div>
-            ) : (
-              <div className="flex items-center space-x-2">
-                <FileUp className="w-4 h-4" />
-                <span>Browse Files</span>
-              </div>
-            )}
-          </Button>
-          <div className="text-xs text-center text-muted-foreground">
+        <CardFooter>
+          <div className="text-xs text-center w-full text-muted-foreground">
             Your data remains local and is not uploaded to any server
           </div>
         </CardFooter>

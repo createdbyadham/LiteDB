@@ -8,10 +8,15 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { dbService } from '@/lib/dbService';
+import { pgService } from '@/lib/pgService';
 import { toast } from '@/hooks/use-toast';
 import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info } from 'lucide-react';
 
-const BatchOperations = () => {
+interface BatchOperationsProps {
+  isPostgres?: boolean;
+}
+
+const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
   const [sqlScript, setSqlScript] = useState('');
   const [useTransaction, setUseTransaction] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -59,7 +64,40 @@ const BatchOperations = () => {
       }
 
       const startTime = performance.now();
-      const result = dbService.executeBatchOperations(statements, useTransaction);
+      
+      let result: { 
+        success: boolean; 
+        affectedTables: string[]; 
+        errors: string[];
+      };
+      
+      if (isPostgres) {
+        // For PostgreSQL, execute each statement sequentially
+        result = { success: true, affectedTables: [], errors: [] };
+        
+        for (const statement of statements) {
+          try {
+            const queryResult = await pgService.executeQuery(statement);
+            if (queryResult) {
+              // Try to extract table names from the SQL
+              const tableMatches = statement.match(/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE)\s+(?:"|')?(\w+)(?:"|')?/i);
+              if (tableMatches && tableMatches[1] && !result.affectedTables.includes(tableMatches[1])) {
+                result.affectedTables.push(tableMatches[1]);
+              }
+            } else {
+              result.success = false;
+              result.errors.push(`Failed to execute: ${statement}`);
+            }
+          } catch (error) {
+            result.success = false;
+            result.errors.push(error instanceof Error ? error.message : "Unknown error");
+          }
+        }
+      } else {
+        // For SQLite, use the existing batch operation
+        result = dbService.executeBatchOperations(statements, useTransaction);
+      }
+      
       const endTime = performance.now();
 
       setResults({
@@ -184,16 +222,23 @@ const BatchOperations = () => {
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2">
-                  <Switch 
-                    id="transaction-mode" 
-                    checked={useTransaction} 
-                    onCheckedChange={setUseTransaction} 
-                  />
-                  <Label htmlFor="transaction-mode">
-                    Use Transaction (All or Nothing)
-                  </Label>
-                </div>
+                {!isPostgres && (
+                  <div className="flex items-center space-x-2">
+                    <Switch 
+                      id="transaction-mode" 
+                      checked={useTransaction} 
+                      onCheckedChange={setUseTransaction} 
+                    />
+                    <Label htmlFor="transaction-mode">
+                      Use Transaction (All or Nothing)
+                    </Label>
+                  </div>
+                )}
+                {isPostgres && (
+                  <div className="text-sm text-muted-foreground italic">
+                    PostgreSQL Mode
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-center space-x-2">
@@ -218,7 +263,10 @@ const BatchOperations = () => {
             
             <Textarea
               ref={textareaRef}
-              placeholder="Enter SQL statements separated by semicolons (;)..."
+              placeholder={isPostgres ? 
+                "Enter PostgreSQL statements (each statement must end with a semicolon)..." : 
+                "Enter SQL statements separated by semicolons (;)..."
+              }
               className="font-mono min-h-[300px] resize-y"
               value={sqlScript}
               onChange={(e) => setSqlScript(e.target.value)}
@@ -257,15 +305,13 @@ const BatchOperations = () => {
                       {results.errors.length > 0 && (
                         <div className="mt-2">
                           <p>Errors:</p>
-                          <ScrollArea className="h-[150px] w-full mt-1 rounded-md border">
-                            <div className="p-4">
-                              {results.errors.map((error, index) => (
-                                <div key={index} className="border-b border-border pb-2 mb-2 last:pb-0 last:mb-0 last:border-b-0">
-                                  <code className="text-xs font-mono">{error}</code>
-                                </div>
-                              ))}
-                            </div>
-                          </ScrollArea>
+                          <div className="mt-1 space-y-1">
+                            {results.errors.map((error, idx) => (
+                              <div key={idx} className="text-sm p-2 bg-destructive/10 rounded-md">
+                                {error}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -277,40 +323,40 @@ const BatchOperations = () => {
         </TabsContent>
         
         <TabsContent value="savedScripts">
-          {savedScripts.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {savedScripts.map((script, index) => (
-                <Card key={index}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-lg">{script.name}</CardTitle>
-                    <CardDescription className="line-clamp-1 text-xs font-mono">
-                      {script.sql.substring(0, 60)}...
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex justify-end space-x-2">
-                      <Button variant="outline" size="sm" onClick={() => loadScript(script)}>
-                        Load
-                      </Button>
-                      <Button 
-                        variant="destructive" 
-                        size="sm"
-                        onClick={() => deleteScript(script)}
-                      >
-                        <Trash className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+          {savedScripts.length === 0 ? (
+            <div className="text-center py-8">
+              <Info className="mx-auto h-12 w-12 text-muted-foreground opacity-50" />
+              <h3 className="mt-2 text-lg font-medium">No saved scripts</h3>
+              <p className="text-muted-foreground mt-1">
+                Save your SQL scripts to reuse them later
+              </p>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center p-8 text-center">
-              <Info className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium">No saved scripts</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Save your SQL scripts to quickly access them later
-              </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {savedScripts.map((script) => (
+                <Card key={script.name} className="overflow-hidden">
+                  <CardHeader className="p-4 pb-2">
+                    <CardTitle className="text-base font-medium">{script.name}</CardTitle>
+                    <CardDescription className="text-xs truncate">
+                      {script.sql.length > 50 ? `${script.sql.substring(0, 50)}...` : script.sql}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-4 pt-0">
+                    <ScrollArea className="h-[100px] w-full rounded border p-2">
+                      <pre className="text-xs font-mono">{script.sql}</pre>
+                    </ScrollArea>
+                  </CardContent>
+                  <div className="flex justify-end p-2 pt-0 space-x-2">
+                    <Button variant="ghost" size="sm" onClick={() => deleteScript(script)}>
+                      <Trash className="h-4 w-4 mr-1" />
+                      Delete
+                    </Button>
+                    <Button size="sm" onClick={() => loadScript(script)}>
+                      Load
+                    </Button>
+                  </div>
+                </Card>
+              ))}
             </div>
           )}
         </TabsContent>

@@ -6,11 +6,20 @@ interface ElectronAPI {
   maximizeWindow: () => Promise<void>;
   closeWindow: () => Promise<void>;
   openFileDialog: (callback: (filePath: string) => void) => () => void;
+  
+  // PostgreSQL methods
+  connectPostgres: (config: { host: string; port: number; database: string; username: string; password: string; ssl?: boolean }) => 
+    Promise<{ success: boolean; error?: string }>;
+  executePostgresQuery: (params: { query: string; values?: any[] }) => 
+    Promise<{ success: boolean; columns?: string[]; rows?: any[]; error?: string; rowCount?: number }>;
+  disconnectPostgres: () => Promise<{ success: boolean; error?: string }>;
 }
 
 declare global {
   interface Window {
     electron: ElectronAPI | undefined;
+    SQL: any;
+    initSqlJs: any;
   }
 }
 

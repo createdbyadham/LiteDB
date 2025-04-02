@@ -37,6 +37,19 @@ contextBridge.exposeInMainWorld(
       return () => {
         ipcRenderer.removeListener('selected-file', subscription);
       };
+    },
+    // PostgreSQL methods
+    connectPostgres: async (config: { host: string; port: number; database: string; username: string; password: string; ssl?: boolean }) => {
+      console.log('Calling connectPostgres from preload:', config.host, config.database);
+      return ipcRenderer.invoke('connect-postgres', config);
+    },
+    executePostgresQuery: async (params: { query: string; values?: any[] }) => {
+      console.log('Calling executePostgresQuery from preload, query length:', params.query.length);
+      return ipcRenderer.invoke('execute-postgres-query', params);
+    },
+    disconnectPostgres: async () => {
+      console.log('Calling disconnectPostgres from preload');
+      return ipcRenderer.invoke('disconnect-postgres');
     }
   }
 );

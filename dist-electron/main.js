@@ -27,7 +27,9 @@ const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
+const pg_1 = require("pg");
 let mainWindow = null;
+let pgPool = null;
 const isDev = process.env.NODE_ENV === 'development';
 const getAssetPath = (...paths) => {
     const basePath = isDev ? process.cwd() : path.join(process.resourcesPath, 'app');
@@ -48,8 +50,8 @@ const createWindow = () => {
     });
     console.log('Created main window with preload script:', path.join(__dirname, 'preload.js'));
     if (isDev) {
-        console.log('Running in development mode, loading from localhost:3000');
-        mainWindow.loadURL('http://localhost:3000');
+        console.log('Running in development mode, loading from localhost:3001');
+        mainWindow.loadURL('http://localhost:3001');
         mainWindow.webContents.openDevTools();
     }
     else {
@@ -228,5 +230,100 @@ electron_1.ipcMain.on('open-file-dialog', (event) => {
                 event.reply('selected-file', result.filePaths[0]);
             }
         });
+    }
+});
+// PostgreSQL handlers
+electron_1.ipcMain.handle('connect-postgres', async (_event, config) => {
+    try {
+        console.log('Received PostgreSQL connection request:', { host: config.host, database: config.database });
+        // Close existing pool if any
+        if (pgPool) {
+            console.log('Closing existing PostgreSQL connection pool');
+            await pgPool.end();
+            pgPool = null;
+        }
+        // Create new connection pool
+        pgPool = new pg_1.Pool({
+            host: config.host,
+            port: config.port,
+            database: config.database,
+            user: config.username,
+            password: config.password,
+            ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
+            max: 20, // Maximum number of clients in the pool
+            idleTimeoutMillis: 60000, // How long a client is allowed to remain idle before being closed
+            connectionTimeoutMillis: 10000, // How long to wait before timing out when connecting a new client
+        });
+        // Test connection
+        const client = await pgPool.connect();
+        try {
+            await client.query('SELECT NOW()');
+            console.log('PostgreSQL connection successful');
+            return { success: true };
+        }
+        finally {
+            client.release();
+        }
+    }
+    catch (error) {
+        console.error('Error connecting to PostgreSQL:', error);
+        // Close pool if it was created but connection failed
+        if (pgPool) {
+            await pgPool.end();
+            pgPool = null;
+        }
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error occurred'
+        };
+    }
+});
+electron_1.ipcMain.handle('execute-postgres-query', async (_event, params) => {
+    try {
+        console.log('Received PostgreSQL query:', { queryLength: params.query.length });
+        if (!pgPool) {
+            throw new Error('No PostgreSQL connection');
+        }
+        const result = await pgPool.query(params.query, params.values);
+        // Format result for the renderer
+        return {
+            success: true,
+            columns: result.fields?.map(field => field.name) || [],
+            rows: result.rows || [],
+            rowCount: result.rowCount
+        };
+    }
+    catch (error) {
+        console.error('Error executing PostgreSQL query:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error occurred'
+        };
+    }
+});
+electron_1.ipcMain.handle('disconnect-postgres', async () => {
+    try {
+        console.log('Received PostgreSQL disconnect request');
+        if (pgPool) {
+            console.log('Closing PostgreSQL connection pool');
+            await pgPool.end();
+            pgPool = null;
+        }
+        return { success: true };
+    }
+    catch (error) {
+        console.error('Error disconnecting from PostgreSQL:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error occurred'
+        };
+    }
+});
+// Add cleanup on app quit
+electron_1.app.on('will-quit', async () => {
+    if (pgPool) {
+        console.log('Closing PostgreSQL connection pool on quit');
+        await pgPool.end();
+        pgPool = null;
     }
 });

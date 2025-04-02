@@ -35,6 +35,19 @@ electron_1.contextBridge.exposeInMainWorld('electron', {
         return () => {
             electron_1.ipcRenderer.removeListener('selected-file', subscription);
         };
+    },
+    // PostgreSQL methods
+    connectPostgres: async (config) => {
+        console.log('Calling connectPostgres from preload:', config.host, config.database);
+        return electron_1.ipcRenderer.invoke('connect-postgres', config);
+    },
+    executePostgresQuery: async (params) => {
+        console.log('Calling executePostgresQuery from preload, query length:', params.query.length);
+        return electron_1.ipcRenderer.invoke('execute-postgres-query', params);
+    },
+    disconnectPostgres: async () => {
+        console.log('Calling disconnectPostgres from preload');
+        return electron_1.ipcRenderer.invoke('disconnect-postgres');
     }
 });
 console.log('Preload script completed, electron API exposed');
