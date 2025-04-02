@@ -385,6 +385,24 @@ class PgService {
       this.currentTables = [];
     }
   }
+
+  async deleteRows(tableName: string, primaryKeyColumn: string, rowIds: string[]): Promise<boolean> {
+    if (!this.connected) return false;
+    
+    try {
+      const sql = `DELETE FROM "${tableName}" WHERE "${primaryKeyColumn}" IN (${rowIds.map(id => this.formatValueForSQL(id)).join(',')})`;
+      const result = await window.electron?.executePostgresQuery({ query: sql });
+      
+      if (!result || !result.success) {
+        throw new Error(result?.error || "Failed to delete rows");
+      }
+      
+      return true;
+    } catch (error) {
+      console.error("Delete rows error:", error);
+      return false;
+    }
+  }
 }
 
 export const pgService = new PgService(); 

@@ -110,44 +110,56 @@ const DatabaseView = () => {
     navigate('/', { replace: true });
   };
 
-  const handleUpdateRow = async (oldRow: RowData, newRow: RowData): Promise<boolean> => {
+  interface DeleteOperation {
+    type: 'delete';
+    rowIds: string[];
+    primaryKeyColumn: string;
+  }
+
+  function isDeleteOperation(value: any): value is DeleteOperation {
+    return (
+      value &&
+      typeof value === 'object' &&
+      'type' in value &&
+      value.type === 'delete' &&
+      Array.isArray(value.rowIds) &&
+      typeof value.primaryKeyColumn === 'string'
+    );
+  }
+
+  const handleUpdateRow = async (oldRow: RowData | null, newRow: RowData | DeleteOperation): Promise<boolean> => {
     if (!selectedTable) return false;
     
     if (isPostgresActive) {
-      // For PostgreSQL, use the pgService.updateRow method
       try {
-        const success = await pgService.updateRow(selectedTable, oldRow, newRow);
-        if (success) {
-          toast({
-            title: "Success",
-            description: "Row updated successfully"
-          });
+        if (isDeleteOperation(newRow)) {
+          // Handle PostgreSQL delete
+          return await pgService.deleteRows(selectedTable, newRow.primaryKeyColumn, newRow.rowIds);
+        } else if (oldRow) {
+          // Handle PostgreSQL update
+          return await pgService.updateRow(selectedTable, oldRow, newRow as RowData);
         }
-        return success;
+        return false;
       } catch (error) {
         toast({
           title: "Error",
-          description: "Failed to update PostgreSQL row",
+          description: "Failed to update/delete PostgreSQL row(s)",
           variant: "destructive"
         });
         return false;
       }
     } else {
-      // SQLite update logic
-      const success = dbService.updateRow(selectedTable, oldRow, newRow);
-      if (success) {
-        toast({
-          title: "Success",
-          description: "Row updated successfully"
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to update row",
-          variant: "destructive"
-        });
+      // SQLite operations
+      if (isDeleteOperation(newRow)) {
+        // Handle SQLite delete
+        const sql = `DELETE FROM ${selectedTable} WHERE ${newRow.primaryKeyColumn} IN (${newRow.rowIds.map(id => `'${id}'`).join(',')})`;
+        const result = dbService.executeBatchOperations([sql]);
+        return result.success;
+      } else if (oldRow) {
+        // Handle SQLite update
+        return dbService.updateRow(selectedTable, oldRow, newRow as RowData);
       }
-      return success;
+      return false;
     }
   };
 

@@ -51,7 +51,7 @@ export function useDatabase(): UseDbReturn {
     return () => {
       mounted = false;
     };
-  }, []); // No dependencies needed
+  }, []);
 
   const loadDatabase = async (data: ArrayBuffer | Buffer, filePath?: string): Promise<boolean> => {
     console.log("Starting database load process");

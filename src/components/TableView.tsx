@@ -183,32 +183,26 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
 
   const handleDeleteRows = async () => {
     try {
-      // Delete each selected row individually
-      for (const rowId of selectedRows) {
-        const row = rows.find(r => 
-          String(r[primaryKeyColumn || '']) === rowId
-        );
-        if (!row || !primaryKeyColumn) continue;
-        
-        const sql = `DELETE FROM ${tableName} WHERE ${primaryKeyColumn} = '${row[primaryKeyColumn]}'`;
-        const result = dbService.executeBatchOperations([sql]);
-        if (!result.success) {
-          throw new Error(result.errors.join(', '));
-        }
+      if (!primaryKeyColumn) {
+        throw new Error("No primary key found for this table");
       }
 
-      // Update the UI state
-      const newRows = filteredRows.filter(row => {
-        const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
-        return !selectedRows.has(rowId);
-      });
-      setFilteredRows(newRows);
-      setSelectedRows(new Set());
-      toast({
-        title: "Success",
-        description: `${selectedRows.size} row(s) deleted successfully`,
-      });
+      const rowIds = Array.from(selectedRows);
+      const success = await onUpdateRow?.(null, { type: 'delete', rowIds, primaryKeyColumn });
 
+      if (success) {
+        // Update the UI state
+        const newRows = filteredRows.filter(row => {
+          const rowId = String(row[primaryKeyColumn]);
+          return !selectedRows.has(rowId);
+        });
+        setFilteredRows(newRows);
+        setSelectedRows(new Set());
+        toast({
+          title: "Success",
+          description: `${selectedRows.size} row(s) deleted successfully`,
+        });
+      }
     } catch (error) {
       console.error('Delete error:', error);
       toast({
