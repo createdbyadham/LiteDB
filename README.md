@@ -1,6 +1,6 @@
 # LightDB
 
-A modern, fast, and user-friendly SQLite database viewer/editor built with React and Electron. View, edit, and manage your SQLite databases with a beautiful interface.
+A modern, fast, and user-friendly database viewer/editor built with React and Electron. Now supporting both SQLite and PostgreSQL with seamless database management.
 
 ![LightDB](./sss.png)
 
@@ -16,6 +16,7 @@ A modern, fast, and user-friendly SQLite database viewer/editor built with React
 - 📱 **Responsive Design**: Works great on any screen size
 - 🔄 **Batch Operations**: Execute multiple SQL statements with transaction support
 - 📜 **SQL Script Management**: Save and reuse your SQL scripts
+- 🔥 **Dual Database Support**: Works with SQLite and PostgreSQL
 
 ## Tech Stack
 
@@ -24,12 +25,14 @@ A modern, fast, and user-friendly SQLite database viewer/editor built with React
 - ⚡ Vite
 - 🎨 Tailwind CSS
 - 🖥️ Electron
+- 🐘 PostgreSQL
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js (v16 or higher)
+- PostgreSQL (if using PostgreSQL features)
 
 ### Installation
 
@@ -56,18 +59,24 @@ npm run build
 
 ## Usage
 
+Connecting to Databases:
+1. SQLite: Click "Upload Database" or drag & drop your SQLite file
+2. PostgreSQL: Open the Connection Manager, enter your credentials, and connect
+3. Switch Databases: Use the database switcher to toggle between SQLite & PostgreSQL
+4. Browse tables using the table selector
+5. Use the search bar to filter data
+6. Double-click any row to edit
+7. Check multiple rows at once then click "Delete" to remove them
+8. Click "Save Changes" to persist modifications
+
+PostgreSQL-Specific Features:
+- Run SQL queries with real-time feedback
+- View table structures directly in the UI
+- Batch execute multiple statements in transaction mode
+- Securely connect using SSL
+
 ### Important Note
 ⚠️ **Run as Administrator**: The application requires administrator privileges to properly handle file paths and enable real-time updates. Right-click the application and select "Run as Administrator" when launching.
-
-### Basic Database Operations
-
-1. Launch the application
-2. Click "Upload Database" or drag and drop your SQLite database file
-3. Browse tables using the table selector
-4. Use the search bar to filter data
-5. Double-click any row to edit
-6. Check multiple rows at once then click "Delete" to remove them
-7. Click "Save Changes" to persist modifications
 
 ### Batch Operations & SQL Scripting
 

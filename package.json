@@ -1,7 +1,7 @@
 {
   "name": "lightdb",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.4.0",
   "main": "dist-electron/main.js",
   "description": "LightDB - A simple and lightweight database viewer/editor for your projects",
   "author": "Adham Ehab",
