@@ -26,6 +26,10 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
     affectedTables: string[];
     errors: string[];
     executionTime?: number;
+    queryResults?: {
+      columns: string[];
+      rows: any[][];
+    } | null;
   } | null>(null);
   const [savedScripts, setSavedScripts] = useState<{ name: string; sql: string }[]>([]);
   const [scriptName, setScriptName] = useState('');
@@ -70,16 +74,28 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
         success: boolean; 
         affectedTables: string[]; 
         errors: string[];
+        queryResults?: {
+          columns: string[];
+          rows: any[][];
+        } | null;
       };
       
       if (isPostgres) {
         // For PostgreSQL, execute each statement sequentially
-        result = { success: true, affectedTables: [], errors: [] };
+        result = { success: true, affectedTables: [], errors: [], queryResults: null };
         
         for (const statement of statements) {
           try {
+            // Check if this is a SELECT or similar query that returns data
+            const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statement);
+            
             const queryResult = await pgService.executeQuery(statement);
             if (queryResult) {
+              // For SELECT queries, we want to display the results
+              if (isSelectQuery) {
+                result.queryResults = queryResult;
+              }
+              
               // Try to extract table names from the SQL
               const tableMatches = statement.match(/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE)\s+(?:"|')?(\w+)(?:"|')?/i);
               if (tableMatches && tableMatches[1] && !result.affectedTables.includes(tableMatches[1])) {
@@ -95,8 +111,29 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
           }
         }
       } else {
-        // For SQLite, use the existing batch operation
-        result = dbService.executeBatchOperations(statements, useTransaction);
+        // For SQLite, check if we have a SELECT query and handle it specially
+        const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statements[0]);
+        
+        if (isSelectQuery && statements.length === 1) {
+          try {
+            const queryResult = dbService.executeQuery(statements[0]);
+            result = { 
+              success: true, 
+              affectedTables: [], 
+              errors: [],
+              queryResults: queryResult
+            };
+          } catch (error) {
+            result = { 
+              success: false, 
+              affectedTables: [], 
+              errors: [error instanceof Error ? error.message : "Unknown error"]
+            };
+          }
+        } else {
+          // For other SQL statements, use the existing batch operation
+          result = dbService.executeBatchOperations(statements, useTransaction);
+        }
       }
       
       const endTime = performance.now();
@@ -212,7 +249,7 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
   }, []);
 
   return (
-    <div className="h-[calc(100vh-220px)] flex flex-col animate-fade-in">
+    <div className="h-[calc(100vh-220px)] flex flex-col animate-fade-in overflow-auto">
       <Tabs defaultValue="editor" className="flex-1 flex flex-col">
         <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="flex items-center justify-between px-4 py-3">
@@ -298,6 +335,76 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
                     <AlertDescription>
                       <div className="mt-2 space-y-2">
                         <p className="text-sm">Execution time: {results.executionTime}ms</p>
+                        
+                        {results.queryResults && results.queryResults.columns.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            <p className="text-sm font-medium">Query results:</p>
+                            <div className="overflow-auto max-h-[300px] rounded-md border">
+                              <table className="min-w-full divide-y divide-border">
+                                <thead className="bg-muted/50">
+                                  <tr>
+                                    {results.queryResults.columns.map((column, idx) => (
+                                      <th 
+                                        key={idx} 
+                                        scope="col" 
+                                        className="px-3 py-2 text-left text-xs font-medium text-muted-foreground tracking-wider"
+                                      >
+                                        {column}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-card divide-y divide-border">
+                                  {results.queryResults.rows.length > 0 && results.queryResults.rows.map((row, rowIdx) => {
+                                    // Check if row is an array (multi-column) or a single value
+                                    const isArray = Array.isArray(row);
+                                    
+                                    return (
+                                      <tr key={rowIdx} className={rowIdx % 2 === 0 ? "bg-muted/20" : "bg-card"}>
+                                        {isArray ? (
+                                          // If row is an array, render each cell
+                                          row.map((cell, cellIdx) => (
+                                            <td key={cellIdx} className="px-3 py-2 whitespace-nowrap text-xs">
+                                              {cell === null ? 
+                                                <span className="text-muted-foreground italic">NULL</span> : 
+                                                String(cell)}
+                                            </td>
+                                          ))
+                                        ) : (
+                                          // If row is a single value (like in enum queries), render as single cell
+                                          <td className="px-3 py-2 whitespace-nowrap text-xs">
+                                            {row === null ? (
+                                              <span className="text-muted-foreground italic">NULL</span>
+                                            ) : typeof row === 'object' ? (
+                                              // Extract value from object - typically PostgreSQL enum values have an 'unnest' property
+                                              Object.values(row)[0] === null ? (
+                                                <span className="text-muted-foreground italic">NULL</span>
+                                              ) : (
+                                                String(Object.values(row)[0])
+                                              )
+                                            ) : (
+                                              String(row)
+                                            )}
+                                          </td>
+                                        )}
+                                      </tr>
+                                    );
+                                  })}
+                                  {results.queryResults.rows.length === 0 && (
+                                    <tr>
+                                      <td 
+                                        colSpan={results.queryResults.columns.length} 
+                                        className="px-3 py-4 text-center text-sm text-muted-foreground"
+                                      >
+                                        No results found
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
                         
                         {results.affectedTables.length > 0 && (
                           <div className="space-y-1">
