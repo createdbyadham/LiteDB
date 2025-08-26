@@ -35,6 +35,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Portal } from '@radix-ui/react-portal';
 
 interface TableViewProps {
   tableName: string;
@@ -249,8 +250,8 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
-      <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center justify-between px-4 py-3">
+      <div className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="flex ml-2 items-center justify-between px-4 py-3">
           <div className="flex items-center space-x-2">
             <Database className="h-5 w-5 text-primary/80" />
             <h1 className="text-xl font-semibold tracking-tight">{tableName}</h1>
@@ -310,7 +311,7 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[40px] px-4 sticky top-0 bg-background z-40">
-                  <div className="flex items-center h-full">
+                  <div className="flex items-center h-full ml-2">
                     <Checkbox
                       checked={paginatedRows.length > 0 && paginatedRows.every(row =>
                         selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))
@@ -350,16 +351,18 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
                         )}
                       </Button>
                       
-                      <TooltipProvider>
+                      <TooltipProvider delayDuration={200}>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-6 w-6">
                               <Info className="h-3.5 w-3.5 text-muted-foreground" />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent align="start" className="max-w-sm">
-                            {getColumnTypeLabel(column)}
-                          </TooltipContent>
+                          <Portal>
+                            <TooltipContent align="start" side="top" className="max-w-sm z-[9999]" sideOffset={5}>
+                              {getColumnTypeLabel(column)}
+                            </TooltipContent>
+                          </Portal>
                         </Tooltip>
                       </TooltipProvider>
                     </div>
@@ -376,7 +379,7 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
                     onDoubleClick={() => handleRowDoubleClick(row)}
                   >
                     <TableCell className="px-4 py-2">
-                      <div className="flex items-center h-full">
+                      <div className="flex items-center h-full ml-2">
                         <Checkbox
                           checked={selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))}
                           onCheckedChange={(checked) => {

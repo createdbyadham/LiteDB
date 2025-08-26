@@ -31,22 +31,22 @@ const TableSidebar = ({
   return (
     <div 
       className={cn(
-        "h-full bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out flex flex-col",
+        "h-full bg-background border-r transition-all duration-300 ease-in-out flex flex-col",
         collapsed ? "w-16" : "w-64"
       )}
     >
       <div className="flex items-center justify-between p-3">
         {!collapsed && (
-          <div className="flex items-center space-x-2">
-            <Database className="w-5 h-5 text-sidebar-primary" />
-            <h2 className="text-sidebar-foreground font-medium">Tables</h2>
+          <div className="flex items-center space-x-2 ml-2">
+            <Database className="w-5 h-5 text-primary" />
+            <h2 className="text-foreground font-medium">Tables</h2>
           </div>
         )}
         <Button
           variant="ghost"
           size="icon"
           className={cn(
-            "text-sidebar-foreground hover:text-sidebar-primary hover:bg-sidebar-accent",
+            "text-sidebar-foreground",
             collapsed ? "mx-auto" : "ml-auto"
           )}
           onClick={onToggleCollapse}
@@ -70,33 +70,35 @@ const TableSidebar = ({
         </div>
       )}
       
-      <Separator className="bg-sidebar-border" />
+      <Separator className={cn("bg-border", !collapsed && "mt-[1px]")} />
       
       <ScrollArea className="flex-1 h-full">
         <div className="py-2">
           {filteredTables.length > 0 ? (
             filteredTables.map((table) => (
-              <Button
-                key={table.name}
-                variant="ghost"
-                className={cn(
-                  "w-full justify-start mb-1 transition-colors",
-                  collapsed ? "mx-auto" : "px-3",
-                  activeTable === table.name 
-                    ? "bg-sidebar-accent text-sidebar-primary font-medium" 
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-primary"
-                )}
-                onClick={collapsed ? undefined : () => onSelectTable(table.name)}
-                disabled={collapsed}
-              >
-                {!collapsed && (
-                  <span className="truncate">{table.name}</span>
-                )}
-              </Button>
+              <div className="px-2">
+                <Button
+                  key={table.name}
+                  variant="ghost" 
+                  className={cn(
+                    "w-full justify-start mb-1 transition-colors rounded-md",
+                    collapsed ? "mx-auto" : "px-3",
+                    !collapsed && activeTable === table.name 
+                      ? "bg-accent text-accent-foreground font-medium" 
+                      : "text-muted-foreground hover:bg-accent/50"
+                  )}
+                  onClick={collapsed ? undefined : () => onSelectTable(table.name)}
+                  disabled={collapsed}
+                >
+                  {!collapsed && (
+                    <span className="truncate">{table.name}</span>
+                  )}
+                </Button>
+              </div>
             ))
           ) : (
             <div className={cn(
-              "flex flex-col items-center justify-center text-center p-4 text-sidebar-foreground/50",
+              "flex flex-col items-center justify-center text-center p-4 text-muted-foreground",
               collapsed && "mx-auto"
             )}>
               {!collapsed && <span>No tables found</span>}

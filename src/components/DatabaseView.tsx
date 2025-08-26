@@ -219,7 +219,7 @@ const DatabaseView = () => {
   if (isLoadingDatabase) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center space-y-4">
+        <div className="text-center space-y-4 ml-4">
           <Database className="w-16 h-16 text-muted-foreground/50 mx-auto animate-pulse" />
           <h2 className="text-xl font-medium">Loading database...</h2>
         </div>
@@ -230,7 +230,7 @@ const DatabaseView = () => {
   if (!databaseAvailable) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center space-y-4">
+        <div className="text-center space-y-4 ml-4">
           <Database className="w-16 h-16 text-muted-foreground/50 mx-auto" />
           <h2 className="text-xl font-medium">No database loaded</h2>
           <p className="text-muted-foreground">
@@ -246,12 +246,11 @@ const DatabaseView = () => {
   }
 
   return (
-    <div className="h-screen flex flex-col py-2 px-4 animate-fade-in">
+    <div className="h-screen flex flex-col py-2 animate-fade-in">
       <div className="flex items-center justify-between mb-4 sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center">
+        <div className="flex items-center ml-2">
           <Button variant="ghost" onClick={handleBackClick}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back
+            <ArrowLeft className="h-2 w-2" />
           </Button>
           {isPostgresActive && (
             <div className="ml-4 flex items-center text-sm text-muted-foreground">
@@ -260,7 +259,7 @@ const DatabaseView = () => {
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 mr-4">
           {isSqliteActive && (
             <Button onClick={handleSaveDatabase} variant="outline">
               <Save className="mr-2 h-4 w-4" />
@@ -302,7 +301,7 @@ const DatabaseView = () => {
               onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
             
-            <div className={`flex-1 ${sidebarCollapsed ? 'pl-2' : 'pl-4'} overflow-hidden`}>
+            <div className={`flex-1 overflow-hidden`}>
               {selectedTable ? (
                 <div className="h-full flex flex-col">
                   {loading ? (
