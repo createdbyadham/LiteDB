@@ -132,7 +132,7 @@
       "dist-electron/preload.js.map"
     ],
     "win": {
-      "icon": "public/favicon.ico",
+      "icon": "public/appicon2.png",
       "target": [
         {
           "target": "nsis",

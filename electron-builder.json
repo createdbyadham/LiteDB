@@ -31,7 +31,7 @@
       ]
     },
     "win": {
-      "icon": "public/favicon.ico",
+      "icon": "public/appicon2.png",
       "target": [
         {
           "target": "nsis",
@@ -43,8 +43,8 @@
       "artifactName": "${productName}_${version}.${ext}"
     },
     "nsis": {
-      "installerIcon": "public/favicon.ico",
-      "uninstallerIcon": "public/favicon.ico",
+      "installerIcon": "public/appicon2.png",
+      "uninstallerIcon": "public/appicon2.png",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,

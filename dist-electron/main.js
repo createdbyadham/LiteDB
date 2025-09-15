@@ -50,7 +50,7 @@ const createWindow = () => {
         width: 1400,
         height: 800,
         frame: false, // Remove default window frame
-        icon: getAssetPath('public', 'appicon.png'),
+        icon: getAssetPath('public', 'appicon2.png'),
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,

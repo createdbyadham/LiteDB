@@ -249,12 +249,12 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
   }, []);
 
   return (
-    <div className="h-[calc(100vh-220px)] flex flex-col animate-fade-in overflow-auto">
+    <div className="h-full flex flex-col animate-fade-in px-2">
       <Tabs defaultValue="editor" className="flex-1 flex flex-col">
         <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="flex items-center justify-between px-4 py-3">
             <div className="flex items-center space-x-2">
-              <Code2 className="h-5 w-5 text-primary/80" />
+              <Code2 className="h-5 w-5 text-primary" />
               <h1 className="text-xl font-semibold tracking-tight">SQL Editor</h1>
               {isPostgres && (
                 <Badge variant="outline" className="ml-2">

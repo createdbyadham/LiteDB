@@ -1,6 +1,6 @@
 import { Minus, Square, X } from 'lucide-react';
 import { Button } from './ui/button';
-import icon from '/icon.png';
+import icon from '/titlebaricon2.png';
 
 const TitleBar = () => {
   const handleMinimize = () => {
@@ -21,7 +21,7 @@ const TitleBar = () => {
       <div className="flex-1 app-drag-handle h-full flex items-center px-4">
         <div className="flex items-center space-x-2">
           <div className="w-3 h-3">
-            <img src={icon} alt="App Icon" className="w-full h-full" />
+            <img src={icon} alt="App Icon" className="w-auto h-auto" />
           </div>
           <span className="text-xs font-medium">LightDB</span>
         </div>

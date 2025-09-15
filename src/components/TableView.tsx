@@ -21,7 +21,6 @@ import {
   Save
 } from 'lucide-react';
 import { ColumnInfo, RowData, dbService } from '@/lib/dbService';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { EditDialog } from '@/components/EditDialog';
 import { toast } from '@/hooks/use-toast';

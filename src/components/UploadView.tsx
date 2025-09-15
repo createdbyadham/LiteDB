@@ -8,6 +8,7 @@ import { useDatabase } from '@/hooks/useDatabase';
 import { ElectronFile } from '@/types/electron';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PostgresConnectionForm from '@/components/PostgresConnectionForm';
+import icon from '/titlebaricon2.png';
 
 const UploadView = () => {
   const { loadDatabase } = useDatabase();
@@ -123,8 +124,8 @@ const UploadView = () => {
     <div className="absolute inset-0 flex items-center justify-center p-6 bg-gradient-to-b from-background to-background/70 animate-fade-in">
       <Card className="w-full max-w-md mx-auto glass animate-scale-in">
         <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto mb-4 p-3 rounded-full bg-primary/10 w-16 h-16 flex items-center justify-center">
-            <Database className="w-8 h-8 text-primary" />
+          <div className="mx-auto mb-2 w-10 h-10 flex items-center justify-center">
+            <img src={icon} alt="App Icon" className="w-auto h-auto" />
           </div>
           <CardTitle className="text-2xl font-semibold tracking-tight">
             <span className="text-gradient">Database Viewer</span>
