@@ -279,7 +279,7 @@ const DatabaseView = () => {
           <TabsTrigger value="query">Batch Operations</TabsTrigger>
         </TabsList>
         
-        <TabsContent value="browse" className="flex-1 h-full overflow-hidden">
+        <TabsContent value="browse" className="flex-1 h-full overflow-hidden animate-fade-in">
           <div className="flex h-full">
             <TableSidebar 
               tables={tables}
