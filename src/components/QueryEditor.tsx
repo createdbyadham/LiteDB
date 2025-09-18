@@ -10,10 +10,16 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { dbService } from '@/lib/dbService';
 import { pgService } from '@/lib/pgService';
 import { toast } from '@/hooks/use-toast';
-import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Code2, Sparkles } from 'lucide-react';
+import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Code2, Sparkles, Download } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { AiQueryDialog } from './AiQueryDialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface BatchOperationsProps {
   isPostgres?: boolean;
@@ -245,6 +251,82 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
     });
   };
 
+  const handleExportResults = async (format: 'csv' | 'json' | 'xlsx') => {
+    if (!results?.queryResults || !results.queryResults.columns.length) {
+      toast({
+        title: "No Data",
+        description: "There are no results to export",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      let exportData = '';
+      const { columns, rows } = results.queryResults;
+
+      if (format === 'json') {
+        // Convert to JSON
+        const jsonData = rows.map(row => {
+          const obj: Record<string, unknown> = {};
+          columns.forEach((col, idx) => {
+            obj[col] = row[idx];
+          });
+          return obj;
+        });
+        exportData = JSON.stringify(jsonData, null, 2);
+      } else if (format === 'csv') {
+        // Convert to CSV
+        exportData = columns.join(',') + '\n';
+        rows.forEach(row => {
+          const csvRow = row.map(value => {
+            if (value === null) return '';
+            if (typeof value === 'string') {
+              // Escape quotes and wrap in quotes if contains comma
+              if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                return `"${value.replace(/"/g, '""')}"`;
+              }
+              return value;
+            }
+            return String(value);
+          });
+          exportData += csvRow.join(',') + '\n';
+        });
+      } else if (format === 'xlsx') {
+        // For Excel, create a structure that can be converted by the backend
+        const data = {
+          "Query Results": {
+            columns,
+            rows
+          }
+        };
+        exportData = JSON.stringify(data);
+      }
+
+      if (window.electron) {
+        const result = await window.electron.exportDatabase(exportData, format);
+        if (result.success) {
+          toast({
+            title: "Success",
+            description: `Results exported to ${result.filePath}`
+          });
+        } else {
+          toast({
+            title: "Error",
+            description: result.error || "Failed to export results",
+            variant: "destructive"
+          });
+        }
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to export results",
+        variant: "destructive"
+      });
+    }
+  };
+
   // Load saved scripts from localStorage when component mounts
   useEffect(() => {
     try {
@@ -340,15 +422,36 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
               {results && (
                 <div className="mt-4 space-y-2">
                   <Alert variant={results.success ? "default" : "destructive"}>
-                    <div className="flex items-center gap-2">
-                      {results.success ? (
-                        <CheckCircle2 className="h-4 w-4" />
-                      ) : (
-                        <AlertCircle className="h-4 w-4" />
-                      )}
-                      <AlertTitle>
-                        {results.success ? 'Script executed successfully' : 'Script execution failed'}
-                      </AlertTitle>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {results.success ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4" />
+                        )}
+                        <AlertTitle>
+                          {results.success ? 'Script executed successfully' : 'Script execution failed'}
+                        </AlertTitle>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm">
+                            <Download className="mr-2 h-4 w-4" />
+                            Export Results
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          <DropdownMenuItem onClick={() => handleExportResults('csv')}>
+                            Export as CSV
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExportResults('json')}>
+                            Export as JSON
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleExportResults('xlsx')}>
+                            Export as Excel
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <AlertDescription>
                       <div className="mt-2 space-y-2">
