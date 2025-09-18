@@ -41,13 +41,27 @@ const UploadView = () => {
     
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      const file = files[0];
+      const file = files[0] as ElectronFile;
       try {
-        console.log('Drag and drop file:', { name: file.name, path: (file as ElectronFile).path, type: file.type });
-        const arrayBuffer = await file.arrayBuffer();
-        const result = await processFile(arrayBuffer, (file as ElectronFile).path);
-        console.log('Drag and drop process result:', result);
-        if (result.success) {
+        console.log('Drag and drop file:', { name: file.name, path: file.path, type: file.type });
+        
+        let arrayBuffer: ArrayBuffer;
+        
+        // If we have a path (desktop file), use electron API
+        if (file.path && window.electron) {
+          const result = await window.electron.readDatabase(file.path);
+          if (!result.success || !result.data) {
+            throw new Error(result.error || 'Failed to read database file');
+          }
+          arrayBuffer = result.data.buffer;
+        } else {
+          // Fallback to browser File API for files without path
+          arrayBuffer = await file.arrayBuffer();
+        }
+        
+        const processResult = await processFile(arrayBuffer, file.path);
+        console.log('Drag and drop process result:', processResult);
+        if (processResult.success) {
           navigate('/database');
         }
       } catch (error) {
