@@ -52,3 +52,5 @@ bun.lockb
 *.db-shm
 *.db-lock
 *.db-trace
+
+.env
