@@ -17,9 +17,17 @@ interface ElectronAPI {
 
 declare global {
   interface Window {
-    electron: ElectronAPI | undefined;
-    SQL: any;
-    initSqlJs: any;
+    electron?: {
+      saveDatabase: (filePath: string, data: Uint8Array) => Promise<{ success: boolean; error?: string }>;
+      exportDatabase: (data: string, format: string) => Promise<{ success: boolean; error?: string }>;
+      minimizeWindow: () => void;
+      maximizeWindow: () => void;
+      closeWindow: () => void;
+    };
+    SQL: {
+      Database: new (buffer?: ArrayBuffer) => unknown;
+    };
+    initSqlJs: () => Promise<typeof SQL>;
   }
 }
 

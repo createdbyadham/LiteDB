@@ -1,6 +1,7 @@
 import { Minus, Square, X } from 'lucide-react';
 import { Button } from './ui/button';
 import icon from '/mtfr.png';
+import { SettingsDialog } from "./ui/settings-dialog";
 
 const TitleBar = () => {
   const handleMinimize = () => {
@@ -29,6 +30,7 @@ const TitleBar = () => {
 
       {/* Window controls */}
       <div className="flex items-center h-full">
+        <SettingsDialog />
         <Button
           variant="ghost"
           size="sm"

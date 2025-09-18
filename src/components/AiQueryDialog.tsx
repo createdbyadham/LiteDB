@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Textarea } from '@/components/ui/textarea';
 import { aiService } from '@/lib/aiService';
 import { Loader2 } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
 
 interface AiQueryDialogProps {
   open: boolean;
@@ -14,6 +15,7 @@ interface AiQueryDialogProps {
 export function AiQueryDialog({ open, onOpenChange, onQueryGenerated }: AiQueryDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { toast } = useToast();
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
@@ -26,6 +28,13 @@ export function AiQueryDialog({ open, onOpenChange, onQueryGenerated }: AiQueryD
       setPrompt('');
     } catch (error) {
       console.error('Failed to generate query:', error);
+      toast({
+        variant: "destructive",
+        title: "Failed to generate SQL query",
+        description: error instanceof Error 
+          ? error.message 
+          : "Please check your AI provider settings and try again.",
+      });
     } finally {
       setIsLoading(false);
     }

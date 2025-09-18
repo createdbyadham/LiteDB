@@ -385,7 +385,7 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
               <div className="flex items-center gap-2">
                 <Button variant="outline" onClick={() => setIsAiDialogOpen(true)}>
                   <Sparkles className="mr-2 h-4 w-4" />
-                  AI Assistant
+                  Text to SQL
                 </Button>
                 <div className="flex items-center space-x-2">
                   <Input

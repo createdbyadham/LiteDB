@@ -1,14 +1,45 @@
 import OpenAI from "openai";
 
-const token = import.meta.env.VITE_GITHUB_TOKEN;
-const endpoint = "https://models.github.ai/inference";
-const modelName = "openai/gpt-4o-mini";
+type AIProvider = 'github' | 'azure' | 'openai';
+type AISettings = {
+  provider: AIProvider;
+  apiKey: string;
+  endpoint?: string;
+};
 
-const client = new OpenAI({ baseURL: endpoint, apiKey: token, dangerouslyAllowBrowser: true });
+const defaultSettings: AISettings = {
+  provider: 'github',
+  apiKey: import.meta.env.VITE_GITHUB_TOKEN || '',
+  endpoint: 'https://models.github.ai/inference'
+};
+
+function getSettings(): AISettings {
+  const savedSettings = localStorage.getItem('aiSettings');
+  return savedSettings ? JSON.parse(savedSettings) : defaultSettings;
+}
+
+function createClient() {
+  const settings = getSettings();
+  return new OpenAI({ 
+    baseURL: settings.endpoint,
+    apiKey: settings.apiKey,
+    dangerouslyAllowBrowser: true 
+  });
+}
+
+// Re-create client when settings change
+window.addEventListener('aiSettingsChanged', () => {
+  client = createClient();
+});
+
+let client = createClient();
 
 export const aiService = {
   async generateSqlQuery(prompt: string): Promise<string> {
     try {
+      const settings = getSettings();
+      const modelName = settings.provider === 'github' ? 'openai/gpt-4o-mini' : 'gpt-4';
+
       const response = await client.chat.completions.create({
         messages: [
           { 
