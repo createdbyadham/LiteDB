@@ -10,8 +10,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { dbService } from '@/lib/dbService';
 import { pgService } from '@/lib/pgService';
 import { toast } from '@/hooks/use-toast';
-import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Code2 } from 'lucide-react';
+import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Code2, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { AiQueryDialog } from './AiQueryDialog';
 
 interface BatchOperationsProps {
   isPostgres?: boolean;
@@ -28,12 +30,13 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
     executionTime?: number;
     queryResults?: {
       columns: string[];
-      rows: any[][];
+      rows: (string | number | boolean | null)[][];
     } | null;
   } | null>(null);
   const [savedScripts, setSavedScripts] = useState<{ name: string; sql: string }[]>([]);
   const [scriptName, setScriptName] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
 
   // Function to execute the SQL script
   const executeScript = async () => {
@@ -76,7 +79,7 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
         errors: string[];
         queryResults?: {
           columns: string[];
-          rows: any[][];
+          rows: (string | number | boolean | null)[][];
         } | null;
       };
       
@@ -93,7 +96,10 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
             if (queryResult) {
               // For SELECT queries, we want to display the results
               if (isSelectQuery) {
-                result.queryResults = queryResult;
+                result.queryResults = queryResult as {
+                  columns: string[];
+                  rows: (string | number | boolean | null)[][];
+                };
               }
               
               // Try to extract table names from the SQL
@@ -121,7 +127,10 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
               success: true, 
               affectedTables: [], 
               errors: [],
-              queryResults: queryResult
+              queryResults: queryResult as {
+                columns: string[];
+                rows: (string | number | boolean | null)[][];
+              }
             };
           } catch (error) {
             result = { 
@@ -249,7 +258,12 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
   }, []);
 
   return (
-    <div className="h-full flex flex-col animate-fade-in px-2">
+    <div className="h-full flex flex-col overflow-auto px-2 animate-fade-in">
+      <AiQueryDialog 
+        open={isAiDialogOpen} 
+        onOpenChange={setIsAiDialogOpen}
+        onQueryGenerated={(query) => setSqlScript(query)}
+      />
       <Tabs defaultValue="editor" className="flex-1 flex flex-col">
         <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="flex items-center justify-between px-4 py-3">
@@ -269,7 +283,7 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
           </TabsList>
         </div>
         
-        <TabsContent value="editor" className="data-[state=inactive]:hidden flex-1 flex flex-col p-4 pt-0">
+        <TabsContent value="editor" className="flex-1 overflow-auto p-4 pt-0">
           <div className="flex-1 flex flex-col gap-4">
             <div className="flex items-center justify-between py-2">
               <div className="flex items-center space-x-4">
@@ -287,11 +301,15 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => setIsAiDialogOpen(true)}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  AI Assistant
+                </Button>
                 <div className="flex items-center space-x-2">
-                  <input
+                  <Input
                     type="text"
                     placeholder="Script name"
-                    className="flex h-10 w-[250px] rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-[250px]"
                     value={scriptName}
                     onChange={(e) => setScriptName(e.target.value)}
                   />
@@ -314,7 +332,7 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
                   "Enter PostgreSQL statements (each statement must end with a semicolon)..." : 
                   "Enter SQL statements separated by semicolons (;)..."
                 }
-                className="flex-1 font-mono text-base min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex-1 font-mono text-base min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 value={sqlScript}
                 onChange={(e) => setSqlScript(e.target.value)}
               />
