@@ -142,10 +142,10 @@ const UploadView = () => {
             <img src={icon} alt="App Icon" className="w-auto h-auto" />
           </div>
           <CardTitle className="text-2xl font-semibold tracking-tight">
-            <span className="text-gradient">Database Viewer</span>
+            <span className="text-gradient">LightDB</span>
           </CardTitle>
           <CardDescription>
-            Connect to a database to view and edit its content
+            Connect to your database to view and edit its content
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
