@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Database, Upload, FileUp, Server } from 'lucide-react';
+import { Upload, FileUp } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useDatabase } from '@/hooks/useDatabase';
 import { ElectronFile } from '@/types/electron';

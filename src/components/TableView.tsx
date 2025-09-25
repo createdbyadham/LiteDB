@@ -1,39 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { 
-  ArrowUpDown, 
-  Search, 
-  Info, 
-  Database, 
-  ChevronLeft, 
-  ChevronRight,
-  Save
-} from 'lucide-react';
+import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Save} from 'lucide-react';
 import { ColumnInfo, RowData, dbService } from '@/lib/dbService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { EditDialog } from '@/components/EditDialog';
 import { toast } from '@/hooks/use-toast';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Portal } from '@radix-ui/react-portal';
 
 interface TableViewProps {

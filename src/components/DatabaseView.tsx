@@ -22,9 +22,9 @@ const DatabaseView = () => {
   const [loading, setLoading] = useState(false);
   
   // SQLite hooks
-  const { isLoaded, isLoading, tables: sqliteTables, getTableData: getSqliteTableData, getTableColumns: getSqliteTableColumns } = useDatabase();
+  const { isLoaded, isLoading, tables: sqliteTables, getTableData: getSqliteTableData, getTableColumns: getSqliteTableColumns, refreshTables: refreshSqliteTables } = useDatabase();
   // PostgreSQL hooks
-  const { isConnected, isConnecting, tables: postgresTables, getTableData: getPostgresTableData, getTableColumns: getPostgresTableColumns, disconnect: disconnectPostgres } = usePostgres();
+  const { isConnected, isConnecting, tables: postgresTables, getTableData: getPostgresTableData, getTableColumns: getPostgresTableColumns, disconnect: disconnectPostgres, refreshTables: refreshPostgresTables } = usePostgres();
   
   const navigate = useNavigate();
   
@@ -116,15 +116,13 @@ const DatabaseView = () => {
     primaryKeyColumn: string;
   }
 
-  function isDeleteOperation(value: any): value is DeleteOperation {
-    return (
-      value &&
-      typeof value === 'object' &&
-      'type' in value &&
-      value.type === 'delete' &&
-      Array.isArray(value.rowIds) &&
-      typeof value.primaryKeyColumn === 'string'
-    );
+  function isDeleteOperation(value: unknown): value is DeleteOperation {
+    if (value === null || typeof value !== 'object') return false;
+    const obj = value as Record<string, unknown>;
+    const typeValue = (obj as { type?: unknown }).type;
+    const rowIds = (obj as { rowIds?: unknown }).rowIds;
+    const primaryKeyColumn = (obj as { primaryKeyColumn?: unknown }).primaryKeyColumn;
+    return typeValue === 'delete' && Array.isArray(rowIds) && typeof primaryKeyColumn === 'string';
   }
 
   const handleUpdateRow = async (oldRow: RowData | null, newRow: RowData | DeleteOperation): Promise<boolean> => {
@@ -329,7 +327,11 @@ const DatabaseView = () => {
         </TabsContent>
         
         <TabsContent value="query" className="flex-1 overflow-hidden">
-          <BatchOperations isPostgres={isPostgresActive} />
+          <BatchOperations 
+            isPostgres={isPostgresActive} 
+            refreshTables={isPostgresActive ? refreshPostgresTables : refreshSqliteTables} 
+            onAutosave={handleSaveDatabase}
+          />
         </TabsContent>
       </Tabs>
 

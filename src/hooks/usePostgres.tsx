@@ -12,6 +12,7 @@ export interface UsePgReturn {
   getTableColumns: (tableName: string) => Promise<ColumnInfo[]>;
   executeQuery: (sql: string) => Promise<{ columns: string[], rows: unknown[][] } | null>;
   disconnect: () => void;
+  refreshTables: () => Promise<void>;  // Add this function
 }
 
 export function usePostgres(): UsePgReturn {
@@ -159,6 +160,25 @@ export function usePostgres(): UsePgReturn {
     return pgService.executeQuery(sql);
   };
 
+  const refreshTables = async () => {
+    if (!isConnected) {
+      console.log("Attempted to refresh tables without PostgreSQL connection");
+      return;
+    }
+    try {
+      console.log("Refreshing PostgreSQL tables");
+      const tableList = await pgService.getTables();
+      setTables(tableList);
+    } catch (error) {
+      console.error("Error refreshing tables:", error);
+      toast({
+        title: "Error",
+        description: "Failed to refresh table list",
+        variant: "destructive"
+      });
+    }
+  };
+
   const disconnect = () => {
     pgService.disconnect();
     setIsConnected(false);
@@ -178,6 +198,7 @@ export function usePostgres(): UsePgReturn {
     getTableData,
     getTableColumns,
     executeQuery,
-    disconnect
+    disconnect,
+    refreshTables  // Add this to the return object
   };
 } 

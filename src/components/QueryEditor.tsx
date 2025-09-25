@@ -14,18 +14,15 @@ import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Code2, Sparkl
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { AiQueryDialog } from './AiQueryDialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 interface BatchOperationsProps {
   isPostgres?: boolean;
+  refreshTables?: () => Promise<void> | void;  // Add this prop
+  onAutosave?: () => Promise<void> | void;     // New prop for autosave
 }
 
-const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
+const BatchOperations = ({ isPostgres = false, refreshTables, onAutosave }: BatchOperationsProps) => {
   const [sqlScript, setSqlScript] = useState('');
   const [useTransaction, setUseTransaction] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -60,8 +57,6 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
 
     try {
       // Split script into statements by semicolons
-      // This is a simple parser and may not handle all SQL syntax perfectly
-      // Especially if semicolons occur in string literals or comments
       const statements = sqlScript
         .split(';')
         .map(stmt => stmt.trim())
@@ -88,6 +83,9 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
           rows: (string | number | boolean | null)[][];
         } | null;
       };
+
+      // Determine if any statement mutates data/schema
+      const isMutating = statements.some(stmt => /^(\s*)(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE|REPLACE)\b/i.test(stmt));
       
       if (isPostgres) {
         // For PostgreSQL, execute each statement sequentially
@@ -97,6 +95,7 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
           try {
             // Check if this is a SELECT or similar query that returns data
             const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statement);
+            const isDDLQuery = /^\s*(CREATE|DROP|ALTER|TRUNCATE)/i.test(statement);
             
             const queryResult = await pgService.executeQuery(statement);
             if (queryResult) {
@@ -106,6 +105,11 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
                   columns: string[];
                   rows: (string | number | boolean | null)[][];
                 };
+              }
+              
+              // If this was a DDL query, refresh the table list
+              if (isDDLQuery && refreshTables) {
+                await Promise.resolve(refreshTables());
               }
               
               // Try to extract table names from the SQL
@@ -125,6 +129,7 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
       } else {
         // For SQLite, check if we have a SELECT query and handle it specially
         const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statements[0]);
+        const isDDLQuery = /^\s*(CREATE|DROP|ALTER|TRUNCATE)/i.test(statements[0]);
         
         if (isSelectQuery && statements.length === 1) {
           try {
@@ -148,6 +153,11 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
         } else {
           // For other SQL statements, use the existing batch operation
           result = dbService.executeBatchOperations(statements, useTransaction);
+          
+          // If this was a DDL query and it was successful, refresh the table list
+          if (isDDLQuery && result.success && refreshTables) {
+            Promise.resolve(refreshTables());
+          }
         }
       }
       
@@ -163,6 +173,10 @@ const BatchOperations = ({ isPostgres = false }: BatchOperationsProps) => {
           title: "Success",
           description: `Executed ${statements.length} statement${statements.length > 1 ? 's' : ''} successfully`
         });
+        // Trigger autosave only when statements are mutating
+        if (isMutating && onAutosave) {
+          void Promise.resolve(onAutosave());
+        }
       } else {
         toast({
           title: "Execution Error",

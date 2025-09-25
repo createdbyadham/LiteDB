@@ -10,6 +10,7 @@ export interface UseDbReturn {
   getTableData: (tableName: string) => { columns: string[], rows: RowData[] };
   getTableColumns: (tableName: string) => ColumnInfo[];
   executeQuery: (sql: string) => { columns: string[], rows: unknown[][] } | null;
+  refreshTables: () => void;
 }
 
 export function useDatabase(): UseDbReturn {
@@ -157,6 +158,25 @@ export function useDatabase(): UseDbReturn {
     return dbService.executeQuery(sql);
   };
 
+  const refreshTables = () => {
+    if (!isLoaded) {
+      console.log("Attempted to refresh tables without loaded database");
+      return;
+    }
+    try {
+      console.log("Refreshing SQLite tables");
+      const tableList = dbService.getTables();
+      setTables(tableList);
+    } catch (error) {
+      console.error("Error refreshing tables:", error);
+      toast({
+        title: "Error",
+        description: "Failed to refresh table list",
+        variant: "destructive"
+      });
+    }
+  };
+
   return {
     isLoaded,
     isLoading,
@@ -164,6 +184,7 @@ export function useDatabase(): UseDbReturn {
     loadDatabase,
     getTableData,
     getTableColumns,
-    executeQuery
+    executeQuery,
+    refreshTables
   };
 }
