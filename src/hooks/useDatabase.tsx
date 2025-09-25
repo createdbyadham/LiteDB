@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { dbService, TableInfo, ColumnInfo, RowData } from '@/lib/dbService';
 import { toast } from '@/hooks/use-toast';
+import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
 
 export interface UseDbReturn {
   isLoaded: boolean;
@@ -17,6 +18,28 @@ export function useDatabase(): UseDbReturn {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [tables, setTables] = useState<TableInfo[]>([]);
+
+  const pushSQLiteSchemaToAI = (tableList: TableInfo[]) => {
+    try {
+      const tableSchemas: TableSchema[] = tableList.map((t) => {
+        const cols = dbService.getTableColumns(t.name);
+        return {
+          name: t.name,
+          columns: cols.map(c => ({
+            name: c.name,
+            type: c.type,
+            isPrimaryKey: c.pk === 1,
+            isNotNull: c.notnull === 1
+          }))
+        };
+      });
+      const schema: DatabaseSchema = { dialect: 'sqlite', tables: tableSchemas };
+      aiService.setSchema(schema);
+    } catch (e) {
+      // Best-effort; ignore schema push errors
+      console.warn('Failed to push SQLite schema to AI service', e);
+    }
+  };
 
   // Initialize SQL.js and check for existing database
   useEffect(() => {
@@ -37,12 +60,15 @@ export function useDatabase(): UseDbReturn {
           console.log("Found existing tables, setting state");
           setTables(existingTables);
           setIsLoaded(true);
+          // Push schema to AI
+          pushSQLiteSchemaToAI(existingTables);
         }
       } catch (error) {
         console.error("Failed to initialize database:", error);
         if (mounted) {
           setIsLoaded(false);
           setTables([]);
+          aiService.clearSchema();
         }
       }
     };
@@ -77,6 +103,8 @@ export function useDatabase(): UseDbReturn {
           console.log("Setting state with tables");
           setTables(tableList);
           setIsLoaded(true);
+          // Push schema to AI
+          pushSQLiteSchemaToAI(tableList);
           
           toast({
             title: "Database loaded",
@@ -88,6 +116,7 @@ export function useDatabase(): UseDbReturn {
           console.log("No tables found in database");
           setIsLoaded(false);
           setTables([]);
+          aiService.clearSchema();
           
           toast({
             title: "Warning",
@@ -101,11 +130,13 @@ export function useDatabase(): UseDbReturn {
       console.log("Failed to load database");
       setIsLoaded(false);
       setTables([]);
+      aiService.clearSchema();
       return false;
     } catch (error) {
       console.error("Error loading database:", error);
       setIsLoaded(false);
       setTables([]);
+      aiService.clearSchema();
       
       toast({
         title: "Error",
@@ -167,6 +198,12 @@ export function useDatabase(): UseDbReturn {
       console.log("Refreshing SQLite tables");
       const tableList = dbService.getTables();
       setTables(tableList);
+      // Update AI schema
+      if (tableList.length > 0) {
+        pushSQLiteSchemaToAI(tableList);
+      } else {
+        aiService.clearSchema();
+      }
     } catch (error) {
       console.error("Error refreshing tables:", error);
       toast({
