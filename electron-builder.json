@@ -1,6 +1,6 @@
 {
-    "appId": "com.lightdb.app",
-    "productName": "LightDB",
+    "appId": "com.litedb.app",
+    "productName": "LiteDB",
     "directories": {
       "output": "release/${version}",
       "buildResources": "assets"

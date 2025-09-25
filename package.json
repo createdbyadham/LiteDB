@@ -1,9 +1,9 @@
 {
-  "name": "lightdb",
+  "name": "litedb",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "main": "dist-electron/main.js",
-  "description": "LightDB - A simple and lightweight database viewer/editor for your projects",
+  "description": "LiteDB - A simple and lightweight database viewer/editor for your projects",
   "author": "Adham Ehab",
   "contributors": [
     {
@@ -72,8 +72,8 @@
     "wait-on": "^8.0.2"
   },
   "build": {
-    "appId": "com.lightdb.app",
-    "productName": "LightDB",
+    "appId": "com.litedb.app",
+    "productName": "LiteDB",
     "directories": {
       "output": "release/${version}",
       "buildResources": "assets"

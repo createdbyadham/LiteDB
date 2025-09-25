@@ -1,22 +1,22 @@
-# LightDB
+# LiteDB
 
 A modern, fast, and user-friendly database viewer/editor built with React and Electron. Now supporting both SQLite and PostgreSQL with seamless database management.
 
-![LightDB](./sss.png)
+![LiteDB](./Litedb.png)
 
 ## Features
 
-- 🚀 **Fast and Responsive**: Built with performance in mind
-- 🎨 **Modern UI**: Clean interface using Tailwind CSS
 - 📝 **Edit Support**: View and edit database records directly
 - 🔍 **Advanced Search**: Filter and search through your data
 - ⚡ **Real-time Updates**: Changes reflect immediately
-- 💾 **Save Changes**: Save modifications back to the original database file
 - 📊 **Data Sorting**: Sort any column with a click
 - 📱 **Responsive Design**: Works great on any screen size
 - 🔄 **Batch Operations**: Execute multiple SQL statements with transaction support
 - 📜 **SQL Script Management**: Save and reuse your SQL scripts
 - 🔥 **Dual Database Support**: Works with SQLite and PostgreSQL
+- 🤖 **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries (supports OpenAI, GitHub, and Azure providers)
+- 💾 **Autosave & Autorefresh**: Automatically save and refresh after executing queries
+- 📊 **Export Query Results**: Export data to **CSV, Excel, or JSON**
 
 ## Tech Stack
 
