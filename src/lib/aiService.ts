@@ -83,7 +83,8 @@ export const aiService = {
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         {
           role: 'system',
-          content: 'You are an SQL expert assistant. Convert natural language to SQL queries. Only respond with the SQL query, no explanations. Do not include any other text or comments. Do not add ```sql```.'
+          content: `You are an SQL expert assistant. Convert natural language to SQL queries. Only respond with the SQL query, no explanations. Do not include any other text or comments. Do not add \`\`\`sql\`\`\`.
+Current date: ${new Date().toISOString().split('T')[0]}`
         }
       ];
 

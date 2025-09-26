@@ -101,9 +101,29 @@ const BatchOperations = ({ isPostgres = false, refreshTables, onAutosave }: Batc
             if (queryResult) {
               // For SELECT queries, we want to display the results
               if (isSelectQuery) {
-                result.queryResults = queryResult as {
-                  columns: string[];
-                  rows: (string | number | boolean | null)[][];
+                // Normalize Postgres object rows to array-of-arrays based on columns (type-safe)
+                const isObjectRow = (value: unknown): value is Record<string, unknown> =>
+                  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+                let normalizedRows: (string | number | boolean | null)[][] = [];
+                if (Array.isArray(queryResult.rows) && queryResult.rows.length > 0) {
+                  const firstRowUnknown = queryResult.rows[0] as unknown;
+                  if (isObjectRow(firstRowUnknown)) {
+                    const objectRows = queryResult.rows as unknown as Array<Record<string, unknown>>;
+                    normalizedRows = objectRows.map((r) =>
+                      queryResult.columns.map((c) => {
+                        const v = r[c];
+                        return (v === undefined ? null : (v as string | number | boolean | null));
+                      })
+                    );
+                  } else {
+                    normalizedRows = queryResult.rows as (string | number | boolean | null)[][];
+                  }
+                }
+
+                result.queryResults = {
+                  columns: queryResult.columns,
+                  rows: normalizedRows
                 };
               }
               
