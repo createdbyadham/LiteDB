@@ -3,7 +3,6 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { HashRouter, Routes, Route } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import DatabaseView from "./components/DatabaseView";
-import NotFound from "./pages/NotFound";
 import UploadView from '@/components/UploadView';
 import TitleBar from '@/components/TitleBar';
 
@@ -16,7 +15,6 @@ const App = () => (
             <Routes>
               <Route path="/" element={<UploadView />} />
               <Route path="/database" element={<DatabaseView />} />
-              <Route path="*" element={<NotFound />} />
             </Routes>
           </HashRouter>
         </main>
