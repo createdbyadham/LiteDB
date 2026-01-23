@@ -6,26 +6,26 @@ A modern, fast, and user-friendly database viewer/editor built with React and El
 
 ## Features
 
-- 📝 **Edit Support**: View and edit database records directly
-- 🔍 **Advanced Search**: Filter and search through your data
-- ⚡ **Real-time Updates**: Changes reflect immediately
-- 📊 **Data Sorting**: Sort any column with a click
-- 📱 **Responsive Design**: Works great on any screen size
-- 🔄 **Batch Operations**: Execute multiple SQL statements with transaction support
-- 📜 **SQL Script Management**: Save and reuse your SQL scripts
-- 🔥 **Dual Database Support**: Works with SQLite and PostgreSQL
-- 🤖 **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries (supports OpenAI, GitHub, and Azure providers), Schema is injected into the LLM upon initialization and refresh
-- 💾 **Autosave & Autorefresh**: Automatically save and refresh after executing queries
-- 📊 **Export Query Results**: Export data to **CSV, Excel, or JSON**
+- **Edit Support**: View and edit database records directly
+- **Advanced Search**: Filter and search through your data
+- **Real-time Updates**: Changes reflect immediately
+- **Data Sorting**: Sort any column with a click
+- **Responsive Design**: Works great on any screen size
+- **Batch Operations**: Execute multiple SQL statements with transaction support
+- **SQL Script Management**: Save and reuse your SQL scripts
+- **Dual Database Support**: Works with SQLite and PostgreSQL
+- **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries (supports OpenAI, GitHub, and Azure providers), Schema is injected into the LLM upon initialization and refresh
+- **Autosave & Autorefresh**: Automatically save and refresh after executing queries
+- **Export Query Results**: Export data to **CSV, Excel, or JSON**
 
 ## Tech Stack
 
-- ⚛️ React
-- 🔷 TypeScript
-- ⚡ Vite
-- 🎨 Tailwind CSS
-- 🖥️ Electron
-- 🐘 PostgreSQL
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Electron
+- PostgreSQL
 
 ## Getting Started
 
@@ -74,9 +74,6 @@ PostgreSQL-Specific Features:
 - View table structures directly in the UI
 - Batch execute multiple statements in transaction mode
 - Securely connect using SSL
-
-### Important Note
-⚠️ **Run as Administrator**: The application requires administrator privileges to properly handle file paths and enable real-time updates. Right-click the application and select "Run as Administrator" when launching.
 
 ### Batch Operations & SQL Scripting
 
