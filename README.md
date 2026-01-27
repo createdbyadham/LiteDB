@@ -2,6 +2,12 @@
 
 A modern, fast, and user-friendly database viewer/editor built with React and Electron. Now supporting both SQLite and PostgreSQL with seamless database management.
 
+<div align="center">
+
+[![Download](https://img.shields.io/badge/Download-App-blue?style=for-the-badge&logo=w)](https://github.com/createdbyadham/LiteDB/releases/tag/v1.5.0)
+[![Watch Demo](https://img.shields.io/badge/Watch-Demo-red?style=for-the-badge&logo=y)](https://www.linkedin.com/feed/update/urn:li:activity:7377312579544563712/?updateEntityUrn=urn%3Ali%3Afs_feedUpdate%3A%28V2%2Curn%3Ali%3Aactivity%3A7377312579544563712%29)
+
+</div>
 ![LiteDB](./Litedb.png)
 
 ## Features
@@ -17,6 +23,14 @@ A modern, fast, and user-friendly database viewer/editor built with React and El
 - **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries (supports OpenAI, GitHub, and Azure providers), Schema is injected into the LLM upon initialization and refresh
 - **Autosave & Autorefresh**: Automatically save and refresh after executing queries
 - **Export Query Results**: Export data to **CSV, Excel, or JSON**
+
+## AI Architecture (Text-to-SQL)
+
+Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline** to ensure high-accuracy SQL generation:
+
+1.  **Schema Extraction**: On connection, the app actively introspects the database to extract table definitions, foreign keys, and data types.
+2.  **Dynamic Context Injection**: This metadata is formatted and injected into the LLM's system prompt (System Message), giving the model "awareness" of the specific database structure.
+3.  **Driver-Specific Validation**: The system prompts are tailored to the active driver (e.g., enforcing PostgreSQL specific syntax vs. SQLite), reducing syntax errors in generated queries.
 
 ## Tech Stack
 
