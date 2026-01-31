@@ -54,9 +54,9 @@ export function AiQueryDialog({ open, onOpenChange, onQueryGenerated }: AiQueryD
             placeholder="e.g., Show me all users who signed up in the last month"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            className="min-h-[100px]"
+            className="min-h-[100px] text-sm resize-none"
           />
-          <Button onClick={handleGenerate} disabled={isLoading || !prompt.trim()}>
+          <Button onClick={handleGenerate} disabled={isLoading || !prompt.trim()} size="sm" className="w-full">
             {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Generate SQL
           </Button>

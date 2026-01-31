@@ -11,7 +11,7 @@ import {
   Terminal,
   ChevronLeft,
   ChevronRight,
-  Home,
+  ArrowLeft
 } from 'lucide-react';
 import icon from '/titlebaricon2.png';
 
@@ -48,9 +48,9 @@ const AppLayout = ({
 
   const mainNavItems: NavItem[] = [
     {
-      id: 'home',
-      label: 'Home',
-      icon: <Home className="w-5 h-5" />,
+      id: 'back',
+      label: 'Back',
+      icon: <ArrowLeft className="w-5 h-5" />,
       onClick: () => navigate('/'),
     },
   ];

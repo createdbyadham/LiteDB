@@ -381,22 +381,13 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
         onQueryGenerated={(query) => setSqlScript(query)}
       />
       <Tabs defaultValue="editor" className="flex-1 flex flex-col">
-        <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="flex items-center justify-between px-4 py-3">
-            <div className="flex items-center space-x-2">
-              <Code2 className="h-5 w-5 text-primary" />
-              <h1 className="text-xl font-semibold tracking-tight">SQL Editor</h1>
-              {isPostgres && (
-                <Badge variant="outline" className="ml-2">
-                  PostgreSQL
-                </Badge>
-              )}
-            </div>
+        <div className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex items-center justify-end px-4 h-[52px]">
+            <TabsList className="ml-4 h-8">
+              <TabsTrigger value="editor" className="text-xs h-7">Editor</TabsTrigger>
+              <TabsTrigger value="savedScripts" className="text-xs h-7">Saved Scripts</TabsTrigger>
+            </TabsList>
           </div>
-          <TabsList className="ml-4 mb-4">
-            <TabsTrigger value="editor">Editor</TabsTrigger>
-            <TabsTrigger value="savedScripts">Saved Scripts</TabsTrigger>
-          </TabsList>
         </div>
         
         <TabsContent value="editor" className="flex-1 overflow-auto p-4 pt-0">
@@ -410,32 +401,32 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                       checked={useTransaction} 
                       onCheckedChange={setUseTransaction} 
                     />
-                    <Label htmlFor="transaction-mode">
-                      Use Transaction (All or Nothing)
+                    <Label htmlFor="transaction-mode" className="text-xs">
+                      Use Transaction
                     </Label>
                   </div>
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" onClick={() => setIsAiDialogOpen(true)}>
-                  <Sparkles className="mr-2 h-4 w-4" />
+                <Button variant="outline" size="sm" onClick={() => setIsAiDialogOpen(true)} className="h-8 text-xs">
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                   Text to SQL
                 </Button>
                 <div className="flex items-center space-x-2">
                   <Input
                     type="text"
                     placeholder="Script name"
-                    className="w-[250px]"
+                    className="w-[200px] h-8 text-xs"
                     value={scriptName}
                     onChange={(e) => setScriptName(e.target.value)}
                   />
-                  <Button variant="outline" onClick={saveScript}>
-                    <Save className="mr-2 h-4 w-4" />
+                  <Button variant="outline" size="sm" onClick={saveScript} className="h-8 text-xs">
+                    <Save className="mr-1.5 h-3.5 w-3.5" />
                     Save Script
                   </Button>
                 </div>
-                <Button onClick={executeScript} disabled={isRunning}>
-                  <PlayCircle className="mr-2 h-4 w-4" />
+                <Button onClick={executeScript} disabled={isRunning} size="sm" className="h-8 text-xs">
+                  <PlayCircle className="mr-1.5 h-3.5 w-3.5" />
                   {isRunning ? 'Running...' : 'Execute Script'}
                 </Button>
               </div>
@@ -448,7 +439,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                   "Enter PostgreSQL statements (each statement must end with a semicolon)..." : 
                   "Enter SQL statements separated by semicolons (;)..."
                 }
-                className="flex-1 font-mono text-base min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex-1 font-mono text-sm min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 value={sqlScript}
                 onChange={(e) => setSqlScript(e.target.value)}
               />
