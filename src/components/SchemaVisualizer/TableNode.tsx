@@ -9,6 +9,7 @@ export interface TableNodeData {
   columns: ColumnInfo[];
   foreignKeys: ForeignKeyInfo[];
   indexes: IndexInfo[];
+  onEdit?: (name: string) => void;
 }
 
 const getColumnIcon = (
@@ -80,7 +81,7 @@ const formatType = (type: string) => {
 };
 
 const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
-  const { name, columns, foreignKeys, indexes } = data;
+  const { name, columns, foreignKeys, indexes, onEdit } = data;
   
   // Find columns that are foreign keys (these will have source handles)
   const fkColumnNames = new Set(foreignKeys.map(fk => fk.from));
@@ -99,7 +100,15 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
           <div className="w-2 h-2 rounded-full bg-emerald-500" />
           <span className="font-medium text-sm text-foreground truncate">{name}</span>
         </div>
-        <button className="text-muted-foreground hover:text-foreground transition-colors">
+        <button 
+          className="text-muted-foreground hover:text-foreground transition-colors nodrag"
+          onClick={(e) => {
+            console.log('Edit table clicked:', name);
+            e.stopPropagation();
+            onEdit?.(name);
+          }}
+          title="View Data"
+        >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
             <polyline points="15 3 21 3 21 9" />
