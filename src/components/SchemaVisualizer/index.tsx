@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -10,26 +10,24 @@ import ReactFlow, {
   Panel,
   MiniMap,
   ConnectionMode,
+  ReactFlowInstance,
+  getNodesBounds,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { toPng, toSvg } from 'html-to-image';
 
 import TableNode, { TableNodeData } from './TableNode';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Input } from '@/components/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useSidebar } from '@/contexts/SidebarContext';
 import { 
   Database, 
-  Search, 
   LayoutGrid,
-  Table2,
   Link2,
   Key,
-  ChevronRight
+  Table2
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo } from '@/lib/dbService';
+import { Sidebar, SidebarItem } from '@/components/Sidebar';
+import { useSidebar } from '@/contexts/SidebarContext';
 
 // Custom node types
 const nodeTypes = {
@@ -38,10 +36,9 @@ const nodeTypes = {
 
 // Edge style for relationships
 const edgeStyle = {
-  stroke: '#a855f7',
+  stroke: '#ffffff',
   strokeWidth: 2,
 };
-
 
 interface SchemaVisualizerProps {
   tables: TableInfo[];
@@ -49,6 +46,10 @@ interface SchemaVisualizerProps {
   getForeignKeys: (tableName: string) => ForeignKeyInfo[] | Promise<ForeignKeyInfo[]>;
   getIndexes: (tableName: string) => IndexInfo[] | Promise<IndexInfo[]>;
   isPostgres?: boolean;
+}
+
+export interface SchemaVisualizerRef {
+  exportSchema: (format: 'png' | 'svg') => Promise<string | null>;
 }
 
 interface SchemaTable {
@@ -92,7 +93,7 @@ const calculateLayout = (tables: SchemaTable[]): { nodes: Node<TableNodeData>[];
     if (refs) {
       refs.forEach(ref => {
         if (!visited.has(ref)) {
-          const refLevel = calculateLevel(ref, currentLevel + 1);
+          calculateLevel(ref, currentLevel + 1);
           maxLevel = Math.max(maxLevel, currentLevel);
         }
       });
@@ -159,8 +160,8 @@ const calculateLayout = (tables: SchemaTable[]): { nodes: Node<TableNodeData>[];
   
   // Create edges for relationships
   tables.forEach(table => {
-    table.foreignKeys.forEach((fk, index) => {
-      edges.push({
+    table.foreignKeys.forEach((fk) => {
+        edges.push({
         id: `${table.name}-${fk.from}-${fk.table}-${fk.to}`,
         source: table.name,
         sourceHandle: `${table.name}-${fk.from}-source`,
@@ -170,7 +171,7 @@ const calculateLayout = (tables: SchemaTable[]): { nodes: Node<TableNodeData>[];
         animated: true,
         style: edgeStyle,
         label: fk.from,
-        labelStyle: { fill: '#a855f7', fontSize: 10 },
+        labelStyle: { fill: '#ffffff', fontSize: 10 },
         labelBgStyle: { fill: 'hsl(var(--card))', fillOpacity: 0.8 },
       });
     });
@@ -179,20 +180,71 @@ const calculateLayout = (tables: SchemaTable[]): { nodes: Node<TableNodeData>[];
   return { nodes, edges };
 };
 
-const SchemaVisualizer = ({ 
+const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(({ 
   tables, 
   getTableColumns, 
   getForeignKeys, 
   getIndexes,
-}: SchemaVisualizerProps) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  isPostgres = false 
+}, ref) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [schemaData, setSchemaData] = useState<SchemaTable[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
-  const [hasLoaded, setHasLoaded] = useState(false);
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    exportSchema: async (format: 'png' | 'svg') => {
+      if (!reactFlowInstance) {
+        return null;
+      }
+
+      // We need to grab the .react-flow__viewport element
+      const viewportEl = document.querySelector('.react-flow__viewport') as HTMLElement;
+      if (!viewportEl) {
+        return null;
+      }
+
+      const nodes = reactFlowInstance.getNodes();
+      if (nodes.length === 0) {
+        return null;
+      }
+
+      const nodesBounds = getNodesBounds(nodes);
+      
+      const padding = 50;
+      const width = nodesBounds.width + padding * 2;
+      const height = nodesBounds.height + padding * 2;
+      
+      const transform = `translate(${-nodesBounds.x + padding}px, ${-nodesBounds.y + padding}px) scale(1)`;
+      
+      const options = {
+        backgroundColor: '#ffffff',
+        width: width,
+        height: height,
+        style: {
+          width: `${width}px`,
+          height: `${height}px`,
+          transform: transform,
+        },
+      };
+
+      try {
+        if (format === 'png') {
+          return await toPng(viewportEl, options);
+        } else {
+          return await toSvg(viewportEl, options);
+        }
+      } catch (error) {
+        console.error('Error exporting schema image:', error);
+        return null;
+      }
+    }
+  }));
 
   // Store functions in refs to avoid dependency issues
   const getTableColumnsRef = useRef(getTableColumns);
@@ -289,13 +341,6 @@ const SchemaVisualizer = ({
     }
   }, [nodes]);
 
-  // Filter tables for sidebar
-  const filteredTables = useMemo(() => {
-    return schemaData.filter(table => 
-      table.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [schemaData, searchQuery]);
-
   // Count statistics
   const stats = useMemo(() => {
     const totalColumns = schemaData.reduce((acc, t) => acc + t.columns.length, 0);
@@ -309,6 +354,38 @@ const SchemaVisualizer = ({
       indexes: totalIndexes,
     };
   }, [schemaData]);
+
+  // Prepare items for sidebar
+  const sidebarItems: SidebarItem[] = useMemo(() => {
+    return schemaData.map(table => ({
+      id: table.name,
+      label: table.name,
+      icon: <Table2 />,
+      tooltip: `${table.name} (${table.columns.length} columns)`,
+      extra: (
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span>{table.columns.length}</span>
+          {table.foreignKeys.length > 0 && (
+            <Link2 className="w-3 h-3 text-amber-400" />
+          )}
+        </div>
+      ),
+      onClick: () => focusTable(table.name)
+    }));
+  }, [schemaData, focusTable]);
+
+  const statsContent = (
+    <div className="grid grid-cols-2 gap-2 text-xs">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        <Table2 className="w-3.5 h-3.5" />
+        <span>{stats.tables} tables</span>
+      </div>
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        <Link2 className="w-3.5 h-3.5" />
+        <span>{stats.relationships} relations</span>
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -336,128 +413,16 @@ const SchemaVisualizer = ({
   }
 
   return (
-    <div className="h-full flex">
-      {/* Sidebar */}
-      <div 
-        className={cn(
-          "h-full bg-background border-r transition-all duration-200 ease-out flex flex-col shrink-0",
-          sidebarCollapsed ? "w-12" : "w-64"
-        )}
-      >
-        {/* Sidebar Header */}
-        <div className="flex items-center justify-between p-3 border-b">
-          {!sidebarCollapsed && (
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Schema
-            </span>
-          )}
-          <Tooltip delayDuration={0}>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-7 w-7 text-muted-foreground", sidebarCollapsed && "mx-auto")}
-                onClick={toggleContentSidebar}
-              >
-                <ChevronRight className={cn(
-                  "h-4 w-4 transition-transform duration-200",
-                  !sidebarCollapsed && "rotate-180"
-                )} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-
-        {!sidebarCollapsed && (
-          <>
-            {/* Stats */}
-            <div className="p-3 border-b grid grid-cols-2 gap-2 text-xs">
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Table2 className="w-3.5 h-3.5" />
-                <span>{stats.tables} tables</span>
-              </div>
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <Link2 className="w-3.5 h-3.5" />
-                <span>{stats.relationships} relations</span>
-              </div>
-            </div>
-
-            {/* Search */}
-            <div className="p-3 border-b">
-              <div className="relative">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search tables..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 h-9"
-                />
-              </div>
-            </div>
-
-            {/* Tables List */}
-            <ScrollArea className="flex-1">
-              <div className="p-2">
-                {filteredTables.map((table) => (
-                  <button
-                    key={table.name}
-                    onClick={() => focusTable(table.name)}
-                    className={cn(
-                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
-                      "hover:bg-muted/50 flex items-center justify-between group",
-                      selectedTable === table.name && "bg-muted"
-                    )}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Table2 className="w-4 h-4 text-muted-foreground shrink-0" />
-                      <span className="truncate">{table.name}</span>
-                    </div>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span>{table.columns.length}</span>
-                      {table.foreignKeys.length > 0 && (
-                        <Link2 className="w-3 h-3 text-purple-400" />
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </ScrollArea>
-          </>
-        )}
-
-        {/* Collapsed state - show table icons */}
-        {sidebarCollapsed && (
-          <ScrollArea className="flex-1">
-            <div className="p-1.5 space-y-1">
-              {filteredTables.map((table) => (
-                <Tooltip key={table.name} delayDuration={0}>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => focusTable(table.name)}
-                      className={cn(
-                        "w-full flex items-center justify-center p-2 rounded-md transition-colors",
-                        "hover:bg-muted/50",
-                        selectedTable === table.name && "bg-muted"
-                      )}
-                    >
-                      <Table2 className={cn(
-                        "w-4 h-4",
-                        selectedTable === table.name ? "text-primary" : "text-muted-foreground"
-                      )} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    {table.name} ({table.columns.length} cols)
-                  </TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-          </ScrollArea>
-        )}
-      </div>
+    <div className="h-full flex animate-fade-in">
+      <Sidebar 
+        title="Schema"
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleContentSidebar}
+        items={sidebarItems}
+        selectedId={selectedTable}
+        stats={statsContent}
+        searchPlaceholder="Search tables..."
+      />
 
       {/* Main Canvas */}
       <div className="flex-1 relative">
@@ -467,6 +432,7 @@ const SchemaVisualizer = ({
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
+          onInit={setReactFlowInstance}
           nodeTypes={nodeTypes}
           connectionMode={ConnectionMode.Loose}
           fitView
@@ -525,11 +491,11 @@ const SchemaVisualizer = ({
                 <span>Primary Key</span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Link2 className="w-3 h-3 text-purple-400" />
+                <Link2 className="w-3 h-3 text-amber-400" />
                 <span>Foreign Key</span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
-                <div className="w-3 h-0.5 bg-purple-400" />
+                <div className="w-3 h-0.5 bg-white" />
                 <span>Relationship</span>
               </div>
             </div>
@@ -538,6 +504,6 @@ const SchemaVisualizer = ({
       </div>
     </div>
   );
-};
+});
 
 export default SchemaVisualizer;

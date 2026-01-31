@@ -175,17 +175,17 @@
 }
 
 .react-flow__edge-path {
-  stroke: #a855f7 !important;
+  stroke: #ffffff !important;
   stroke-width: 2px !important;
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #c084fc !important;
+  stroke: #fbbf24 !important;
   stroke-width: 3px !important;
 }
 
 .react-flow__edge-text {
-  fill: #a855f7 !important;
+  fill: #ffffff !important;
 }
 
 .react-flow__edge-textbg {

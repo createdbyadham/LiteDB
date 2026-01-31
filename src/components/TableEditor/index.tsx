@@ -20,7 +20,7 @@ interface TableViewProps {
   onUpdateRow?: (oldRow: RowData, newRow: RowData) => Promise<boolean>;
 }
 
-const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableViewProps) => {
+const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableViewProps) => {
   const [filteredRows, setFilteredRows] = useState<RowData[]>([]);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -226,11 +226,11 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
   return (
     <div className="flex flex-col h-full animate-fade-in">
       <div className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex ml-2 items-center justify-between px-4 py-3">
+        <div className="flex items-center justify-between px-4 h-[52px]">
           <div className="flex items-center space-x-2">
-            <Database className="h-5 w-5 text-primary/80" />
-            <h1 className="text-xl font-semibold tracking-tight">{tableName}</h1>
-            <Badge variant="outline" className="ml-2">
+            <Database className="h-4 w-4 text-primary/80" />
+            <h1 className="text-sm font-semibold tracking-tight">{tableName}</h1>
+            <Badge variant="outline" className="ml-2 text-xs font-normal">
               {filteredRows.length} {filteredRows.length === 1 ? 'row' : 'rows'}
             </Badge>
           </div>
@@ -238,7 +238,7 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
-              className="h-10 px-2"
+              className="h-8 px-2 text-xs"
               onClick={async () => {
                 const data = dbService.exportDatabase();
                 console.log('Exporting database data:', data);
@@ -264,16 +264,16 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
                 }
               }}
             >
-              <Save className= "h-4 w-4" />
+              <Save className= "h-3.5 w-3.5 mr-1.5" />
               Save Changes
             </Button>
             <div className="relative w-64">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search table..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8"
+                className="pl-8 h-8 text-xs"
               />
             </div>
           </div>
@@ -371,7 +371,7 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
                       </div>
                     </TableCell>
                     {columns.map((column) => (
-                      <TableCell key={column} className="whitespace-nowrap">
+                      <TableCell key={column} className="whitespace-nowrap pl-[24px]">
                         {formatCellValue(row[column])}
                       </TableCell>
                     ))}
@@ -447,4 +447,4 @@ const TableView = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableV
   );
 };
 
-export default TableView;
+export default TableEditor;

@@ -64,4 +64,4 @@ export function AiQueryDialog({ open, onOpenChange, onQueryGenerated }: AiQueryD
       </DialogContent>
     </Dialog>
   );
-} 
+}
