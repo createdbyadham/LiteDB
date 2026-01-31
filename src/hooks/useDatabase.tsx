@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { dbService, TableInfo, ColumnInfo, RowData } from '@/lib/dbService';
+import { dbService, TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/dbService';
 import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
 
@@ -10,6 +10,8 @@ export interface UseDbReturn {
   loadDatabase: (data: ArrayBuffer | Buffer, filePath?: string) => Promise<boolean>;
   getTableData: (tableName: string) => { columns: string[], rows: RowData[] };
   getTableColumns: (tableName: string) => ColumnInfo[];
+  getForeignKeys: (tableName: string) => ForeignKeyInfo[];
+  getIndexes: (tableName: string) => IndexInfo[];
   executeQuery: (sql: string) => { columns: string[], rows: unknown[][] } | null;
   refreshTables: () => void;
 }
@@ -176,6 +178,22 @@ export function useDatabase(): UseDbReturn {
     return dbService.getTableColumns(tableName);
   };
 
+  const getForeignKeys = (tableName: string) => {
+    if (!isLoaded || !tables.length) {
+      console.log("Attempted to get foreign keys without loaded database");
+      return [];
+    }
+    return dbService.getForeignKeys(tableName);
+  };
+
+  const getIndexes = (tableName: string) => {
+    if (!isLoaded || !tables.length) {
+      console.log("Attempted to get indexes without loaded database");
+      return [];
+    }
+    return dbService.getIndexes(tableName);
+  };
+
   const executeQuery = (sql: string) => {
     if (!isLoaded || !tables.length) {
       console.log("Attempted to execute query without loaded database");
@@ -221,6 +239,8 @@ export function useDatabase(): UseDbReturn {
     loadDatabase,
     getTableData,
     getTableColumns,
+    getForeignKeys,
+    getIndexes,
     executeQuery,
     refreshTables
   };

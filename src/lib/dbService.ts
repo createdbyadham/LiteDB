@@ -14,6 +14,23 @@ export interface ColumnInfo {
   pk: number;
 }
 
+export interface ForeignKeyInfo {
+  id: number;
+  seq: number;
+  table: string;        // Referenced table
+  from: string;         // Column in this table
+  to: string;           // Column in referenced table
+  on_update: string;
+  on_delete: string;
+  match: string;
+}
+
+export interface IndexInfo {
+  name: string;
+  unique: boolean;
+  columns: string[];
+}
+
 export interface RowData {
   [key: string]: unknown;
 }
@@ -246,6 +263,96 @@ class DbService {
       });
       return [];
     }
+  }
+
+  getForeignKeys(tableName: string): ForeignKeyInfo[] {
+    if (!this.db) {
+      return [];
+    }
+    
+    try {
+      const pragmaResult = this.db.exec(`PRAGMA foreign_key_list('${tableName}')`);
+      
+      if (pragmaResult.length === 0 || !pragmaResult[0].values) {
+        return [];
+      }
+      
+      return pragmaResult[0].values.map((row) => ({
+        id: row[0] as number,
+        seq: row[1] as number,
+        table: row[2] as string,
+        from: row[3] as string,
+        to: row[4] as string,
+        on_update: row[5] as string,
+        on_delete: row[6] as string,
+        match: row[7] as string
+      }));
+    } catch (error) {
+      console.error(`Error fetching foreign keys for ${tableName}:`, error);
+      return [];
+    }
+  }
+
+  getIndexes(tableName: string): IndexInfo[] {
+    if (!this.db) {
+      return [];
+    }
+    
+    try {
+      const indexListResult = this.db.exec(`PRAGMA index_list('${tableName}')`);
+      
+      if (indexListResult.length === 0 || !indexListResult[0].values) {
+        return [];
+      }
+      
+      const indexes: IndexInfo[] = [];
+      
+      for (const row of indexListResult[0].values) {
+        const indexName = row[1] as string;
+        const unique = row[2] === 1;
+        
+        // Get columns for this index
+        const indexInfoResult = this.db.exec(`PRAGMA index_info('${indexName}')`);
+        const columns: string[] = [];
+        
+        if (indexInfoResult.length > 0 && indexInfoResult[0].values) {
+          for (const colRow of indexInfoResult[0].values) {
+            columns.push(colRow[2] as string);
+          }
+        }
+        
+        indexes.push({
+          name: indexName,
+          unique,
+          columns
+        });
+      }
+      
+      return indexes;
+    } catch (error) {
+      console.error(`Error fetching indexes for ${tableName}:`, error);
+      return [];
+    }
+  }
+
+  // Get complete schema information for all tables
+  getFullSchema(): { 
+    tables: Array<{
+      name: string;
+      columns: ColumnInfo[];
+      foreignKeys: ForeignKeyInfo[];
+      indexes: IndexInfo[];
+    }>;
+  } {
+    const tables = this.getTables();
+    return {
+      tables: tables.map(table => ({
+        name: table.name,
+        columns: this.getTableColumns(table.name),
+        foreignKeys: this.getForeignKeys(table.name),
+        indexes: this.getIndexes(table.name)
+      }))
+    };
   }
 
   getTableData(tableName: string, limit = 1000, offset = 0): { columns: string[], rows: RowData[] } {

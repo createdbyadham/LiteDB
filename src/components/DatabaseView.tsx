@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import TableView from '@/components/TableView';
 import BatchOperations from '@/components/QueryEditor';
+import SchemaVisualizer from '@/components/SchemaVisualizer';
 import { useDatabase } from '@/hooks/useDatabase';
 import { usePostgres } from '@/hooks/usePostgres';
 import { dbService, RowData, ColumnInfo } from '@/lib/dbService';
 import { pgService } from '@/lib/pgService';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Database, ArrowLeft, Save, Download, Server } from 'lucide-react';
+import { Database, ArrowLeft, Save, Download, Server, GitBranch } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { ExportDialog } from '@/components/ExportDialog';
 import TableSidebar from '@/components/TableSidebar';
@@ -22,9 +23,28 @@ const DatabaseView = () => {
   const [loading, setLoading] = useState(false);
   
   // SQLite hooks
-  const { isLoaded, isLoading, tables: sqliteTables, getTableData: getSqliteTableData, getTableColumns: getSqliteTableColumns, refreshTables: refreshSqliteTables } = useDatabase();
+  const { 
+    isLoaded, 
+    isLoading, 
+    tables: sqliteTables, 
+    getTableData: getSqliteTableData, 
+    getTableColumns: getSqliteTableColumns,
+    getForeignKeys: getSqliteForeignKeys,
+    getIndexes: getSqliteIndexes,
+    refreshTables: refreshSqliteTables 
+  } = useDatabase();
   // PostgreSQL hooks
-  const { isConnected, isConnecting, tables: postgresTables, getTableData: getPostgresTableData, getTableColumns: getPostgresTableColumns, disconnect: disconnectPostgres, refreshTables: refreshPostgresTables } = usePostgres();
+  const { 
+    isConnected, 
+    isConnecting, 
+    tables: postgresTables, 
+    getTableData: getPostgresTableData, 
+    getTableColumns: getPostgresTableColumns,
+    getForeignKeys: getPostgresForeignKeys,
+    getIndexes: getPostgresIndexes,
+    disconnect: disconnectPostgres, 
+    refreshTables: refreshPostgresTables 
+  } = usePostgres();
   
   const navigate = useNavigate();
   
@@ -55,6 +75,22 @@ const DatabaseView = () => {
       return getSqliteTableColumns(tableName);
     }
   }, [isPostgresActive, getPostgresTableColumns, getSqliteTableColumns]);
+
+  const getForeignKeys = useCallback(async (tableName: string) => {
+    if (isPostgresActive) {
+      return await getPostgresForeignKeys(tableName);
+    } else {
+      return getSqliteForeignKeys(tableName);
+    }
+  }, [isPostgresActive, getPostgresForeignKeys, getSqliteForeignKeys]);
+
+  const getIndexes = useCallback(async (tableName: string) => {
+    if (isPostgresActive) {
+      return await getPostgresIndexes(tableName);
+    } else {
+      return getSqliteIndexes(tableName);
+    }
+  }, [isPostgresActive, getPostgresIndexes, getSqliteIndexes]);
 
   // Effect to load table data when a table is selected
   useEffect(() => {
@@ -274,6 +310,10 @@ const DatabaseView = () => {
       <Tabs defaultValue="browse" className="h-[calc(100vh-120px)] flex flex-col">
         <TabsList className="mb-2 sticky top-14 z-40 bg-background">
           <TabsTrigger value="browse">Browse</TabsTrigger>
+          <TabsTrigger value="schema">
+            <GitBranch className="w-4 h-4 mr-1" />
+            Schema
+          </TabsTrigger>
           <TabsTrigger value="query">Batch Operations</TabsTrigger>
         </TabsList>
         
@@ -324,6 +364,16 @@ const DatabaseView = () => {
               )}
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="schema" className="flex-1 overflow-hidden animate-fade-in">
+          <SchemaVisualizer 
+            tables={tables}
+            getTableColumns={getTableColumns}
+            getForeignKeys={getForeignKeys}
+            getIndexes={getIndexes}
+            isPostgres={isPostgresActive}
+          />
         </TabsContent>
         
         <TabsContent value="query" className="flex-1 overflow-hidden">
