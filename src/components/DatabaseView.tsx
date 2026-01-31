@@ -247,6 +247,15 @@ const DatabaseView = () => {
       if (isDeleteOperation(newRow)) {
         const sql = `DELETE FROM ${selectedTable} WHERE ${newRow.primaryKeyColumn} IN (${newRow.rowIds.map(id => `'${id}'`).join(',')})`;
         const result = dbService.executeBatchOperations([sql]);
+        
+        if (!result.success && result.errors.length > 0) {
+          toast({
+            title: "Delete Error",
+            description: result.errors.join('\n'),
+            variant: "destructive"
+          });
+        }
+        
         return result.success;
       } else if (oldRow) {
         return dbService.updateRow(selectedTable, oldRow, newRow as RowData);
