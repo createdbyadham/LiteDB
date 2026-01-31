@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import ReactFlow, {
   Node,
   Edge,
@@ -15,20 +15,17 @@ import 'reactflow/dist/style.css';
 
 import TableNode, { TableNodeData } from './TableNode';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { 
   Database, 
   Search, 
-  Maximize2, 
-  ZoomIn, 
-  ZoomOut, 
   LayoutGrid,
   Table2,
   Link2,
   Key,
-  Box,
   ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -45,10 +42,6 @@ const edgeStyle = {
   strokeWidth: 2,
 };
 
-const selectedEdgeStyle = {
-  stroke: '#a855f7',
-  strokeWidth: 3,
-};
 
 interface SchemaVisualizerProps {
   tables: TableInfo[];
@@ -191,7 +184,6 @@ const SchemaVisualizer = ({
   getTableColumns, 
   getForeignKeys, 
   getIndexes,
-  isPostgres = false 
 }: SchemaVisualizerProps) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -199,18 +191,43 @@ const SchemaVisualizer = ({
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
+
+  // Store functions in refs to avoid dependency issues
+  const getTableColumnsRef = useRef(getTableColumns);
+  const getForeignKeysRef = useRef(getForeignKeys);
+  const getIndexesRef = useRef(getIndexes);
+  
+  getTableColumnsRef.current = getTableColumns;
+  getForeignKeysRef.current = getForeignKeys;
+  getIndexesRef.current = getIndexes;
+
+  // Create a stable table key to detect actual table changes
+  const tableKey = useMemo(() => 
+    tables.map(t => t.name).sort().join(','), 
+    [tables]
+  );
 
   // Load schema data
   useEffect(() => {
+    // Skip if already loaded with the same tables
+    if (hasLoaded && schemaData.length === tables.length) {
+      return;
+    }
+
+    let mounted = true;
+
     const loadSchema = async () => {
+      if (!mounted) return;
       setLoading(true);
+      
       try {
         const schemaPromises = tables.map(async (table) => {
           const [columns, foreignKeys, indexes] = await Promise.all([
-            Promise.resolve(getTableColumns(table.name)),
-            Promise.resolve(getForeignKeys(table.name)),
-            Promise.resolve(getIndexes(table.name)),
+            Promise.resolve(getTableColumnsRef.current(table.name)),
+            Promise.resolve(getForeignKeysRef.current(table.name)),
+            Promise.resolve(getIndexesRef.current(table.name)),
           ]);
           
           return {
@@ -222,7 +239,11 @@ const SchemaVisualizer = ({
         });
         
         const data = await Promise.all(schemaPromises);
+        
+        if (!mounted) return;
+        
         setSchemaData(data);
+        setHasLoaded(true);
         
         // Calculate layout
         const { nodes: newNodes, edges: newEdges } = calculateLayout(data);
@@ -231,7 +252,7 @@ const SchemaVisualizer = ({
       } catch (error) {
         console.error('Error loading schema:', error);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
     
@@ -240,7 +261,11 @@ const SchemaVisualizer = ({
     } else {
       setLoading(false);
     }
-  }, [tables, getTableColumns, getForeignKeys, getIndexes, setNodes, setEdges]);
+    
+    return () => {
+      mounted = false;
+    };
+  }, [tableKey]); // Only depend on tableKey
 
   // Handle node selection
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
@@ -315,29 +340,35 @@ const SchemaVisualizer = ({
       {/* Sidebar */}
       <div 
         className={cn(
-          "h-full bg-background border-r transition-all duration-300 ease-in-out flex flex-col",
+          "h-full bg-background border-r transition-all duration-200 ease-out flex flex-col shrink-0",
           sidebarCollapsed ? "w-12" : "w-64"
         )}
       >
         {/* Sidebar Header */}
         <div className="flex items-center justify-between p-3 border-b">
           {!sidebarCollapsed && (
-            <div className="flex items-center space-x-2">
-              <Box className="w-5 h-5 text-primary" />
-              <h2 className="text-lg font-semibold tracking-tight">Schema</h2>
-            </div>
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Schema
+            </span>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("text-muted-foreground", sidebarCollapsed && "mx-auto")}
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          >
-            <ChevronRight className={cn(
-              "h-4 w-4 transition-transform",
-              !sidebarCollapsed && "rotate-180"
-            )} />
-          </Button>
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-7 w-7 text-muted-foreground", sidebarCollapsed && "mx-auto")}
+                onClick={toggleContentSidebar}
+              >
+                <ChevronRight className={cn(
+                  "h-4 w-4 transition-transform duration-200",
+                  !sidebarCollapsed && "rotate-180"
+                )} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            </TooltipContent>
+          </Tooltip>
         </div>
 
         {!sidebarCollapsed && (
@@ -395,6 +426,36 @@ const SchemaVisualizer = ({
               </div>
             </ScrollArea>
           </>
+        )}
+
+        {/* Collapsed state - show table icons */}
+        {sidebarCollapsed && (
+          <ScrollArea className="flex-1">
+            <div className="p-1.5 space-y-1">
+              {filteredTables.map((table) => (
+                <Tooltip key={table.name} delayDuration={0}>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => focusTable(table.name)}
+                      className={cn(
+                        "w-full flex items-center justify-center p-2 rounded-md transition-colors",
+                        "hover:bg-muted/50",
+                        selectedTable === table.name && "bg-muted"
+                      )}
+                    >
+                      <Table2 className={cn(
+                        "w-4 h-4",
+                        selectedTable === table.name ? "text-primary" : "text-muted-foreground"
+                      )} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {table.name} ({table.columns.length} cols)
+                  </TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
+          </ScrollArea>
         )}
       </div>
 

@@ -1,26 +1,44 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import TableView from '@/components/TableView';
 import BatchOperations from '@/components/QueryEditor';
 import SchemaVisualizer from '@/components/SchemaVisualizer';
+import AppLayout from '@/components/AppLayout';
+import StatusBar from '@/components/StatusBar';
 import { useDatabase } from '@/hooks/useDatabase';
 import { usePostgres } from '@/hooks/usePostgres';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { dbService, RowData, ColumnInfo } from '@/lib/dbService';
 import { pgService } from '@/lib/pgService';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Database, ArrowLeft, Save, Download, Server, GitBranch } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { 
+  Database, 
+  Save, 
+  Download, 
+  Server,
+  Table2,
+  Search,
+  RefreshCw,
+  ChevronRight,
+} from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { ExportDialog } from '@/components/ExportDialog';
-import TableSidebar from '@/components/TableSidebar';
+import { cn } from '@/lib/utils';
 
 const DatabaseView = () => {
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [tableColumns, setTableColumns] = useState<ColumnInfo[]>([]);
   const [tableData, setTableData] = useState<{ columns: string[], rows: RowData[] }>({ columns: [], rows: [] });
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('browse');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
   
   // SQLite hooks
   const { 
@@ -33,6 +51,7 @@ const DatabaseView = () => {
     getIndexes: getSqliteIndexes,
     refreshTables: refreshSqliteTables 
   } = useDatabase();
+  
   // PostgreSQL hooks
   const { 
     isConnected, 
@@ -59,59 +78,96 @@ const DatabaseView = () => {
   const databaseAvailable = isPostgresActive || isSqliteActive;
   const isLoadingDatabase = isLoading || isConnecting;
 
-  // Memoize the getTableData and getTableColumns functions to prevent infinite loops
-  const getTableData = useCallback(async (tableName: string) => {
-    if (isPostgresActive) {
-      return await getPostgresTableData(tableName);
-    } else {
-      return getSqliteTableData(tableName);
-    }
-  }, [isPostgresActive, getPostgresTableData, getSqliteTableData]);
+  // Get database name
+  const databaseName = isPostgresActive 
+    ? pgService.currentConfig?.database || 'PostgreSQL'
+    : dbService.currentFilePath?.split(/[/\\]/).pop() || 'SQLite';
 
-  const getTableColumns = useCallback(async (tableName: string) => {
-    if (isPostgresActive) {
-      return await getPostgresTableColumns(tableName);
-    } else {
-      return getSqliteTableColumns(tableName);
-    }
-  }, [isPostgresActive, getPostgresTableColumns, getSqliteTableColumns]);
+  // Filter tables based on search
+  const filteredTables = tables.filter(table => 
+    table.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  const getForeignKeys = useCallback(async (tableName: string) => {
-    if (isPostgresActive) {
-      return await getPostgresForeignKeys(tableName);
-    } else {
-      return getSqliteForeignKeys(tableName);
-    }
-  }, [isPostgresActive, getPostgresForeignKeys, getSqliteForeignKeys]);
+  // Store the postgres active state in a ref to avoid dependency issues
+  const isPostgresActiveRef = useRef(isPostgresActive);
+  isPostgresActiveRef.current = isPostgresActive;
 
-  const getIndexes = useCallback(async (tableName: string) => {
-    if (isPostgresActive) {
-      return await getPostgresIndexes(tableName);
+  // Store hook functions in refs to avoid dependency issues
+  const sqliteFuncsRef = useRef({
+    getTableData: getSqliteTableData,
+    getTableColumns: getSqliteTableColumns,
+    getForeignKeys: getSqliteForeignKeys,
+    getIndexes: getSqliteIndexes,
+  });
+  sqliteFuncsRef.current = {
+    getTableData: getSqliteTableData,
+    getTableColumns: getSqliteTableColumns,
+    getForeignKeys: getSqliteForeignKeys,
+    getIndexes: getSqliteIndexes,
+  };
+
+  const postgresFuncsRef = useRef({
+    getTableData: getPostgresTableData,
+    getTableColumns: getPostgresTableColumns,
+    getForeignKeys: getPostgresForeignKeys,
+    getIndexes: getPostgresIndexes,
+  });
+  postgresFuncsRef.current = {
+    getTableData: getPostgresTableData,
+    getTableColumns: getPostgresTableColumns,
+    getForeignKeys: getPostgresForeignKeys,
+    getIndexes: getPostgresIndexes,
+  };
+
+  // Stable function references for schema visualizer
+  const getTableColumnsStable = useCallback((tableName: string) => {
+    if (isPostgresActiveRef.current) {
+      return postgresFuncsRef.current.getTableColumns(tableName);
     } else {
-      return getSqliteIndexes(tableName);
+      return sqliteFuncsRef.current.getTableColumns(tableName);
     }
-  }, [isPostgresActive, getPostgresIndexes, getSqliteIndexes]);
+  }, []);
+
+  const getForeignKeysStable = useCallback((tableName: string) => {
+    if (isPostgresActiveRef.current) {
+      return postgresFuncsRef.current.getForeignKeys(tableName);
+    } else {
+      return sqliteFuncsRef.current.getForeignKeys(tableName);
+    }
+  }, []);
+
+  const getIndexesStable = useCallback((tableName: string) => {
+    if (isPostgresActiveRef.current) {
+      return postgresFuncsRef.current.getIndexes(tableName);
+    } else {
+      return sqliteFuncsRef.current.getIndexes(tableName);
+    }
+  }, []);
 
   // Effect to load table data when a table is selected
   useEffect(() => {
-    // Skip the effect if no table is selected
     if (!selectedTable) return;
     
     let mounted = true;
-    console.log(`Loading data for table: ${selectedTable}`);
 
     const loadTableData = async () => {
       if (mounted) setLoading(true);
       
       try {
-        // Get table columns
-        const columns = await getTableColumns(selectedTable);
+        let columns, data;
+        
+        if (isPostgresActiveRef.current) {
+          [columns, data] = await Promise.all([
+            postgresFuncsRef.current.getTableColumns(selectedTable),
+            postgresFuncsRef.current.getTableData(selectedTable),
+          ]);
+        } else {
+          columns = sqliteFuncsRef.current.getTableColumns(selectedTable);
+          data = sqliteFuncsRef.current.getTableData(selectedTable);
+        }
+        
         if (!mounted) return;
         setTableColumns(columns);
-        
-        // Get table data
-        const data = await getTableData(selectedTable);
-        if (!mounted) return;
         setTableData(data);
       } catch (error) {
         console.error('Error loading table data:', error);
@@ -127,19 +183,14 @@ const DatabaseView = () => {
       }
     };
     
-    // Use requestAnimationFrame to ensure the loading state is applied first
-    const frameId = requestAnimationFrame(() => {
-      loadTableData();
-    });
+    loadTableData();
     
     return () => {
       mounted = false;
-      cancelAnimationFrame(frameId);
     };
-  }, [selectedTable]);  // Only depend on selectedTable, not the functions
+  }, [selectedTable]);
 
   const handleBackClick = () => {
-    // Disconnect PostgreSQL if connected before navigating
     if (isPostgresActive) {
       disconnectPostgres();
     }
@@ -155,10 +206,7 @@ const DatabaseView = () => {
   function isDeleteOperation(value: unknown): value is DeleteOperation {
     if (value === null || typeof value !== 'object') return false;
     const obj = value as Record<string, unknown>;
-    const typeValue = (obj as { type?: unknown }).type;
-    const rowIds = (obj as { rowIds?: unknown }).rowIds;
-    const primaryKeyColumn = (obj as { primaryKeyColumn?: unknown }).primaryKeyColumn;
-    return typeValue === 'delete' && Array.isArray(rowIds) && typeof primaryKeyColumn === 'string';
+    return obj.type === 'delete' && Array.isArray(obj.rowIds) && typeof obj.primaryKeyColumn === 'string';
   }
 
   const handleUpdateRow = async (oldRow: RowData | null, newRow: RowData | DeleteOperation): Promise<boolean> => {
@@ -167,10 +215,8 @@ const DatabaseView = () => {
     if (isPostgresActive) {
       try {
         if (isDeleteOperation(newRow)) {
-          // Handle PostgreSQL delete
           return await pgService.deleteRows(selectedTable, newRow.primaryKeyColumn, newRow.rowIds);
         } else if (oldRow) {
-          // Handle PostgreSQL update
           return await pgService.updateRow(selectedTable, oldRow, newRow as RowData);
         }
         return false;
@@ -183,14 +229,11 @@ const DatabaseView = () => {
         return false;
       }
     } else {
-      // SQLite operations
       if (isDeleteOperation(newRow)) {
-        // Handle SQLite delete
         const sql = `DELETE FROM ${selectedTable} WHERE ${newRow.primaryKeyColumn} IN (${newRow.rowIds.map(id => `'${id}'`).join(',')})`;
         const result = dbService.executeBatchOperations([sql]);
         return result.success;
       } else if (oldRow) {
-        // Handle SQLite update
         return dbService.updateRow(selectedTable, oldRow, newRow as RowData);
       }
       return false;
@@ -199,7 +242,6 @@ const DatabaseView = () => {
 
   const handleSaveDatabase = async () => {
     if (isPostgresActive) {
-      // PostgreSQL databases don't need to be saved locally
       toast({
         title: "Information",
         description: "PostgreSQL databases are saved on the server automatically",
@@ -207,7 +249,6 @@ const DatabaseView = () => {
       return;
     }
     
-    // SQLite save logic
     const data = dbService.exportDatabase();
     if (!data) {
       toast({
@@ -230,6 +271,7 @@ const DatabaseView = () => {
     try {
       const result = await window.electron.saveDatabase(dbService.currentFilePath, data);
       if (result.success) {
+        setLastSaved(new Date());
         toast({
           title: "Success",
           description: "Database saved successfully"
@@ -250,147 +292,310 @@ const DatabaseView = () => {
     }
   };
 
+  const handleRefresh = () => {
+    if (isPostgresActive) {
+      refreshPostgresTables();
+    } else {
+      refreshSqliteTables();
+    }
+    toast({
+      title: "Refreshed",
+      description: "Table list has been refreshed",
+    });
+  };
+
   if (isLoadingDatabase) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center space-y-4 ml-4">
-          <Database className="w-16 h-16 text-muted-foreground/50 mx-auto animate-pulse" />
-          <h2 className="text-xl font-medium">Loading database...</h2>
+      <AppLayout isConnected={false}>
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center space-y-4">
+            <Database className="w-16 h-16 text-muted-foreground/50 mx-auto animate-pulse" />
+            <h2 className="text-xl font-medium">Loading database...</h2>
+          </div>
         </div>
-      </div>
+      </AppLayout>
     );
   }
 
   if (!databaseAvailable) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center space-y-4 ml-4">
-          <Database className="w-16 h-16 text-muted-foreground/50 mx-auto" />
-          <h2 className="text-xl font-medium">No database loaded</h2>
-          <p className="text-muted-foreground">
-            Please load a database file or connect to PostgreSQL to continue
-          </p>
-          <Button onClick={handleBackClick} variant="outline">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Upload
-          </Button>
+      <AppLayout isConnected={false}>
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center space-y-4">
+            <Database className="w-16 h-16 text-muted-foreground/50 mx-auto" />
+            <h2 className="text-xl font-medium">No database loaded</h2>
+            <p className="text-muted-foreground">
+              Please load a database file or connect to PostgreSQL to continue
+            </p>
+            <Button onClick={handleBackClick} variant="outline">
+              Back to Home
+            </Button>
+          </div>
         </div>
-      </div>
+      </AppLayout>
     );
   }
 
   return (
-    <div className="h-screen flex flex-col py-2 animate-fade-in">
-      <div className="flex items-center justify-between mb-4 sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center ml-2">
-          <Button variant="ghost" onClick={handleBackClick}>
-            <ArrowLeft className="h-2 w-2" />
-          </Button>
-          {isPostgresActive && (
-            <div className="ml-4 flex items-center text-sm text-muted-foreground">
-              <Server className="w-4 h-4 mr-1" />
-              <span>PostgreSQL: {pgService.currentConfig?.database}@{pgService.currentConfig?.host}</span>
-            </div>
-          )}
-        </div>
-        <div className="flex gap-2 mr-4">
-          {isSqliteActive && (
-            <Button onClick={handleSaveDatabase} variant="outline">
-              <Save className="mr-2 h-4 w-4" />
-              Save
+    <AppLayout 
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      isConnected={databaseAvailable}
+      connectionType={isPostgresActive ? 'postgres' : 'sqlite'}
+      databaseName={databaseName}
+    >
+      <div className="flex flex-col h-full overflow-hidden">
+        {/* Header */}
+        <header className="h-12 border-b bg-background flex items-center justify-between px-4 shrink-0">
+          <div className="flex items-center gap-3">
+            <h1 className="text-sm font-semibold">
+              {activeTab === 'browse' && 'Table Editor'}
+              {activeTab === 'schema' && 'Schema Visualizer'}
+              {activeTab === 'query' && 'SQL Editor'}
+            </h1>
+            {isPostgresActive && (
+              <Badge variant="outline" className="text-xs font-normal">
+                <Server className="w-3 h-3 mr-1" />
+                {pgService.currentConfig?.host}
+              </Badge>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={handleRefresh}
+              className="h-8"
+            >
+              <RefreshCw className="w-4 h-4" />
             </Button>
-          )}
-          <Button onClick={() => setExportDialogOpen(true)} variant="outline">
-            <Download className="mr-2 h-4 w-4" />
-            Export
-          </Button>
-        </div>
-      </div>
+            {isSqliteActive && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleSaveDatabase}
+                className="h-8"
+              >
+                <Save className="w-4 h-4 mr-1.5" />
+                Save
+              </Button>
+            )}
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setExportDialogOpen(true)}
+              className="h-8"
+            >
+              <Download className="w-4 h-4 mr-1.5" />
+              Export
+            </Button>
+          </div>
+        </header>
 
-      <Tabs defaultValue="browse" className="h-[calc(100vh-120px)] flex flex-col">
-        <TabsList className="mb-2 sticky top-14 z-40 bg-background">
-          <TabsTrigger value="browse">Browse</TabsTrigger>
-          <TabsTrigger value="schema">
-            <GitBranch className="w-4 h-4 mr-1" />
-            Schema
-          </TabsTrigger>
-          <TabsTrigger value="query">Batch Operations</TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="browse" className="flex-1 h-full overflow-hidden animate-fade-in">
-          <div className="flex h-full">
-            <TableSidebar 
-              tables={tables}
-              activeTable={selectedTable}
-              onSelectTable={(tableName) => {
-                if (tableName === selectedTable) return; // Skip if already selected
-                
-                // Reset data first, then set the selected table
-                setTableColumns([]);
-                setTableData({ columns: [], rows: [] });
-                setLoading(true); // Set loading immediately
-                
-                // Use setTimeout to ensure state updates are batched properly
-                setTimeout(() => {
-                  setSelectedTable(tableName);
-                }, 0);
-              }}
-              collapsed={sidebarCollapsed}
-              onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-            />
-            
-            <div className={`flex-1 overflow-hidden`}>
-              {selectedTable ? (
-                <div className="h-full flex flex-col">
-                  {loading ? (
-                    <div className="flex items-center justify-center h-full">
-                      <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+        {/* Main Content Area */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Table Sidebar - Only show in browse mode */}
+          {activeTab === 'browse' && (
+            <aside 
+              className={cn(
+                "h-full bg-background border-r transition-all duration-200 ease-out flex flex-col shrink-0",
+                sidebarCollapsed ? "w-12" : "w-64"
+              )}
+            >
+              {/* Sidebar Header */}
+              <div className="flex items-center justify-between p-3 border-b">
+                {!sidebarCollapsed && (
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Tables
+                  </span>
+                )}
+                <Tooltip delayDuration={0}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn("h-7 w-7 text-muted-foreground", sidebarCollapsed && "mx-auto")}
+                      onClick={toggleContentSidebar}
+                    >
+                      <ChevronRight className={cn(
+                        "h-4 w-4 transition-transform duration-200",
+                        !sidebarCollapsed && "rotate-180"
+                      )} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+
+              {!sidebarCollapsed && (
+                <>
+                  {/* Stats */}
+                  <div className="p-3 border-b grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <Table2 className="w-3.5 h-3.5" />
+                      <span>{tables.length} tables</span>
                     </div>
-                  ) : (
-                    <TableView 
-                      key={selectedTable}
-                      tableName={selectedTable}
-                      columns={tableData.columns}
-                      rows={tableData.rows}
-                      columnInfo={tableColumns}
-                      onUpdateRow={handleUpdateRow}
-                    />
-                  )}
-                </div>
+
+                  </div>
+
+                  {/* Search */}
+                  <div className="p-3 border-b">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search tables..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-8 h-9"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tables List */}
+                  <ScrollArea className="flex-1">
+                    <div className="p-2">
+                      {filteredTables.length > 0 ? (
+                        filteredTables.map((table) => (
+                          <button
+                            key={table.name}
+                            onClick={() => {
+                              if (table.name === selectedTable) return;
+                              setTableColumns([]);
+                              setTableData({ columns: [], rows: [] });
+                              setLoading(true);
+                              setTimeout(() => setSelectedTable(table.name), 0);
+                            }}
+                            className={cn(
+                              "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                              "hover:bg-muted/50 flex items-center justify-between group",
+                              selectedTable === table.name && "bg-muted"
+                            )}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Table2 className="w-4 h-4 text-muted-foreground shrink-0" />
+                              <span className="truncate">{table.name}</span>
+                            </div>
+                            <ChevronRight className={cn(
+                              "w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0",
+                              selectedTable === table.name && "opacity-100"
+                            )} />
+                          </button>
+                        ))
+                      ) : (
+                        <div className="text-center text-muted-foreground text-sm py-8">
+                          {searchQuery ? 'No tables found' : 'No tables in database'}
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </>
+              )}
+
+              {/* Collapsed state - show table icons */}
+              {sidebarCollapsed && (
+                <ScrollArea className="flex-1">
+                  <div className="p-1.5 space-y-1">
+                    {filteredTables.map((table) => (
+                      <Tooltip key={table.name} delayDuration={0}>
+                        <TooltipTrigger asChild>
+                          <button
+                            onClick={() => {
+                              if (table.name === selectedTable) return;
+                              setTableColumns([]);
+                              setTableData({ columns: [], rows: [] });
+                              setLoading(true);
+                              setTimeout(() => setSelectedTable(table.name), 0);
+                            }}
+                            className={cn(
+                              "w-full flex items-center justify-center p-2 rounded-md transition-colors",
+                              "hover:bg-muted/50",
+                              selectedTable === table.name && "bg-muted"
+                            )}
+                          >
+                            <Table2 className={cn(
+                              "w-4 h-4",
+                              selectedTable === table.name ? "text-primary" : "text-muted-foreground"
+                            )} />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          {table.name}
+                        </TooltipContent>
+                      </Tooltip>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </aside>
+          )}
+
+          {/* Content Area */}
+          <div className="flex-1 overflow-hidden">
+            {activeTab === 'browse' && (
+              selectedTable ? (
+                loading ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
+                  </div>
+                ) : (
+                  <TableView 
+                    key={selectedTable}
+                    tableName={selectedTable}
+                    columns={tableData.columns}
+                    rows={tableData.rows}
+                    columnInfo={tableColumns}
+                    onUpdateRow={handleUpdateRow}
+                  />
+                )
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <p>Select a table to view its data</p>
+                  <div className="text-center space-y-2">
+                    <Table2 className="w-12 h-12 mx-auto text-muted-foreground/50" />
+                    <p>Select a table to view its data</p>
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-        </TabsContent>
+              )
+            )}
 
-        <TabsContent value="schema" className="flex-1 overflow-hidden animate-fade-in">
-          <SchemaVisualizer 
-            tables={tables}
-            getTableColumns={getTableColumns}
-            getForeignKeys={getForeignKeys}
-            getIndexes={getIndexes}
-            isPostgres={isPostgresActive}
-          />
-        </TabsContent>
-        
-        <TabsContent value="query" className="flex-1 overflow-hidden">
-          <BatchOperations 
-            isPostgres={isPostgresActive} 
-            refreshTables={isPostgresActive ? refreshPostgresTables : refreshSqliteTables} 
-            onAutosave={handleSaveDatabase}
-          />
-        </TabsContent>
-      </Tabs>
+            {activeTab === 'schema' && (
+              <SchemaVisualizer 
+                tables={tables}
+                getTableColumns={getTableColumnsStable}
+                getForeignKeys={getForeignKeysStable}
+                getIndexes={getIndexesStable}
+                isPostgres={isPostgresActive}
+              />
+            )}
+
+            {activeTab === 'query' && (
+              <BatchOperations 
+                isPostgres={isPostgresActive} 
+                refreshTables={isPostgresActive ? refreshPostgresTables : refreshSqliteTables} 
+                onAutosave={handleSaveDatabase}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Status Bar */}
+        <StatusBar 
+          isConnected={databaseAvailable}
+          connectionType={isPostgresActive ? 'postgres' : 'sqlite'}
+          databaseName={databaseName}
+          tableCount={tables.length}
+          lastSaved={lastSaved}
+        />
+      </div>
 
       <ExportDialog 
         open={exportDialogOpen} 
         onOpenChange={setExportDialogOpen} 
         isPostgres={isPostgresActive}
       />
-    </div>
+    </AppLayout>
   );
 };
 
