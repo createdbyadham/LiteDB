@@ -38,7 +38,7 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
     --sidebar-background: 222.2 84% 4.9%;
     --sidebar-foreground: 210 40% 98%;
@@ -232,4 +232,22 @@
 /* Attribution hiding */
 .react-flow__attribution {
   display: none !important;
+}
+
+/* Sidebar animation utilities */
+.sidebar-transition {
+  transition-property: width, opacity, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
+/* Prevent content flash during sidebar collapse */
+.sidebar-content {
+  opacity: 1;
+  transition: opacity 150ms ease-out;
+}
+
+.sidebar-collapsed .sidebar-content {
+  opacity: 0;
+  pointer-events: none;
 }

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FileUp } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
@@ -8,7 +7,6 @@ import { useDatabase } from '@/hooks/useDatabase';
 import { ElectronFile } from '@/types/electron';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PostgresConnectionForm from '@/components/PostgresConnectionForm';
-import icon from '/titlebaricon2.png';
 
 const UploadView = () => {
   const { loadDatabase } = useDatabase();
@@ -86,7 +84,7 @@ const UploadView = () => {
     }
 
     setIsLoading(true);
-    const unsubscribe = window.electron.openFileDialog(async (filePath: string) => {
+    window.electron.openFileDialog(async (filePath: string) => {
       try {
         console.log('Selected file:', filePath);
         if (!window.electron) {
@@ -135,80 +133,82 @@ const UploadView = () => {
   };
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center p-6 bg-gradient-to-b from-background to-background/70 animate-fade-in">
-      <Card className="w-full max-w-md mx-auto glass animate-scale-in">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto mb-2 w-10 h-10 flex items-center justify-center">
-            <img src={icon} alt="App Icon" className="w-auto h-auto" />
-          </div>
-          <CardTitle className="text-2xl font-semibold tracking-tight">
-            <span className="text-gradient">LiteDB</span>
-          </CardTitle>
-          <CardDescription>
-            Connect to your database to view and edit its content
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Tabs defaultValue="sqlite" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="sqlite">SQLite</TabsTrigger>
-              <TabsTrigger value="postgres">PostgreSQL</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="sqlite" className="space-y-4 mt-4">
-              <div
-                className={`border-2 border-dashed rounded-lg p-8 transition-all duration-200 ease-in-out ${
-                  isDragging 
-                    ? 'border-primary/80 bg-primary/5' 
-                    : 'border-border hover:border-primary/40 hover:bg-primary/5'
-                }`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <div className="flex flex-col items-center justify-center space-y-3 text-center">
-                  <div className="mb-2 p-3 rounded-full bg-primary/10">
-                    <Upload className={`w-6 h-6 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
-                  </div>
-                  <div className="text-sm">
-                    <span className="font-medium">Drag and drop</span> your SQLite database here
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Supports .db, .sqlite, and .sqlite3 files
+    <div className="h-full flex">
+      {/* Main Content */}
+      <main className="flex-1 flex items-center justify-center p-8 bg-gradient-to-br from-background via-background to-muted/20">
+        <Card className="w-full max-w-lg glass animate-scale-in">
+          <CardHeader className="space-y-1 text-center pb-2">
+            <CardTitle className="text-2xl font-semibold tracking-tight">
+              <span className="text-gradient">Connect to Database</span>
+            </CardTitle>
+            <CardDescription>
+              Choose your database type and connect to start exploring
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
+            <Tabs defaultValue="sqlite" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 h-11">
+                <TabsTrigger value="sqlite" className="data-[state=active]:bg-background">
+                  <Upload className="w-4 h-4 mr-2" />
+                  SQLite
+                </TabsTrigger>
+                <TabsTrigger value="postgres" className="data-[state=active]:bg-background">
+                  <FileUp className="w-4 h-4 mr-2" />
+                  PostgreSQL
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="sqlite" className="space-y-4 mt-6">
+                <div
+                  className={`border-2 border-dashed rounded-xl p-10 transition-all duration-200 ease-in-out cursor-pointer ${
+                    isDragging 
+                      ? 'border-primary bg-primary/5 scale-[1.02]' 
+                      : 'border-border hover:border-primary/50 hover:bg-muted/30'
+                  }`}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={handleButtonClick}
+                >
+                  <div className="flex flex-col items-center justify-center space-y-4 text-center">
+                    <div className={`p-4 rounded-full transition-colors ${isDragging ? 'bg-primary/20' : 'bg-muted'}`}>
+                      <Upload className={`w-8 h-8 transition-colors ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                    </div>
+                    <div>
+                      <div className="text-base font-medium mb-1">
+                        Drop your database file here
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        or click to browse
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-1 rounded-full">
+                      .db, .sqlite, .sqlite3
+                    </div>
                   </div>
                 </div>
-              </div>
-              
-              <Button 
-                className="w-full transition-all" 
-                onClick={handleButtonClick}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <div className="flex items-center space-x-2">
-                    <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                    <span>Loading...</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center space-x-2">
-                    <FileUp className="w-4 h-4" />
-                    <span>Browse Files</span>
+                
+                {isLoading && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <div className="animate-spin w-4 h-4 border-2 border-primary border-t-transparent rounded-full" />
+                    <span>Loading database...</span>
                   </div>
                 )}
-              </Button>
-            </TabsContent>
-            
-            <TabsContent value="postgres" className="mt-4">
-              <PostgresConnectionForm onConnectionSuccess={handlePostgresConnect} />
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-        <CardFooter>
-          <div className="text-xs text-center w-full text-muted-foreground">
-            Your data remains local and is not uploaded to any server
-          </div>
-        </CardFooter>
-      </Card>
+              </TabsContent>
+              
+              <TabsContent value="postgres" className="mt-6">
+                <PostgresConnectionForm onConnectionSuccess={handlePostgresConnect} />
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+          <CardFooter className="pt-2">
+            <div className="text-xs text-center w-full text-muted-foreground flex items-center justify-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-emerald-500" />
+              Your data remains local and secure
+            </div>
+          </CardFooter>
+        </Card>
+      </main>
     </div>
   );
 };
