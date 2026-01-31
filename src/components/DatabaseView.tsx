@@ -486,6 +486,10 @@ const DatabaseView = () => {
                 getForeignKeys={getForeignKeysStable}
                 getIndexes={getIndexesStable}
                 isPostgres={isPostgresActive}
+                onEditTable={(tableName) => {
+                  handleTableSelect(tableName);
+                  setActiveTab('browse');
+                }}
               />
             )}
 

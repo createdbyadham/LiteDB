@@ -46,6 +46,7 @@ interface SchemaVisualizerProps {
   getForeignKeys: (tableName: string) => ForeignKeyInfo[] | Promise<ForeignKeyInfo[]>;
   getIndexes: (tableName: string) => IndexInfo[] | Promise<IndexInfo[]>;
   isPostgres?: boolean;
+  onEditTable?: (tableName: string) => void;
 }
 
 export interface SchemaVisualizerRef {
@@ -60,7 +61,7 @@ interface SchemaTable {
 }
 
 // Auto-layout algorithm
-const calculateLayout = (tables: SchemaTable[]): { nodes: Node<TableNodeData>[]; edges: Edge[] } => {
+const calculateLayout = (tables: SchemaTable[], onEditTable?: (name: string) => void): { nodes: Node<TableNodeData>[]; edges: Edge[] } => {
   const nodes: Node<TableNodeData>[] = [];
   const edges: Edge[] = [];
   
@@ -153,6 +154,7 @@ const calculateLayout = (tables: SchemaTable[]): { nodes: Node<TableNodeData>[];
           columns: table.columns,
           foreignKeys: table.foreignKeys,
           indexes: table.indexes,
+          onEdit: onEditTable,
         },
       });
     });
@@ -186,7 +188,8 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
   getForeignKeys, 
   getIndexes,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  isPostgres = false 
+  isPostgres = false,
+  onEditTable
 }, ref) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -250,10 +253,12 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
   const getTableColumnsRef = useRef(getTableColumns);
   const getForeignKeysRef = useRef(getForeignKeys);
   const getIndexesRef = useRef(getIndexes);
+  const onEditTableRef = useRef(onEditTable);
   
   getTableColumnsRef.current = getTableColumns;
   getForeignKeysRef.current = getForeignKeys;
   getIndexesRef.current = getIndexes;
+  onEditTableRef.current = onEditTable;
 
   // Create a stable table key to detect actual table changes
   const tableKey = useMemo(() => 
@@ -298,7 +303,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
         setHasLoaded(true);
         
         // Calculate layout
-        const { nodes: newNodes, edges: newEdges } = calculateLayout(data);
+        const { nodes: newNodes, edges: newEdges } = calculateLayout(data, (name) => onEditTableRef.current?.(name));
         setNodes(newNodes);
         setEdges(newEdges);
       } catch (error) {
@@ -326,7 +331,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
 
   // Handle auto-layout
   const handleAutoLayout = useCallback(() => {
-    const { nodes: newNodes, edges: newEdges } = calculateLayout(schemaData);
+    const { nodes: newNodes, edges: newEdges } = calculateLayout(schemaData, (name) => onEditTableRef.current?.(name));
     setNodes(newNodes);
     setEdges(newEdges);
   }, [schemaData, setNodes, setEdges]);
@@ -336,10 +341,14 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
     setSelectedTable(tableName);
     // Center on the node
     const node = nodes.find(n => n.id === tableName);
-    if (node) {
-      // Nodes will be highlighted by selection
+    if (node && reactFlowInstance) {
+      reactFlowInstance.fitView({
+        nodes: [{ id: tableName }],
+        duration: 800,
+        padding: 0.5,
+      });
     }
-  }, [nodes]);
+  }, [nodes, reactFlowInstance]);
 
   // Count statistics
   const stats = useMemo(() => {
@@ -462,6 +471,8 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
           
           <MiniMap 
             className="!bg-card !border-border"
+            pannable
+            zoomable
             nodeColor={(node) => {
               if (node.id === selectedTable) return 'hsl(var(--primary))';
               return 'hsl(var(--muted))';
