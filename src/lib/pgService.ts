@@ -513,6 +513,11 @@ class PgService {
       return true;
     } catch (error) {
       console.error("Delete rows error:", error);
+      toast({
+        title: "Delete Error",
+        description: error instanceof Error ? error.message : "Failed to delete rows",
+        variant: "destructive"
+      });
       return false;
     }
   }
