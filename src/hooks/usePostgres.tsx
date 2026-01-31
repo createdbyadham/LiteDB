@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { pgService, PgConfig } from '@/lib/pgService';
-import { TableInfo, ColumnInfo, RowData } from '@/lib/dbService';
+import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/dbService';
 import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
 
@@ -11,9 +11,11 @@ export interface UsePgReturn {
   connectToDatabase: (config: PgConfig) => Promise<boolean>;
   getTableData: (tableName: string) => Promise<{ columns: string[], rows: RowData[] }>;
   getTableColumns: (tableName: string) => Promise<ColumnInfo[]>;
+  getForeignKeys: (tableName: string) => Promise<ForeignKeyInfo[]>;
+  getIndexes: (tableName: string) => Promise<IndexInfo[]>;
   executeQuery: (sql: string) => Promise<{ columns: string[], rows: unknown[][] } | null>;
   disconnect: () => void;
-  refreshTables: () => Promise<void>;  // Add this function
+  refreshTables: () => Promise<void>;
 }
 
 export function usePostgres(): UsePgReturn {
@@ -179,6 +181,22 @@ export function usePostgres(): UsePgReturn {
     return pgService.getTableColumns(tableName);
   };
 
+  const getForeignKeys = async (tableName: string) => {
+    if (!isConnected) {
+      console.log("Attempted to get foreign keys without PostgreSQL connection");
+      return [];
+    }
+    return pgService.getForeignKeys(tableName);
+  };
+
+  const getIndexes = async (tableName: string) => {
+    if (!isConnected) {
+      console.log("Attempted to get indexes without PostgreSQL connection");
+      return [];
+    }
+    return pgService.getIndexes(tableName);
+  };
+
   const executeQuery = async (sql: string) => {
     if (!isConnected) {
       console.log("Attempted to execute query without PostgreSQL connection");
@@ -236,8 +254,10 @@ export function usePostgres(): UsePgReturn {
     connectToDatabase,
     getTableData,
     getTableColumns,
+    getForeignKeys,
+    getIndexes,
     executeQuery,
     disconnect,
-    refreshTables  // Add this to the return object
+    refreshTables
   };
 } 

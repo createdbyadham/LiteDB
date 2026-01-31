@@ -1,6 +1,6 @@
 // This service handles PostgreSQL database operations
 import { toast } from "@/hooks/use-toast";
-import { TableInfo, ColumnInfo, RowData } from '@/lib/dbService';
+import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/dbService';
 
 // Define PostgreSQL connection config
 export interface PgConfig {
@@ -217,6 +217,119 @@ class PgService {
       });
       return { columns: [], rows: [] };
     }
+  }
+
+  async getForeignKeys(tableName: string): Promise<ForeignKeyInfo[]> {
+    if (!this.connected) {
+      return [];
+    }
+    
+    try {
+      const result = await window.electron?.executePostgresQuery({
+        query: `
+          SELECT
+            tc.constraint_name,
+            kcu.column_name as from_column,
+            ccu.table_name AS to_table,
+            ccu.column_name AS to_column,
+            rc.update_rule,
+            rc.delete_rule
+          FROM 
+            information_schema.table_constraints AS tc 
+            JOIN information_schema.key_column_usage AS kcu
+              ON tc.constraint_name = kcu.constraint_name
+              AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage AS ccu
+              ON ccu.constraint_name = tc.constraint_name
+              AND ccu.table_schema = tc.table_schema
+            JOIN information_schema.referential_constraints AS rc
+              ON tc.constraint_name = rc.constraint_name
+              AND tc.table_schema = rc.constraint_schema
+          WHERE tc.constraint_type = 'FOREIGN KEY' 
+            AND tc.table_name = '${tableName}'
+            AND tc.table_schema = 'public';
+        `
+      });
+      
+      if (!result || !result.success) {
+        return [];
+      }
+      
+      return result.rows.map((row: any, index: number) => ({
+        id: index,
+        seq: 0,
+        table: row.to_table,
+        from: row.from_column,
+        to: row.to_column,
+        on_update: row.update_rule || 'NO ACTION',
+        on_delete: row.delete_rule || 'NO ACTION',
+        match: 'NONE'
+      }));
+    } catch (error) {
+      console.error(`Error fetching foreign keys for ${tableName}:`, error);
+      return [];
+    }
+  }
+
+  async getIndexes(tableName: string): Promise<IndexInfo[]> {
+    if (!this.connected) {
+      return [];
+    }
+    
+    try {
+      const result = await window.electron?.executePostgresQuery({
+        query: `
+          SELECT
+            i.relname as index_name,
+            ix.indisunique as is_unique,
+            array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns
+          FROM
+            pg_class t
+            JOIN pg_index ix ON t.oid = ix.indrelid
+            JOIN pg_class i ON i.oid = ix.indexrelid
+            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
+          WHERE
+            t.relname = '${tableName}'
+            AND t.relkind = 'r'
+          GROUP BY
+            i.relname, ix.indisunique;
+        `
+      });
+      
+      if (!result || !result.success) {
+        return [];
+      }
+      
+      return result.rows.map((row: any) => ({
+        name: row.index_name,
+        unique: row.is_unique,
+        columns: Array.isArray(row.columns) ? row.columns : [row.columns]
+      }));
+    } catch (error) {
+      console.error(`Error fetching indexes for ${tableName}:`, error);
+      return [];
+    }
+  }
+
+  async getFullSchema(): Promise<{ 
+    tables: Array<{
+      name: string;
+      columns: ColumnInfo[];
+      foreignKeys: ForeignKeyInfo[];
+      indexes: IndexInfo[];
+    }>;
+  }> {
+    const tables = await this.getTables();
+    const schemaPromises = tables.map(async (table) => ({
+      name: table.name,
+      columns: await this.getTableColumns(table.name),
+      foreignKeys: await this.getForeignKeys(table.name),
+      indexes: await this.getIndexes(table.name)
+    }));
+    
+    return {
+      tables: await Promise.all(schemaPromises)
+    };
   }
 
   async executeQuery(sql: string): Promise<{ columns: string[], rows: unknown[][] } | null> {
