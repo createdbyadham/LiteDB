@@ -1,4 +1,4 @@
-import { Minus, Square, X, Copy } from 'lucide-react';
+import { Minus, X, Copy } from 'lucide-react';
 import { Button } from './ui/button';
 import { SettingsDialog } from "./ui/settings-dialog";
 

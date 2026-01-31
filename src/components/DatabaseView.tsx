@@ -1,33 +1,28 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import TableView from '@/components/TableView';
-import BatchOperations from '@/components/QueryEditor';
-import SchemaVisualizer from '@/components/SchemaVisualizer';
+import TableEditor from '@/components/TableEditor';
+import SqlEditor from '@/components/SqlEditor';
+import SchemaVisualizer, { SchemaVisualizerRef } from '@/components/SchemaVisualizer';
 import AppLayout from '@/components/AppLayout';
 import StatusBar from '@/components/StatusBar';
+import { Sidebar, SidebarItem } from '@/components/Sidebar';
 import { useDatabase } from '@/hooks/useDatabase';
 import { usePostgres } from '@/hooks/usePostgres';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { dbService, RowData, ColumnInfo } from '@/lib/dbService';
 import { pgService } from '@/lib/pgService';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
   Database, 
   Save, 
   Download, 
   Server,
   Table2,
-  Search,
   RefreshCw,
-  ChevronRight,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { ExportDialog } from '@/components/ExportDialog';
-import { cn } from '@/lib/utils';
 
 const DatabaseView = () => {
   const [selectedTable, setSelectedTable] = useState<string>('');
@@ -36,7 +31,6 @@ const DatabaseView = () => {
   const [tableData, setTableData] = useState<{ columns: string[], rows: RowData[] }>({ columns: [], rows: [] });
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('browse');
-  const [searchQuery, setSearchQuery] = useState('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
   
@@ -82,11 +76,6 @@ const DatabaseView = () => {
   const databaseName = isPostgresActive 
     ? pgService.currentConfig?.database || 'PostgreSQL'
     : dbService.currentFilePath?.split(/[/\\]/).pop() || 'SQLite';
-
-  // Filter tables based on search
-  const filteredTables = tables.filter(table => 
-    table.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   // Store the postgres active state in a ref to avoid dependency issues
   const isPostgresActiveRef = useRef(isPostgresActive);
@@ -143,6 +132,32 @@ const DatabaseView = () => {
       return sqliteFuncsRef.current.getIndexes(tableName);
     }
   }, []);
+
+  const schemaVisualizerRef = useRef<SchemaVisualizerRef>(null);
+
+  const handleSchemaExport = async (format: 'png' | 'svg') => {
+    if (!schemaVisualizerRef.current) return;
+    
+    try {
+      const dataUrl = await schemaVisualizerRef.current.exportSchema(format);
+      if (!dataUrl) {
+         toast({ title: "Error", description: "Failed to generate schema image", variant: "destructive" });
+         return;
+      }
+      
+      if (window.electron) {
+        const result = await window.electron.exportDatabase(dataUrl, format);
+        if (result.success) {
+           toast({ title: "Success", description: `Schema exported as ${format.toUpperCase()}` });
+        } else if (result.error !== 'Export cancelled') {
+           toast({ title: "Error", description: result.error || "Failed to export schema", variant: "destructive" });
+        }
+      }
+    } catch (error) {
+       console.error(error);
+       toast({ title: "Error", description: "Failed to export schema", variant: "destructive" });
+    }
+  };
 
   // Effect to load table data when a table is selected
   useEffect(() => {
@@ -304,6 +319,32 @@ const DatabaseView = () => {
     });
   };
 
+  const handleTableSelect = (tableName: string) => {
+    if (tableName === selectedTable) return;
+    setTableColumns([]);
+    setTableData({ columns: [], rows: [] });
+    setLoading(true);
+    setTimeout(() => setSelectedTable(tableName), 0);
+  };
+
+  // Prepare sidebar items
+  const sidebarItems: SidebarItem[] = useMemo(() => {
+    return tables.map(table => ({
+      id: table.name,
+      label: table.name,
+      icon: <Table2 />,
+      tooltip: table.name,
+      onClick: () => handleTableSelect(table.name)
+    }));
+  }, [tables, selectedTable]);
+
+  const sidebarStats = (
+    <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
+      <Table2 className="w-3.5 h-3.5" />
+      <span>{tables.length} tables</span>
+    </div>
+  );
+
   if (isLoadingDatabase) {
     return (
       <AppLayout isConnected={false}>
@@ -397,139 +438,16 @@ const DatabaseView = () => {
         <div className="flex-1 flex overflow-hidden">
           {/* Table Sidebar - Only show in browse mode */}
           {activeTab === 'browse' && (
-            <aside 
-              className={cn(
-                "h-full bg-background border-r transition-all duration-200 ease-out flex flex-col shrink-0",
-                sidebarCollapsed ? "w-12" : "w-64"
-              )}
-            >
-              {/* Sidebar Header */}
-              <div className="flex items-center justify-between p-3 border-b">
-                {!sidebarCollapsed && (
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Tables
-                  </span>
-                )}
-                <Tooltip delayDuration={0}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn("h-7 w-7 text-muted-foreground", sidebarCollapsed && "mx-auto")}
-                      onClick={toggleContentSidebar}
-                    >
-                      <ChevronRight className={cn(
-                        "h-4 w-4 transition-transform duration-200",
-                        !sidebarCollapsed && "rotate-180"
-                      )} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    {sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-
-              {!sidebarCollapsed && (
-                <>
-                  {/* Stats */}
-                  <div className="p-3 border-b grid grid-cols-2 gap-2 text-xs">
-                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                      <Table2 className="w-3.5 h-3.5" />
-                      <span>{tables.length} tables</span>
-                    </div>
-
-                  </div>
-
-                  {/* Search */}
-                  <div className="p-3 border-b">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search tables..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-8 h-9"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Tables List */}
-                  <ScrollArea className="flex-1">
-                    <div className="p-2">
-                      {filteredTables.length > 0 ? (
-                        filteredTables.map((table) => (
-                          <button
-                            key={table.name}
-                            onClick={() => {
-                              if (table.name === selectedTable) return;
-                              setTableColumns([]);
-                              setTableData({ columns: [], rows: [] });
-                              setLoading(true);
-                              setTimeout(() => setSelectedTable(table.name), 0);
-                            }}
-                            className={cn(
-                              "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
-                              "hover:bg-muted/50 flex items-center justify-between group",
-                              selectedTable === table.name && "bg-muted"
-                            )}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Table2 className="w-4 h-4 text-muted-foreground shrink-0" />
-                              <span className="truncate">{table.name}</span>
-                            </div>
-                            <ChevronRight className={cn(
-                              "w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0",
-                              selectedTable === table.name && "opacity-100"
-                            )} />
-                          </button>
-                        ))
-                      ) : (
-                        <div className="text-center text-muted-foreground text-sm py-8">
-                          {searchQuery ? 'No tables found' : 'No tables in database'}
-                        </div>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </>
-              )}
-
-              {/* Collapsed state - show table icons */}
-              {sidebarCollapsed && (
-                <ScrollArea className="flex-1">
-                  <div className="p-1.5 space-y-1">
-                    {filteredTables.map((table) => (
-                      <Tooltip key={table.name} delayDuration={0}>
-                        <TooltipTrigger asChild>
-                          <button
-                            onClick={() => {
-                              if (table.name === selectedTable) return;
-                              setTableColumns([]);
-                              setTableData({ columns: [], rows: [] });
-                              setLoading(true);
-                              setTimeout(() => setSelectedTable(table.name), 0);
-                            }}
-                            className={cn(
-                              "w-full flex items-center justify-center p-2 rounded-md transition-colors",
-                              "hover:bg-muted/50",
-                              selectedTable === table.name && "bg-muted"
-                            )}
-                          >
-                            <Table2 className={cn(
-                              "w-4 h-4",
-                              selectedTable === table.name ? "text-primary" : "text-muted-foreground"
-                            )} />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          {table.name}
-                        </TooltipContent>
-                      </Tooltip>
-                    ))}
-                  </div>
-                </ScrollArea>
-              )}
-            </aside>
+            <Sidebar 
+              title="Tables"
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={toggleContentSidebar}
+              items={sidebarItems}
+              selectedId={selectedTable}
+              stats={sidebarStats}
+              searchPlaceholder="Search tables..."
+              className="animate-fade-in"
+            />
           )}
 
           {/* Content Area */}
@@ -541,7 +459,7 @@ const DatabaseView = () => {
                     <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
                   </div>
                 ) : (
-                  <TableView 
+                  <TableEditor 
                     key={selectedTable}
                     tableName={selectedTable}
                     columns={tableData.columns}
@@ -551,7 +469,7 @@ const DatabaseView = () => {
                   />
                 )
               ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
+                <div className="flex items-center justify-center h-full text-muted-foreground animate-fade-in">
                   <div className="text-center space-y-2">
                     <Table2 className="w-12 h-12 mx-auto text-muted-foreground/50" />
                     <p>Select a table to view its data</p>
@@ -562,6 +480,7 @@ const DatabaseView = () => {
 
             {activeTab === 'schema' && (
               <SchemaVisualizer 
+                ref={schemaVisualizerRef}
                 tables={tables}
                 getTableColumns={getTableColumnsStable}
                 getForeignKeys={getForeignKeysStable}
@@ -571,7 +490,7 @@ const DatabaseView = () => {
             )}
 
             {activeTab === 'query' && (
-              <BatchOperations 
+              <SqlEditor 
                 isPostgres={isPostgresActive} 
                 refreshTables={isPostgresActive ? refreshPostgresTables : refreshSqliteTables} 
                 onAutosave={handleSaveDatabase}
@@ -594,6 +513,8 @@ const DatabaseView = () => {
         open={exportDialogOpen} 
         onOpenChange={setExportDialogOpen} 
         isPostgres={isPostgresActive}
+        mode={activeTab === 'schema' ? 'schema' : 'data'}
+        onExportSchema={handleSchemaExport}
       />
     </AppLayout>
   );

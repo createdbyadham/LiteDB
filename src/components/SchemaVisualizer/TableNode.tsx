@@ -25,13 +25,13 @@ const getColumnIcon = (
     return (
       <div className="flex items-center gap-1">
         <Key className="w-3 h-3 text-amber-400" />
-        {isForeignKey && <Link2 className="w-3 h-3 text-purple-400" />}
+        {isForeignKey && <Link2 className="w-3 h-3 text-amber-400" />}
       </div>
     );
   }
   
   if (isForeignKey) {
-    return <Link2 className="w-3 h-3 text-purple-400" />;
+    return <Link2 className="w-3 h-3 text-amber-400" />;
   }
   
   if (isUnique) {
@@ -139,7 +139,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
                   type="source"
                   position={Position.Right}
                   id={`${name}-${column.name}-source`}
-                  className="!w-2 !h-2 !bg-purple-400 !border-purple-500"
+                  className="!w-2 !h-2 !bg-amber-400 !border-amber-500"
                   style={{ right: -4 }}
                 />
               )}

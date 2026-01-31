@@ -187,9 +187,10 @@ electron_1.ipcMain.handle('export-database', async (_event, data, format) => {
         console.log('Received export request:', { format, dataLength: data.length });
         // Define file extension based on format
         const fileExtension = format.toLowerCase();
+        const isImage = ['png', 'svg', 'jpg', 'jpeg'].includes(fileExtension);
         // Show save dialog
         const result = await electron_1.dialog.showSaveDialog({
-            title: 'Export Database',
+            title: isImage ? 'Export Schema Image' : 'Export Database',
             defaultPath: `export.${fileExtension}`,
             filters: [
                 { name: format.toUpperCase(), extensions: [fileExtension] },
@@ -204,7 +205,35 @@ electron_1.ipcMain.handle('export-database', async (_event, data, format) => {
         await fs.promises.mkdir(directory, { recursive: true });
         // Write the file
         console.log('Writing file to:', result.filePath);
-        await fs.promises.writeFile(result.filePath, data);
+        if (isImage && data.startsWith('data:')) {
+            if (data.indexOf(';base64,') !== -1) {
+                // Base64 encoded (PNG, JPG, etc.)
+                const base64Data = data.replace(/^data:image\/\w+;base64,/, '');
+                const buffer = Buffer.from(base64Data, 'base64');
+                await fs.promises.writeFile(result.filePath, buffer);
+            }
+            else {
+                // URL encoded (SVG)
+                const commaIndex = data.indexOf(',');
+                if (commaIndex !== -1) {
+                    const encodedData = data.substring(commaIndex + 1);
+                    try {
+                        const decodedData = decodeURIComponent(encodedData);
+                        await fs.promises.writeFile(result.filePath, decodedData);
+                    }
+                    catch (e) {
+                        console.error('Failed to decode URI component, writing raw data', e);
+                        await fs.promises.writeFile(result.filePath, encodedData);
+                    }
+                }
+                else {
+                    await fs.promises.writeFile(result.filePath, data);
+                }
+            }
+        }
+        else {
+            await fs.promises.writeFile(result.filePath, data);
+        }
         console.log('File exported successfully');
         return { success: true, filePath: result.filePath };
     }

@@ -16,13 +16,13 @@ import { Input } from '@/components/ui/input';
 import { AiQueryDialog } from './AiQueryDialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
-interface BatchOperationsProps {
+interface SqlEditorProps {
   isPostgres?: boolean;
-  refreshTables?: () => Promise<void> | void;  // Add this prop
-  onAutosave?: () => Promise<void> | void;     // New prop for autosave
+  refreshTables?: () => Promise<void> | void;
+  onAutosave?: () => Promise<void> | void;
 }
 
-const BatchOperations = ({ isPostgres = false, refreshTables, onAutosave }: BatchOperationsProps) => {
+const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorProps) => {
   const [sqlScript, setSqlScript] = useState('');
   const [useTransaction, setUseTransaction] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -644,4 +644,4 @@ const BatchOperations = ({ isPostgres = false, refreshTables, onAutosave }: Batc
   );
 };
 
-export default BatchOperations; 
+export default SqlEditor;

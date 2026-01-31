@@ -7,37 +7,52 @@ import { toast } from '@/hooks/use-toast';
 import { dbService } from '@/lib/dbService';
 import { usePostgres } from '@/hooks/usePostgres';
 
-type ExportFormat = 'csv' | 'json' | 'xlsx';
+type ExportFormat = 'csv' | 'json' | 'xlsx' | 'png' | 'svg';
 
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isPostgres?: boolean;
+  mode?: 'data' | 'schema';
+  onExportSchema?: (format: 'png' | 'svg') => Promise<void>;
 }
 
-export function ExportDialog({ open, onOpenChange, isPostgres = false }: ExportDialogProps) {
-  const [format, setFormat] = useState<ExportFormat>('csv');
+export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'data', onExportSchema }: ExportDialogProps) {
+  const [format, setFormat] = useState<ExportFormat>(mode === 'schema' ? 'png' : 'csv');
   const [isExporting, setIsExporting] = useState(false);
   const [exportableTables, setExportableTables] = useState<string[]>([]);
   const [selectedTable, setSelectedTable] = useState<string>('');
   
   const { tables: postgresTables, executeQuery: executePgQuery } = usePostgres();
   
+  // Reset format when mode changes
+  useEffect(() => {
+    setFormat(mode === 'schema' ? 'png' : 'csv');
+  }, [mode]);
+
   // Fetch available tables when dialog opens
   useEffect(() => {
-    if (open && isPostgres && postgresTables.length > 0) {
+    if (open && isPostgres && mode === 'data' && postgresTables.length > 0) {
       const tableNames = postgresTables.map(t => t.name);
       setExportableTables(tableNames);
       if (tableNames.length > 0 && !selectedTable) {
         setSelectedTable(tableNames[0]);
       }
     }
-  }, [open, isPostgres, postgresTables]);
+  }, [open, isPostgres, postgresTables, mode]);
 
   const handleExport = async () => {
     try {
       setIsExporting(true);
       
+      if (mode === 'schema') {
+        if (onExportSchema) {
+          await onExportSchema(format as 'png' | 'svg');
+          onOpenChange(false);
+        }
+        return;
+      }
+
       let exportData = '';  // Initialize with empty string
       let exportFormat = format;
       
@@ -154,10 +169,10 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false }: ExportD
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Export {isPostgres ? 'Table' : 'Database'}</DialogTitle>
+          <DialogTitle>Export {mode === 'schema' ? 'Schema' : (isPostgres ? 'Table' : 'Database')}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-4">
-          {isPostgres && (
+          {mode === 'data' && isPostgres && (
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="table" className="text-right">
                 Table
@@ -190,9 +205,18 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false }: ExportD
                 <SelectValue placeholder="Select format" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="csv">CSV</SelectItem>
-                <SelectItem value="json">JSON</SelectItem>
-                {!isPostgres && <SelectItem value="xlsx">Excel</SelectItem>}
+                {mode === 'data' ? (
+                  <>
+                    <SelectItem value="csv">CSV</SelectItem>
+                    <SelectItem value="json">JSON</SelectItem>
+                    {!isPostgres && <SelectItem value="xlsx">Excel</SelectItem>}
+                  </>
+                ) : (
+                  <>
+                    <SelectItem value="png">PNG Image</SelectItem>
+                    <SelectItem value="svg">SVG Image</SelectItem>
+                  </>
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -201,7 +225,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false }: ExportD
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleExport} disabled={isExporting || (isPostgres && !selectedTable)}>
+          <Button onClick={handleExport} disabled={isExporting || (mode === 'data' && isPostgres && !selectedTable)}>
             {isExporting ? 'Exporting...' : 'Export'}
           </Button>
         </DialogFooter>
