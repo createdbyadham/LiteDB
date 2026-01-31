@@ -8,10 +8,14 @@ A modern, fast, and user-friendly database viewer/editor built with React and El
 [![Watch Demo](https://img.shields.io/badge/Watch-Demo-red?style=for-the-badge&logo=y)](https://www.linkedin.com/feed/update/urn:li:activity:7377312579544563712/?updateEntityUrn=urn%3Ali%3Afs_feedUpdate%3A%28V2%2Curn%3Ali%3Aactivity%3A7377312579544563712%29)
 
 </div>
+
 ![LiteDB](./Litedb.png)
 
 ## Features
 
+- **Schema Visualization**: Visualize your database structure, relationships, and foreign keys in an interactive diagram.
+  - **Auto-Layout**: Automatically arranges tables to minimize crossing lines.
+  - **Export**: Save your schema diagram as **PNG or SVG** for documentation.
 - **Edit Support**: View and edit database records directly
 - **Advanced Search**: Filter and search through your data
 - **Real-time Updates**: Changes reflect immediately
@@ -21,8 +25,15 @@ A modern, fast, and user-friendly database viewer/editor built with React and El
 - **SQL Script Management**: Save and reuse your SQL scripts
 - **Dual Database Support**: Works with SQLite and PostgreSQL
 - **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries (supports OpenAI, GitHub, and Azure providers), Schema is injected into the LLM upon initialization and refresh
-- **Autosave & Autorefresh**: Automatically save and refresh after executing queries
-- **Export Query Results**: Export data to **CSV, Excel, or JSON**
+- **Autosave & Export**: Automatically save changes and export query results to **CSV, Excel, or JSON**.
+
+## Schema Visualization
+
+LiteDB now includes a powerful **Entity Relationship Diagram (ERD)** generator:
+1. **Interactive Graph**: Drag and drop tables, zoom in/out, and explore relationships.
+2. **Visual Foreign Keys**: Lines connect Foreign Keys (Source) to Primary Keys (Target) automatically.
+3. **Key Indicators**: Visual icons for Primary Keys (🔑), Foreign Keys (🔗), and Unique constraints (#).
+4. **Export Ready**: One-click export to high-quality images for your technical documentation.
 
 ## AI Architecture (Text-to-SQL)
 
