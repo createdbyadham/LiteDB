@@ -1,7 +1,7 @@
 {
   "name": "litedb",
   "private": true,
-  "version": "1.5.0",
+  "version": "2.0.0",
   "main": "dist-electron/main.js",
   "description": "LiteDB - A simple and lightweight database viewer/editor for your projects",
   "author": "Adham Ehab",
