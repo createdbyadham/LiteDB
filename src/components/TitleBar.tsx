@@ -16,7 +16,7 @@ const TitleBar = () => {
   };
 
   return (
-    <div className="h-8 flex items-center justify-between bg-sidebar border-b border-sidebar-border select-none shrink-0">
+    <div className="h-8 flex items-center justify-between bg-[#020817] border-b border-border/40 select-none shrink-0 z-50">
       {/* Draggable area */}
       <div className="flex-1 app-drag-handle h-full flex items-center">
         {/* Empty draggable area */}

@@ -23,7 +23,8 @@ import {
   LayoutGrid,
   Link2,
   Key,
-  Table2
+  Table2,
+  TableOfContents
 } from 'lucide-react';
 import { ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo } from '@/lib/sqliteService';
 import { Sidebar, SidebarItem } from '@/components/Sidebar';
@@ -369,7 +370,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
     return schemaData.map(table => ({
       id: table.name,
       label: table.name,
-      icon: <Table2 />,
+      icon: <TableOfContents />,
       tooltip: `${table.name} (${table.columns.length} columns)`,
       extra: (
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
