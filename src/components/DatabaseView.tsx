@@ -6,17 +6,17 @@ import SchemaVisualizer, { SchemaVisualizerRef } from '@/components/SchemaVisual
 import AppLayout from '@/components/AppLayout';
 import StatusBar from '@/components/StatusBar';
 import { Sidebar, SidebarItem } from '@/components/Sidebar';
-import { useDatabase } from '@/hooks/useDatabase';
+import { useSqlite } from '@/hooks/useSqlite';
 import { usePostgres } from '@/hooks/usePostgres';
 import { useSidebar } from '@/contexts/SidebarContext';
-import { dbService, RowData, ColumnInfo } from '@/lib/dbService';
+import { sqliteService, RowData, ColumnInfo } from '@/lib/sqliteService';
 import { pgService } from '@/lib/pgService';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Database, 
-  Save, 
-  Download, 
+import {
+  Database,
+  Save,
+  Download,
   Server,
   Table2,
   RefreshCw,
@@ -33,49 +33,49 @@ const DatabaseView = () => {
   const [activeTab, setActiveTab] = useState<string>('browse');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
-  
+
   // SQLite hooks
-  const { 
-    isLoaded, 
-    isLoading, 
-    tables: sqliteTables, 
-    getTableData: getSqliteTableData, 
+  const {
+    isLoaded,
+    isLoading,
+    tables: sqliteTables,
+    getTableData: getSqliteTableData,
     getTableColumns: getSqliteTableColumns,
     getForeignKeys: getSqliteForeignKeys,
     getIndexes: getSqliteIndexes,
-    refreshTables: refreshSqliteTables 
-  } = useDatabase();
-  
+    refreshTables: refreshSqliteTables
+  } = useSqlite();
+
   // PostgreSQL hooks
-  const { 
-    isConnected, 
-    isConnecting, 
-    tables: postgresTables, 
-    getTableData: getPostgresTableData, 
+  const {
+    isConnected,
+    isConnecting,
+    tables: postgresTables,
+    getTableData: getPostgresTableData,
     getTableColumns: getPostgresTableColumns,
     getForeignKeys: getPostgresForeignKeys,
     getIndexes: getPostgresIndexes,
-    disconnect: disconnectPostgres, 
-    refreshTables: refreshPostgresTables 
+    disconnect: disconnectPostgres,
+    refreshTables: refreshPostgresTables
   } = usePostgres();
-  
+
   const navigate = useNavigate();
-  
+
   // Determine which database type is active
   const isPostgresActive = isConnected;
   const isSqliteActive = isLoaded && !isPostgresActive;
-  
+
   // Combined tables from active source
   const tables = isPostgresActive ? postgresTables : sqliteTables;
-  
+
   // Check if any database is available
   const databaseAvailable = isPostgresActive || isSqliteActive;
   const isLoadingDatabase = isLoading || isConnecting;
 
   // Get database name
-  const databaseName = isPostgresActive 
+  const databaseName = isPostgresActive
     ? pgService.currentConfig?.database || 'PostgreSQL'
-    : dbService.currentFilePath?.split(/[/\\]/).pop() || 'SQLite';
+    : sqliteService.currentFilePath?.split(/[/\\]/).pop() || 'SQLite';
 
   // Store the postgres active state in a ref to avoid dependency issues
   const isPostgresActiveRef = useRef(isPostgresActive);
@@ -137,40 +137,40 @@ const DatabaseView = () => {
 
   const handleSchemaExport = async (format: 'png' | 'svg') => {
     if (!schemaVisualizerRef.current) return;
-    
+
     try {
       const dataUrl = await schemaVisualizerRef.current.exportSchema(format);
       if (!dataUrl) {
-         toast({ title: "Error", description: "Failed to generate schema image", variant: "destructive" });
-         return;
+        toast({ title: "Error", description: "Failed to generate schema image", variant: "destructive" });
+        return;
       }
-      
+
       if (window.electron) {
         const result = await window.electron.exportDatabase(dataUrl, format);
         if (result.success) {
-           toast({ title: "Success", description: `Schema exported as ${format.toUpperCase()}` });
+          toast({ title: "Success", description: `Schema exported as ${format.toUpperCase()}` });
         } else if (result.error !== 'Export cancelled') {
-           toast({ title: "Error", description: result.error || "Failed to export schema", variant: "destructive" });
+          toast({ title: "Error", description: result.error || "Failed to export schema", variant: "destructive" });
         }
       }
     } catch (error) {
-       console.error(error);
-       toast({ title: "Error", description: "Failed to export schema", variant: "destructive" });
+      console.error(error);
+      toast({ title: "Error", description: "Failed to export schema", variant: "destructive" });
     }
   };
 
   // Effect to load table data when a table is selected
   useEffect(() => {
     if (!selectedTable) return;
-    
+
     let mounted = true;
 
     const loadTableData = async () => {
       if (mounted) setLoading(true);
-      
+
       try {
         let columns, data;
-        
+
         if (isPostgresActiveRef.current) {
           [columns, data] = await Promise.all([
             postgresFuncsRef.current.getTableColumns(selectedTable),
@@ -180,7 +180,7 @@ const DatabaseView = () => {
           columns = sqliteFuncsRef.current.getTableColumns(selectedTable);
           data = sqliteFuncsRef.current.getTableData(selectedTable);
         }
-        
+
         if (!mounted) return;
         setTableColumns(columns);
         setTableData(data);
@@ -197,9 +197,9 @@ const DatabaseView = () => {
         if (mounted) setLoading(false);
       }
     };
-    
+
     loadTableData();
-    
+
     return () => {
       mounted = false;
     };
@@ -226,7 +226,7 @@ const DatabaseView = () => {
 
   const handleUpdateRow = async (oldRow: RowData | null, newRow: RowData | DeleteOperation): Promise<boolean> => {
     if (!selectedTable) return false;
-    
+
     if (isPostgresActive) {
       try {
         if (isDeleteOperation(newRow)) {
@@ -246,8 +246,8 @@ const DatabaseView = () => {
     } else {
       if (isDeleteOperation(newRow)) {
         const sql = `DELETE FROM ${selectedTable} WHERE ${newRow.primaryKeyColumn} IN (${newRow.rowIds.map(id => `'${id}'`).join(',')})`;
-        const result = dbService.executeBatchOperations([sql]);
-        
+        const result = sqliteService.executeBatchOperations([sql]);
+
         if (!result.success && result.errors.length > 0) {
           toast({
             title: "Delete Error",
@@ -255,10 +255,10 @@ const DatabaseView = () => {
             variant: "destructive"
           });
         }
-        
+
         return result.success;
       } else if (oldRow) {
-        return dbService.updateRow(selectedTable, oldRow, newRow as RowData);
+        return sqliteService.updateRow(selectedTable, oldRow, newRow as RowData);
       }
       return false;
     }
@@ -272,8 +272,8 @@ const DatabaseView = () => {
       });
       return;
     }
-    
-    const data = dbService.exportDatabase();
+
+    const data = sqliteService.exportDatabase();
     if (!data) {
       toast({
         title: "Error",
@@ -283,7 +283,7 @@ const DatabaseView = () => {
       return;
     }
 
-    if (!dbService.currentFilePath || !window.electron) {
+    if (!sqliteService.currentFilePath || !window.electron) {
       toast({
         title: "Error",
         description: "No database file loaded. Please load a database file first.",
@@ -293,7 +293,7 @@ const DatabaseView = () => {
     }
 
     try {
-      const result = await window.electron.saveDatabase(dbService.currentFilePath, data);
+      const result = await window.electron.saveDatabase(sqliteService.currentFilePath, data);
       if (result.success) {
         setLastSaved(new Date());
         toast({
@@ -387,7 +387,7 @@ const DatabaseView = () => {
   }
 
   return (
-    <AppLayout 
+    <AppLayout
       activeTab={activeTab}
       onTabChange={setActiveTab}
       isConnected={databaseAvailable}
@@ -410,10 +410,10 @@ const DatabaseView = () => {
               </Badge>
             )}
           </div>
-          
+
           <div className="flex items-center gap-2">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="sm"
               onClick={handleRefresh}
               className="h-8"
@@ -421,8 +421,8 @@ const DatabaseView = () => {
               <RefreshCw className="w-4 h-4" />
             </Button>
             {isSqliteActive && (
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 size="sm"
                 onClick={handleSaveDatabase}
                 className="h-8"
@@ -431,8 +431,8 @@ const DatabaseView = () => {
                 Save
               </Button>
             )}
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="sm"
               onClick={() => setExportDialogOpen(true)}
               className="h-8"
@@ -447,7 +447,7 @@ const DatabaseView = () => {
         <div className="flex-1 flex overflow-hidden">
           {/* Table Sidebar - Only show in browse mode */}
           {activeTab === 'browse' && (
-            <Sidebar 
+            <Sidebar
               title="Tables"
               collapsed={sidebarCollapsed}
               onToggleCollapse={toggleContentSidebar}
@@ -468,7 +468,7 @@ const DatabaseView = () => {
                     <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
                   </div>
                 ) : (
-                  <TableEditor 
+                  <TableEditor
                     key={selectedTable}
                     tableName={selectedTable}
                     columns={tableData.columns}
@@ -488,7 +488,7 @@ const DatabaseView = () => {
             )}
 
             {activeTab === 'schema' && (
-              <SchemaVisualizer 
+              <SchemaVisualizer
                 ref={schemaVisualizerRef}
                 tables={tables}
                 getTableColumns={getTableColumnsStable}
@@ -503,9 +503,9 @@ const DatabaseView = () => {
             )}
 
             {activeTab === 'query' && (
-              <SqlEditor 
-                isPostgres={isPostgresActive} 
-                refreshTables={isPostgresActive ? refreshPostgresTables : refreshSqliteTables} 
+              <SqlEditor
+                isPostgres={isPostgresActive}
+                refreshTables={isPostgresActive ? refreshPostgresTables : refreshSqliteTables}
                 onAutosave={handleSaveDatabase}
               />
             )}
@@ -513,7 +513,7 @@ const DatabaseView = () => {
         </div>
 
         {/* Status Bar */}
-        <StatusBar 
+        <StatusBar
           isConnected={databaseAvailable}
           connectionType={isPostgresActive ? 'postgres' : 'sqlite'}
           databaseName={databaseName}
@@ -522,9 +522,9 @@ const DatabaseView = () => {
         />
       </div>
 
-      <ExportDialog 
-        open={exportDialogOpen} 
-        onOpenChange={setExportDialogOpen} 
+      <ExportDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
         isPostgres={isPostgresActive}
         mode={activeTab === 'schema' ? 'schema' : 'data'}
         onExportSchema={handleSchemaExport}

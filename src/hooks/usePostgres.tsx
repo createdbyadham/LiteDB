@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { pgService, PgConfig } from '@/lib/pgService';
-import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/dbService';
+import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
 
@@ -54,14 +54,14 @@ export function usePostgres(): UsePgReturn {
       try {
         console.log("Initializing PostgreSQL service");
         await pgService.init();
-        
+
         if (!mounted) return;
 
         // Check if we already have a connection
         if (pgService.connected) {
           console.log("Found existing PostgreSQL connection");
           const existingTables = await pgService.getTables();
-          
+
           if (mounted) {
             setTables(existingTables);
             setIsConnected(true);
@@ -80,7 +80,7 @@ export function usePostgres(): UsePgReturn {
     };
 
     void initPg();
-    
+
     return () => {
       mounted = false;
     };
@@ -91,39 +91,39 @@ export function usePostgres(): UsePgReturn {
     setIsConnecting(true);
     setIsConnected(false);
     setTables([]); // Clear existing tables while connecting
-    
+
     try {
       // Ensure pgService is initialized
       console.log("Ensuring pgService is initialized");
       await pgService.init();
-      
+
       console.log("Connecting to PostgreSQL database");
       const success = await pgService.connect(config);
-      
+
       if (success) {
         console.log("PostgreSQL connection successful, getting tables");
         const tableList = await pgService.getTables();
         console.log("Retrieved tables:", tableList);
-        
+
         if (tableList.length > 0) {
           console.log("Setting state with tables");
           setTables(tableList);
           setIsConnected(true);
           // Push schema to AI
           await pushPgSchemaToAI(tableList);
-          
+
           toast({
             title: "Connected to PostgreSQL",
             description: `Connected to ${config.database} with ${tableList.length} tables`,
           });
-          
+
           return true;
         } else {
           console.log("No tables found in database");
           setIsConnected(true); // Still connected, just no tables
           setTables([]);
           aiService.clearSchema();
-          
+
           toast({
             title: "Connected to PostgreSQL",
             description: "Connected but the database contains no tables",
@@ -131,7 +131,7 @@ export function usePostgres(): UsePgReturn {
           return true;
         }
       }
-      
+
       console.log("Failed to connect to PostgreSQL database");
       setIsConnected(false);
       setTables([]);
@@ -142,13 +142,13 @@ export function usePostgres(): UsePgReturn {
       setIsConnected(false);
       setTables([]);
       aiService.clearSchema();
-      
+
       toast({
         title: "Connection Error",
         description: error instanceof Error ? error.message : "Failed to connect to PostgreSQL database",
         variant: "destructive"
       });
-      
+
       return false;
     } finally {
       setIsConnecting(false);
@@ -240,7 +240,7 @@ export function usePostgres(): UsePgReturn {
     setIsConnected(false);
     setTables([]);
     aiService.clearSchema();
-    
+
     toast({
       title: "Disconnected",
       description: "Disconnected from PostgreSQL database",

@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
 import { Key, Hash, Link2, Circle, Diamond } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ColumnInfo, ForeignKeyInfo, IndexInfo } from '@/lib/dbService';
+import { ColumnInfo, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 
 export interface TableNodeData {
   name: string;
@@ -13,8 +13,8 @@ export interface TableNodeData {
 }
 
 const getColumnIcon = (
-  column: ColumnInfo, 
-  foreignKeys: ForeignKeyInfo[], 
+  column: ColumnInfo,
+  foreignKeys: ForeignKeyInfo[],
   indexes: IndexInfo[]
 ) => {
   const isPrimaryKey = column.pk === 1;
@@ -30,26 +30,26 @@ const getColumnIcon = (
       </div>
     );
   }
-  
+
   if (isForeignKey) {
     return <Link2 className="w-3 h-3 text-amber-400" />;
   }
-  
+
   if (isUnique) {
     return <Hash className="w-3 h-3 text-blue-400" />;
   }
-  
+
   if (isNullable) {
     return <Diamond className="w-3 h-3 text-muted-foreground/50" />;
   }
-  
+
   return <Circle className="w-3 h-3 text-muted-foreground/50 fill-current" />;
 };
 
 const formatType = (type: string) => {
   // Normalize and shorten common types
   const normalized = type.toLowerCase();
-  
+
   const typeMap: Record<string, string> = {
     'integer': 'int4',
     'bigint': 'int8',
@@ -70,24 +70,24 @@ const formatType = (type: string) => {
       return short;
     }
   }
-  
+
   // Handle varchar(n), etc
   const match = normalized.match(/^(\w+)\((\d+)\)$/);
   if (match) {
     return match[1];
   }
-  
+
   return type.length > 12 ? type.substring(0, 10) + '..' : type;
 };
 
 const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
   const { name, columns, foreignKeys, indexes, onEdit } = data;
-  
+
   // Find columns that are foreign keys (these will have source handles)
   const fkColumnNames = new Set(foreignKeys.map(fk => fk.from));
 
   return (
-    <div 
+    <div
       className={cn(
         "bg-card border rounded-lg shadow-lg min-w-[220px] max-w-[280px] overflow-hidden",
         "transition-all duration-200",
@@ -100,7 +100,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
           <div className="w-2 h-2 rounded-full bg-emerald-500" />
           <span className="font-medium text-sm text-foreground truncate">{name}</span>
         </div>
-        <button 
+        <button
           className="text-muted-foreground hover:text-foreground transition-colors nodrag"
           onClick={(e) => {
             console.log('Edit table clicked:', name);
@@ -116,13 +116,13 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
           </svg>
         </button>
       </div>
-      
+
       {/* Columns List */}
       <div className="divide-y divide-border/50">
         {columns.map((column) => {
           const isPk = column.pk === 1;
           const isFk = fkColumnNames.has(column.name);
-          
+
           return (
             <div
               key={column.name}
@@ -141,7 +141,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
                   style={{ left: -4 }}
                 />
               )}
-              
+
               {/* Source handle for foreign keys */}
               {isFk && (
                 <Handle
@@ -152,7 +152,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
                   style={{ right: -4 }}
                 />
               )}
-              
+
               <div className="flex items-center gap-2 min-w-0 flex-1">
                 {getColumnIcon(column, foreignKeys, indexes)}
                 <span className={cn(
@@ -162,7 +162,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
                   {column.name}
                 </span>
               </div>
-              
+
               <span className="text-muted-foreground/70 ml-2 shrink-0 font-mono text-[10px]">
                 {formatType(column.type)}
               </span>
@@ -170,7 +170,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
           );
         })}
       </div>
-      
+
       {/* Footer showing count */}
       {columns.length > 10 && (
         <div className="px-3 py-1 bg-muted/30 text-[10px] text-muted-foreground text-center border-t border-border/50">

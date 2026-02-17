@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { toast } from '@/hooks/use-toast';
-import { dbService } from '@/lib/dbService';
+import { sqliteService } from '@/lib/sqliteService';
 import { usePostgres } from '@/hooks/usePostgres';
 
 type ExportFormat = 'csv' | 'json' | 'xlsx' | 'png' | 'svg';
@@ -22,9 +22,9 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
   const [isExporting, setIsExporting] = useState(false);
   const [exportableTables, setExportableTables] = useState<string[]>([]);
   const [selectedTable, setSelectedTable] = useState<string>('');
-  
+
   const { tables: postgresTables, executeQuery: executePgQuery } = usePostgres();
-  
+
   // Reset format when mode changes
   useEffect(() => {
     setFormat(mode === 'schema' ? 'png' : 'csv');
@@ -44,7 +44,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
   const handleExport = async () => {
     try {
       setIsExporting(true);
-      
+
       if (mode === 'schema') {
         if (onExportSchema) {
           await onExportSchema(format as 'png' | 'svg');
@@ -55,7 +55,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
 
       let exportData = '';  // Initialize with empty string
       let exportFormat = format;
-      
+
       if (isPostgres) {
         // For PostgreSQL we need to export the selected table
         if (!selectedTable) {
@@ -66,7 +66,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
           });
           return;
         }
-        
+
         // Get the table data
         const result = await executePgQuery(`SELECT * FROM "${selectedTable}"`);
         if (!result) {
@@ -77,7 +77,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
           });
           return;
         }
-        
+
         // Format data based on the selected format
         if (format === 'json') {
           // JSON format
@@ -85,12 +85,12 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         } else if (format === 'csv') {
           // CSV format
           const header = result.columns.join(',');
-          const rows = result.rows.map((row: any) => 
+          const rows = result.rows.map((row: any) =>
             result.columns.map(col => {
               const value = row[col];
               // Handle strings with commas by wrapping in quotes
-              return typeof value === 'string' && value.includes(',') 
-                ? `"${value.replace(/"/g, '""')}"` 
+              return typeof value === 'string' && value.includes(',')
+                ? `"${value.replace(/"/g, '""')}"`
                 : value === null ? '' : String(value);
             }).join(',')
           );
@@ -107,7 +107,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         }
       } else {
         // Get data in selected format for SQLite
-        const sqliteData = dbService.exportToFormat(format);
+        const sqliteData = sqliteService.exportToFormat(format);
         if (!sqliteData) {
           toast({
             title: "Error",
@@ -118,7 +118,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         }
         exportData = sqliteData;
       }
-      
+
       // Check if we have data to export
       if (!exportData || exportData.length === 0) {
         toast({
@@ -128,7 +128,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         });
         return;
       }
-      
+
       if (!window.electron) {
         toast({
           title: "Error",
@@ -137,10 +137,10 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         });
         return;
       }
-      
+
       // Export the data
       const result = await window.electron.exportDatabase(exportData, exportFormat);
-      
+
       if (result.success) {
         toast({
           title: "Success",
@@ -192,7 +192,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
               </Select>
             </div>
           )}
-          
+
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="format" className="text-right">
               Format

@@ -18,14 +18,14 @@ import { toPng, toSvg } from 'html-to-image';
 
 import TableNode, { TableNodeData } from './TableNode';
 import { Button } from '@/components/ui/button';
-import { 
-  Database, 
+import {
+  Database,
   LayoutGrid,
   Link2,
   Key,
   Table2
 } from 'lucide-react';
-import { ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo } from '@/lib/dbService';
+import { ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo } from '@/lib/sqliteService';
 import { Sidebar, SidebarItem } from '@/components/Sidebar';
 import { useSidebar } from '@/contexts/SidebarContext';
 
@@ -64,31 +64,31 @@ interface SchemaTable {
 const calculateLayout = (tables: SchemaTable[], onEditTable?: (name: string) => void): { nodes: Node<TableNodeData>[]; edges: Edge[] } => {
   const nodes: Node<TableNodeData>[] = [];
   const edges: Edge[] = [];
-  
+
   // Build a graph of relationships
   const relationships = new Map<string, Set<string>>();
   const incomingRelationships = new Map<string, Set<string>>();
-  
+
   tables.forEach(table => {
     relationships.set(table.name, new Set());
     incomingRelationships.set(table.name, new Set());
   });
-  
+
   tables.forEach(table => {
     table.foreignKeys.forEach(fk => {
       relationships.get(table.name)?.add(fk.table);
       incomingRelationships.get(fk.table)?.add(table.name);
     });
   });
-  
+
   // Calculate levels (topological sort-ish)
   const levels = new Map<string, number>();
   const visited = new Set<string>();
-  
+
   const calculateLevel = (tableName: string, currentLevel: number = 0): number => {
     if (visited.has(tableName)) return levels.get(tableName) || 0;
     visited.add(tableName);
-    
+
     let maxLevel = currentLevel;
     const refs = relationships.get(tableName);
     if (refs) {
@@ -99,25 +99,25 @@ const calculateLayout = (tables: SchemaTable[], onEditTable?: (name: string) => 
         }
       });
     }
-    
+
     levels.set(tableName, maxLevel);
     return maxLevel;
   };
-  
+
   // Start with tables that have no outgoing relationships
   tables.forEach(table => {
     if (relationships.get(table.name)?.size === 0) {
       calculateLevel(table.name, 0);
     }
   });
-  
+
   // Handle any remaining tables
   tables.forEach(table => {
     if (!levels.has(table.name)) {
       calculateLevel(table.name, 0);
     }
   });
-  
+
   // Group tables by level
   const levelGroups = new Map<number, SchemaTable[]>();
   tables.forEach(table => {
@@ -127,24 +127,24 @@ const calculateLayout = (tables: SchemaTable[], onEditTable?: (name: string) => 
     }
     levelGroups.get(level)?.push(table);
   });
-  
+
   // Position nodes
   const nodeWidth = 250;
   const nodeHeight = 200;
   const horizontalGap = 100;
   const verticalGap = 80;
-  
+
   const sortedLevels = Array.from(levelGroups.keys()).sort((a, b) => b - a);
-  
+
   sortedLevels.forEach((level, levelIndex) => {
     const tablesInLevel = levelGroups.get(level) || [];
     const levelWidth = tablesInLevel.length * (nodeWidth + horizontalGap);
     const startX = -(levelWidth / 2) + (nodeWidth / 2);
-    
+
     tablesInLevel.forEach((table, tableIndex) => {
       const x = startX + tableIndex * (nodeWidth + horizontalGap);
       const y = levelIndex * (nodeHeight + verticalGap);
-      
+
       nodes.push({
         id: table.name,
         type: 'tableNode',
@@ -159,11 +159,11 @@ const calculateLayout = (tables: SchemaTable[], onEditTable?: (name: string) => 
       });
     });
   });
-  
+
   // Create edges for relationships
   tables.forEach(table => {
     table.foreignKeys.forEach((fk) => {
-        edges.push({
+      edges.push({
         id: `${table.name}-${fk.from}-${fk.table}-${fk.to}`,
         source: table.name,
         sourceHandle: `${table.name}-${fk.from}-source`,
@@ -178,14 +178,14 @@ const calculateLayout = (tables: SchemaTable[], onEditTable?: (name: string) => 
       });
     });
   });
-  
+
   return { nodes, edges };
 };
 
-const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(({ 
-  tables, 
-  getTableColumns, 
-  getForeignKeys, 
+const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(({
+  tables,
+  getTableColumns,
+  getForeignKeys,
   getIndexes,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   isPostgres = false,
@@ -218,13 +218,13 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
       }
 
       const nodesBounds = getNodesBounds(nodes);
-      
+
       const padding = 50;
       const width = nodesBounds.width + padding * 2;
       const height = nodesBounds.height + padding * 2;
-      
+
       const transform = `translate(${-nodesBounds.x + padding}px, ${-nodesBounds.y + padding}px) scale(1)`;
-      
+
       const options = {
         backgroundColor: '#ffffff',
         width: width,
@@ -254,15 +254,15 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
   const getForeignKeysRef = useRef(getForeignKeys);
   const getIndexesRef = useRef(getIndexes);
   const onEditTableRef = useRef(onEditTable);
-  
+
   getTableColumnsRef.current = getTableColumns;
   getForeignKeysRef.current = getForeignKeys;
   getIndexesRef.current = getIndexes;
   onEditTableRef.current = onEditTable;
 
   // Create a stable table key to detect actual table changes
-  const tableKey = useMemo(() => 
-    tables.map(t => t.name).sort().join(','), 
+  const tableKey = useMemo(() =>
+    tables.map(t => t.name).sort().join(','),
     [tables]
   );
 
@@ -278,7 +278,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
     const loadSchema = async () => {
       if (!mounted) return;
       setLoading(true);
-      
+
       try {
         const schemaPromises = tables.map(async (table) => {
           const [columns, foreignKeys, indexes] = await Promise.all([
@@ -286,7 +286,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
             Promise.resolve(getForeignKeysRef.current(table.name)),
             Promise.resolve(getIndexesRef.current(table.name)),
           ]);
-          
+
           return {
             name: table.name,
             columns: columns || [],
@@ -294,14 +294,14 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
             indexes: indexes || [],
           };
         });
-        
+
         const data = await Promise.all(schemaPromises);
-        
+
         if (!mounted) return;
-        
+
         setSchemaData(data);
         setHasLoaded(true);
-        
+
         // Calculate layout
         const { nodes: newNodes, edges: newEdges } = calculateLayout(data, (name) => onEditTableRef.current?.(name));
         setNodes(newNodes);
@@ -312,13 +312,13 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
         if (mounted) setLoading(false);
       }
     };
-    
+
     if (tables.length > 0) {
       loadSchema();
     } else {
       setLoading(false);
     }
-    
+
     return () => {
       mounted = false;
     };
@@ -355,7 +355,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
     const totalColumns = schemaData.reduce((acc, t) => acc + t.columns.length, 0);
     const totalRelationships = schemaData.reduce((acc, t) => acc + t.foreignKeys.length, 0);
     const totalIndexes = schemaData.reduce((acc, t) => acc + t.indexes.length, 0);
-    
+
     return {
       tables: schemaData.length,
       columns: totalColumns,
@@ -423,7 +423,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
 
   return (
     <div className="h-full flex animate-fade-in">
-      <Sidebar 
+      <Sidebar
         title="Schema"
         collapsed={sidebarCollapsed}
         onToggleCollapse={toggleContentSidebar}
@@ -455,21 +455,21 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
           }}
           proOptions={{ hideAttribution: true }}
         >
-          <Background 
-            variant={BackgroundVariant.Dots} 
-            gap={20} 
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={20}
             size={1}
             color="hsl(var(--muted-foreground) / 0.2)"
           />
-          
-          <Controls 
+
+          <Controls
             className="!bg-card !border-border !shadow-lg"
             showZoom={true}
             showFitView={true}
             showInteractive={false}
           />
-          
-          <MiniMap 
+
+          <MiniMap
             className="!bg-card !border-border"
             pannable
             zoomable
