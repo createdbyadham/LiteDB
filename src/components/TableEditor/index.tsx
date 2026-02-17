@@ -4,8 +4,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Save} from 'lucide-react';
-import { ColumnInfo, RowData, dbService } from '@/lib/dbService';
+import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Save } from 'lucide-react';
+import { ColumnInfo, RowData, sqliteService } from '@/lib/sqliteService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { EditDialog } from '@/components/EditDialog';
 import { toast } from '@/hooks/use-toast';
@@ -30,7 +30,7 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const rowsPerPage = 100;
-  
+
   // Reset state when table changes
   useEffect(() => {
     setFilteredRows([]);
@@ -39,53 +39,53 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
     setSearchQuery('');
     setCurrentPage(1);
   }, [tableName]);
-  
+
   // Update filtered rows when data changes
   useEffect(() => {
     let result = [...rows];
-    
+
     // Apply search filter
     if (searchQuery) {
       const lowerQuery = searchQuery.toLowerCase();
-      result = result.filter(row => 
-        Object.entries(row).some(([_, value]) => 
+      result = result.filter(row =>
+        Object.entries(row).some(([_, value]) =>
           String(value).toLowerCase().includes(lowerQuery)
         )
       );
     }
-    
+
     // Apply sorting
     if (sortColumn) {
       result.sort((a, b) => {
         const valueA = a[sortColumn];
         const valueB = b[sortColumn];
-        
+
         // Handle null values
         if (valueA === null && valueB === null) return 0;
         if (valueA === null) return sortDirection === 'asc' ? -1 : 1;
         if (valueB === null) return sortDirection === 'asc' ? 1 : -1;
-        
+
         // Check if values are numbers
         const numA = Number(valueA);
         const numB = Number(valueB);
-        
+
         if (!isNaN(numA) && !isNaN(numB)) {
           return sortDirection === 'asc' ? numA - numB : numB - numA;
         }
-        
+
         // Otherwise sort as strings
         const strA = String(valueA);
         const strB = String(valueB);
-        
-        return sortDirection === 'asc' 
-          ? strA.localeCompare(strB) 
+
+        return sortDirection === 'asc'
+          ? strA.localeCompare(strB)
           : strB.localeCompare(strA);
       });
     }
-    
+
     setFilteredRows(result);
   }, [rows, searchQuery, sortColumn, sortDirection]);
-  
+
   const handleSort = (column: string) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -94,44 +94,44 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
       setSortDirection('asc');
     }
   };
-  
+
   const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
   const paginatedRows = filteredRows.slice(
-    (currentPage - 1) * rowsPerPage, 
+    (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
   );
-  
+
   // Map column names to their info
   const columnInfoMap = columnInfo.reduce((acc, info) => {
     acc[info.name] = info;
     return acc;
   }, {} as Record<string, ColumnInfo>);
-  
+
   // Get the primary key column (if any)
   const primaryKeyColumn = columnInfo.find(col => col.pk === 1)?.name;
-  
+
   const formatCellValue = (value: unknown) => {
     if (value === null) return <span className="text-muted-foreground italic">NULL</span>;
     if (typeof value === 'object') return JSON.stringify(value);
     return String(value);
   };
-  
+
   const getColumnTypeLabel = (colName: string) => {
     const info = columnInfoMap[colName];
     if (!info) return null;
-    
+
     const label = info.type || 'TEXT';
-    
+
     const badges = [];
-    
+
     if (info.pk) {
       badges.push(<Badge key="pk" variant="destructive" className="ml-1">PK</Badge>);
     }
-    
+
     if (info.notnull) {
       badges.push(<Badge key="nn" variant="outline" className="ml-1">NOT NULL</Badge>);
     }
-    
+
     return (
       <div className="flex items-center text-xs">
         <span className="text-muted-foreground">{label}</span>
@@ -193,7 +193,7 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
 
   const handleRowUpdate = async (updatedRow: RowData) => {
     if (!editingRow || !onUpdateRow) return;
-    
+
     try {
       const success = await onUpdateRow(editingRow, updatedRow);
       if (success) {
@@ -202,7 +202,7 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
           description: "Row updated successfully",
         });
         // Update the local state
-        setFilteredRows(prev => 
+        setFilteredRows(prev =>
           prev.map(row => {
             const primaryKey = columnInfo.find(col => col.pk === 1)?.name;
             if (primaryKey && row[primaryKey] === editingRow[primaryKey]) {
@@ -234,27 +234,27 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
               {filteredRows.length} {filteredRows.length === 1 ? 'row' : 'rows'}
             </Badge>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               className="h-8 px-2 text-xs"
               onClick={async () => {
-                const data = dbService.exportDatabase();
+                const data = sqliteService.exportDatabase();
                 console.log('Exporting database data:', data);
                 if (data && window.electron) {
                   // If we don't have a current file path, show save dialog
-                  if (!dbService.currentFilePath) {
+                  if (!sqliteService.currentFilePath) {
                     toast({
-                      title: "Error", 
+                      title: "Error",
                       description: "No database file loaded. Please load a database file first.",
                       variant: "destructive"
                     });
                     return;
                   }
 
-                  console.log('Current file path:', dbService.currentFilePath);
-                  const result = await window.electron.saveDatabase(dbService.currentFilePath, data);
+                  console.log('Current file path:', sqliteService.currentFilePath);
+                  const result = await window.electron.saveDatabase(sqliteService.currentFilePath, data);
                   console.log('Save result:', result);
                   if (result.success) {
                     toast({ title: "Success", description: "Database saved successfully" });
@@ -264,7 +264,7 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
                 }
               }}
             >
-              <Save className= "h-3.5 w-3.5 mr-1.5" />
+              <Save className="h-3.5 w-3.5 mr-1.5" />
               Save Changes
             </Button>
             <div className="relative w-64">
@@ -279,7 +279,7 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
           </div>
         </div>
       </div>
-      
+
       <div className="flex-1 overflow-hidden">
         <div className="h-full overflow-auto">
           <Table>
@@ -318,14 +318,13 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
                       >
                         {column}
                         {sortColumn === column && (
-                          <ArrowUpDown 
-                            className={`ml-1 h-3.5 w-3.5 transition-transform ${
-                              sortDirection === 'desc' ? 'rotate-180' : ''
-                            }`} 
+                          <ArrowUpDown
+                            className={`ml-1 h-3.5 w-3.5 transition-transform ${sortDirection === 'desc' ? 'rotate-180' : ''
+                              }`}
                           />
                         )}
                       </Button>
-                      
+
                       <TooltipProvider delayDuration={200}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -348,7 +347,7 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
             <TableBody>
               {paginatedRows.length > 0 ? (
                 paginatedRows.map((row, rowIndex) => (
-                  <TableRow 
+                  <TableRow
                     key={primaryKeyColumn && row[primaryKeyColumn] ? String(row[primaryKeyColumn]) : rowIndex}
                     className="hover:bg-muted/30 cursor-pointer"
                     onDoubleClick={() => handleRowDoubleClick(row)}
@@ -379,8 +378,8 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
                 ))
               ) : (
                 <TableRow>
-                  <TableCell 
-                    colSpan={columns.length + 1} 
+                  <TableCell
+                    colSpan={columns.length + 1}
                     className="h-32 text-center text-muted-foreground"
                   >
                     No results found
@@ -397,7 +396,7 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
           <div className="text-sm text-muted-foreground">
             Page {currentPage} of {totalPages}
           </div>
-          
+
           <div className="flex items-center space-x-2">
             <Button
               variant="outline"
@@ -407,7 +406,7 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            
+
             <Button
               variant="outline"
               size="sm"

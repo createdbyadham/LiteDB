@@ -4,14 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FileUp } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import { useDatabase } from '@/hooks/useDatabase';
+import { useSqlite } from '@/hooks/useSqlite';
 import { ElectronFile } from '@/types/electron';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PostgresConnectionForm from '@/components/PostgresConnectionForm';
 import icon from '/titlebaricon2.png';
 
 const UploadView = () => {
-  const { loadDatabase } = useDatabase();
+  const { loadDatabase } = useSqlite();
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
@@ -38,15 +38,15 @@ const UploadView = () => {
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    
+
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const file = files[0] as ElectronFile;
       try {
         console.log('Drag and drop file:', { name: file.name, path: file.path, type: file.type });
-        
+
         let arrayBuffer: ArrayBuffer;
-        
+
         // If we have a path (desktop file), use electron API
         if (file.path && window.electron) {
           const result = await window.electron.readDatabase(file.path);
@@ -58,7 +58,7 @@ const UploadView = () => {
           // Fallback to browser File API for files without path
           arrayBuffer = await file.arrayBuffer();
         }
-        
+
         const processResult = await processFile(arrayBuffer, file.path);
         console.log('Drag and drop process result:', processResult);
         if (processResult.success) {
@@ -123,7 +123,7 @@ const UploadView = () => {
       return { success: true };
     } catch (error) {
       console.error('Process file error:', error);
-      return { 
+      return {
         success: false,
         error: error instanceof Error ? error.message : "Failed to process file"
       };
@@ -148,14 +148,13 @@ const UploadView = () => {
               <TabsTrigger value="sqlite">SQLite</TabsTrigger>
               <TabsTrigger value="postgres">PostgreSQL</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="sqlite" className="space-y-4 mt-4">
               <div
-                className={`border-2 border-dashed rounded-lg p-8 transition-all duration-200 ease-in-out ${
-                  isDragging 
-                    ? 'border-primary/80 bg-primary/5' 
-                    : 'border-border hover:border-primary/40 hover:bg-primary/5'
-                }`}
+                className={`border-2 border-dashed rounded-lg p-8 transition-all duration-200 ease-in-out ${isDragging
+                  ? 'border-primary/80 bg-primary/5'
+                  : 'border-border hover:border-primary/40 hover:bg-primary/5'
+                  }`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
@@ -172,9 +171,9 @@ const UploadView = () => {
                   </div>
                 </div>
               </div>
-              
-              <Button 
-                className="w-full transition-all" 
+
+              <Button
+                className="w-full transition-all"
                 onClick={handleButtonClick}
                 disabled={isLoading}
               >
@@ -191,7 +190,7 @@ const UploadView = () => {
                 )}
               </Button>
             </TabsContent>
-            
+
             <TabsContent value="postgres" className="mt-4">
               <PostgresConnectionForm onConnectionSuccess={handlePostgresConnect} />
             </TabsContent>

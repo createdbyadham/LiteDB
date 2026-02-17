@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { dbService } from '@/lib/dbService';
+import { sqliteService } from '@/lib/sqliteService';
 import { pgService } from '@/lib/pgService';
 import { toast } from '@/hooks/use-toast';
 import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Code2, Sparkles, Download } from 'lucide-react';
@@ -26,7 +26,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
   const [sqlScript, setSqlScript] = useState('');
   const [useTransaction, setUseTransaction] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState<{ 
+  const [results, setResults] = useState<{
     success: boolean;
     affectedTables: string[];
     errors: string[];
@@ -73,10 +73,10 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
       }
 
       const startTime = performance.now();
-      
-      let result: { 
-        success: boolean; 
-        affectedTables: string[]; 
+
+      let result: {
+        success: boolean;
+        affectedTables: string[];
         errors: string[];
         queryResults?: {
           columns: string[];
@@ -86,17 +86,17 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
 
       // Determine if any statement mutates data/schema
       const isMutating = statements.some(stmt => /^(\s*)(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE|REPLACE)\b/i.test(stmt));
-      
+
       if (isPostgres) {
         // For PostgreSQL, execute each statement sequentially
         result = { success: true, affectedTables: [], errors: [], queryResults: null };
-        
+
         for (const statement of statements) {
           try {
             // Check if this is a SELECT or similar query that returns data
             const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statement);
             const isDDLQuery = /^\s*(CREATE|DROP|ALTER|TRUNCATE)/i.test(statement);
-            
+
             const queryResult = await pgService.executeQuery(statement);
             if (queryResult) {
               // For SELECT queries, we want to display the results
@@ -126,12 +126,12 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                   rows: normalizedRows
                 };
               }
-              
+
               // If this was a DDL query, refresh the table list
               if (isDDLQuery && refreshTables) {
                 await Promise.resolve(refreshTables());
               }
-              
+
               // Try to extract table names from the SQL
               const tableMatches = statement.match(/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE)\s+(?:"|')?(\w+)(?:"|')?/i);
               if (tableMatches && tableMatches[1] && !result.affectedTables.includes(tableMatches[1])) {
@@ -150,13 +150,13 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
         // For SQLite, check if we have a SELECT query and handle it specially
         const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statements[0]);
         const isDDLQuery = /^\s*(CREATE|DROP|ALTER|TRUNCATE)/i.test(statements[0]);
-        
+
         if (isSelectQuery && statements.length === 1) {
           try {
-            const queryResult = dbService.executeQuery(statements[0]);
-            result = { 
-              success: true, 
-              affectedTables: [], 
+            const queryResult = sqliteService.executeQuery(statements[0]);
+            result = {
+              success: true,
+              affectedTables: [],
               errors: [],
               queryResults: queryResult as {
                 columns: string[];
@@ -164,23 +164,23 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
               }
             };
           } catch (error) {
-            result = { 
-              success: false, 
-              affectedTables: [], 
+            result = {
+              success: false,
+              affectedTables: [],
               errors: [error instanceof Error ? error.message : "Unknown error"]
             };
           }
         } else {
           // For other SQL statements, use the existing batch operation
-          result = dbService.executeBatchOperations(statements, useTransaction);
-          
+          result = sqliteService.executeBatchOperations(statements, useTransaction);
+
           // If this was a DDL query and it was successful, refresh the table list
           if (isDDLQuery && result.success && refreshTables) {
             Promise.resolve(refreshTables());
           }
         }
       }
-      
+
       const endTime = performance.now();
 
       setResults({
@@ -210,7 +210,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
         affectedTables: [],
         errors: [error instanceof Error ? error.message : "Unknown error occurred"]
       });
-      
+
       toast({
         title: "Execution Failed",
         description: error instanceof Error ? error.message : "Unknown error occurred",
@@ -252,11 +252,11 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
 
     const newScript = { name: scriptName, sql: sqlScript };
     setSavedScripts([...savedScripts, newScript]);
-    
+
     // Save to localStorage for persistence
     const existingScripts = JSON.parse(localStorage.getItem('savedScripts') || '[]');
     localStorage.setItem('savedScripts', JSON.stringify([...existingScripts, newScript]));
-    
+
     setScriptName('');
     toast({
       title: "Script Saved",
@@ -275,10 +275,10 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
   const deleteScript = (scriptToDelete: { name: string; sql: string }) => {
     const updatedScripts = savedScripts.filter(script => script.name !== scriptToDelete.name);
     setSavedScripts(updatedScripts);
-    
+
     // Update localStorage
     localStorage.setItem('savedScripts', JSON.stringify(updatedScripts));
-    
+
     toast({
       title: "Script Deleted",
       description: `"${scriptToDelete.name}" has been removed from your collection`
@@ -375,8 +375,8 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
 
   return (
     <div className="h-full flex flex-col overflow-auto px-2 animate-fade-in">
-      <AiQueryDialog 
-        open={isAiDialogOpen} 
+      <AiQueryDialog
+        open={isAiDialogOpen}
         onOpenChange={setIsAiDialogOpen}
         onQueryGenerated={(query) => setSqlScript(query)}
       />
@@ -389,17 +389,17 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
             </TabsList>
           </div>
         </div>
-        
+
         <TabsContent value="editor" className="flex-1 overflow-auto p-4 pt-0">
           <div className="flex-1 flex flex-col gap-4">
             <div className="flex items-center justify-between py-2">
               <div className="flex items-center space-x-4">
                 {!isPostgres && (
                   <div className="flex items-center space-x-2">
-                    <Switch 
-                      id="transaction-mode" 
-                      checked={useTransaction} 
-                      onCheckedChange={setUseTransaction} 
+                    <Switch
+                      id="transaction-mode"
+                      checked={useTransaction}
+                      onCheckedChange={setUseTransaction}
                     />
                     <Label htmlFor="transaction-mode" className="text-xs">
                       Use Transaction
@@ -431,19 +431,19 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                 </Button>
               </div>
             </div>
-            
+
             <div className="flex-1 flex flex-col min-h-0">
               <Textarea
                 ref={textareaRef}
-                placeholder={isPostgres ? 
-                  "Enter PostgreSQL statements (each statement must end with a semicolon)..." : 
+                placeholder={isPostgres ?
+                  "Enter PostgreSQL statements (each statement must end with a semicolon)..." :
                   "Enter SQL statements separated by semicolons (;)..."
                 }
                 className="flex-1 font-mono text-sm min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 value={sqlScript}
                 onChange={(e) => setSqlScript(e.target.value)}
               />
-              
+
               {results && (
                 <div className="mt-4 space-y-2">
                   <Alert variant={results.success ? "default" : "destructive"}>
@@ -481,7 +481,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                     <AlertDescription>
                       <div className="mt-2 space-y-2">
                         <p className="text-sm">Execution time: {results.executionTime}ms</p>
-                        
+
                         {results.queryResults && results.queryResults.columns.length > 0 && (
                           <div className="mt-4 space-y-2">
                             <p className="text-sm font-medium">Query results:</p>
@@ -490,9 +490,9 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                                 <thead className="bg-muted/50">
                                   <tr>
                                     {results.queryResults.columns.map((column, idx) => (
-                                      <th 
-                                        key={idx} 
-                                        scope="col" 
+                                      <th
+                                        key={idx}
+                                        scope="col"
                                         className="px-3 py-2 text-left text-xs font-medium text-muted-foreground tracking-wider"
                                       >
                                         {column}
@@ -504,15 +504,15 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                                   {results.queryResults.rows.length > 0 && results.queryResults.rows.map((row, rowIdx) => {
                                     // Check if row is an array (multi-column) or a single value
                                     const isArray = Array.isArray(row);
-                                    
+
                                     return (
                                       <tr key={rowIdx} className={rowIdx % 2 === 0 ? "bg-muted/20" : "bg-card"}>
                                         {isArray ? (
                                           // If row is an array, render each cell
                                           row.map((cell, cellIdx) => (
                                             <td key={cellIdx} className="px-3 py-2 whitespace-nowrap text-xs">
-                                              {cell === null ? 
-                                                <span className="text-muted-foreground italic">NULL</span> : 
+                                              {cell === null ?
+                                                <span className="text-muted-foreground italic">NULL</span> :
                                                 String(cell)}
                                             </td>
                                           ))
@@ -538,8 +538,8 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                                   })}
                                   {results.queryResults.rows.length === 0 && (
                                     <tr>
-                                      <td 
-                                        colSpan={results.queryResults.columns.length} 
+                                      <td
+                                        colSpan={results.queryResults.columns.length}
                                         className="px-3 py-4 text-center text-sm text-muted-foreground"
                                       >
                                         No results found
@@ -551,7 +551,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                             </div>
                           </div>
                         )}
-                        
+
                         {results.affectedTables.length > 0 && (
                           <div className="space-y-1">
                             <p className="text-sm font-medium">Affected tables:</p>
@@ -564,7 +564,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
                             </div>
                           </div>
                         )}
-                        
+
                         {results.errors.length > 0 && (
                           <div className="space-y-1">
                             <p className="text-sm font-medium">Errors:</p>
@@ -585,7 +585,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
             </div>
           </div>
         </TabsContent>
-        
+
         <TabsContent value="savedScripts" className="flex-1 overflow-auto">
           <div className="p-4 pt-2">
             {savedScripts.length === 0 ? (

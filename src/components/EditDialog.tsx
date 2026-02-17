@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ColumnInfo, RowData } from '@/lib/dbService';
+import { ColumnInfo, RowData } from '@/lib/sqliteService';
 import { toast } from '@/hooks/use-toast';
 
 interface EditDialogProps {

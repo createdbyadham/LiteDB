@@ -1,6 +1,6 @@
 // This service handles PostgreSQL database operations
 import { toast } from "@/hooks/use-toast";
-import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/dbService';
+import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 
 // Define PostgreSQL connection config
 export interface PgConfig {
@@ -54,7 +54,7 @@ class PgService {
           reject(error);
         }
       };
-      
+
       void initializeAsync();
     });
 
@@ -65,37 +65,37 @@ class PgService {
   async connect(config: PgConfig) {
     try {
       console.log("Connecting to PostgreSQL database");
-      
+
       // Save the config
       this.currentConfig = config;
-      
+
       // Call main process to establish connection
       // This will be implemented in the Electron main process
       const result = await window.electron?.connectPostgres(config);
-      
+
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to connect to PostgreSQL database");
       }
-      
+
       this.connected = true;
-      
+
       // Fetch tables to verify connection
       this.currentTables = await this.getTables();
       console.log("Connected to PostgreSQL with tables:", this.currentTables);
-      
+
       return true;
     } catch (error) {
       console.error("PostgreSQL connection error:", error);
       this.currentTables = [];
       this.currentConfig = null;
       this.connected = false;
-      
+
       toast({
         title: "Connection Error",
         description: error instanceof Error ? error.message : "Failed to connect to PostgreSQL database",
         variant: "destructive"
       });
-      
+
       return false;
     }
   }
@@ -104,7 +104,7 @@ class PgService {
     if (!this.connected) {
       return this.currentTables;
     }
-    
+
     try {
       const result = await window.electron?.executePostgresQuery({
         query: `
@@ -119,16 +119,16 @@ class PgService {
             table_name;
         `
       });
-      
+
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to retrieve tables");
       }
-      
+
       this.currentTables = result.rows.map((row: any) => ({
         name: row.name,
         sql: row.sql
       }));
-      
+
       return this.currentTables;
     } catch (error) {
       console.error("Error fetching PostgreSQL tables:", error);
@@ -145,7 +145,7 @@ class PgService {
     if (!this.connected) {
       return [];
     }
-    
+
     try {
       const result = await window.electron?.executePostgresQuery({
         query: `
@@ -167,11 +167,11 @@ class PgService {
             a.attnum;
         `
       });
-      
+
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to retrieve columns");
       }
-      
+
       return result.rows.map((row: any) => ({
         cid: parseInt(row.cid),
         name: row.name,
@@ -194,16 +194,16 @@ class PgService {
     if (!this.connected) {
       return { columns: [], rows: [] };
     }
-    
+
     try {
       const result = await window.electron?.executePostgresQuery({
         query: `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset};`
       });
-      
+
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to retrieve table data");
       }
-      
+
       return {
         columns: result.columns || [],
         rows: result.rows || []
@@ -223,7 +223,7 @@ class PgService {
     if (!this.connected) {
       return [];
     }
-    
+
     try {
       const result = await window.electron?.executePostgresQuery({
         query: `
@@ -250,11 +250,11 @@ class PgService {
             AND tc.table_schema = 'public';
         `
       });
-      
+
       if (!result || !result.success) {
         return [];
       }
-      
+
       return result.rows.map((row: any, index: number) => ({
         id: index,
         seq: 0,
@@ -275,7 +275,7 @@ class PgService {
     if (!this.connected) {
       return [];
     }
-    
+
     try {
       const result = await window.electron?.executePostgresQuery({
         query: `
@@ -295,11 +295,11 @@ class PgService {
             i.relname, ix.indisunique;
         `
       });
-      
+
       if (!result || !result.success) {
         return [];
       }
-      
+
       return result.rows.map((row: any) => ({
         name: row.index_name,
         unique: row.is_unique,
@@ -311,7 +311,7 @@ class PgService {
     }
   }
 
-  async getFullSchema(): Promise<{ 
+  async getFullSchema(): Promise<{
     tables: Array<{
       name: string;
       columns: ColumnInfo[];
@@ -326,7 +326,7 @@ class PgService {
       foreignKeys: await this.getForeignKeys(table.name),
       indexes: await this.getIndexes(table.name)
     }));
-    
+
     return {
       tables: await Promise.all(schemaPromises)
     };
@@ -341,16 +341,16 @@ class PgService {
       });
       return null;
     }
-    
+
     try {
       const result = await window.electron?.executePostgresQuery({
         query: sql
       });
-      
+
       if (!result || !result.success) {
         throw new Error(result?.error || "Query execution failed");
       }
-      
+
       return {
         columns: result.columns || [],
         rows: result.rows || []
@@ -375,33 +375,33 @@ class PgService {
       });
       return false;
     }
-    
+
     try {
       // Get the table columns to determine primary key and data types
       const columns = await this.getTableColumns(tableName);
-      
+
       // Find the primary key column
       const primaryKeyColumn = columns.find(col => col.pk === 1);
       if (!primaryKeyColumn) {
         throw new Error(`Cannot update row: Table ${tableName} has no primary key`);
       }
-      
+
       const pkName = primaryKeyColumn.name;
       const pkValue = oldRow[pkName];
-      
+
       if (pkValue === undefined) {
         throw new Error(`Primary key value not found in row data`);
       }
-      
+
       // Let's try a completely different approach to avoid parameter index issues
       // Instead of using $1, $2, etc. parameterized queries, we'll use a safer manual approach
-      
+
       // Check if any changes are needed
       const changes = Object.entries(newRow)
         .filter(([column, value]) => {
           return column !== pkName && oldRow[column] !== value;
         });
-      
+
       if (changes.length === 0) {
         toast({
           title: "No Changes",
@@ -409,34 +409,34 @@ class PgService {
         });
         return true; // No changes needed
       }
-      
+
       // Manually construct the SET part with proper escaping
       const setClauses = changes.map(([column, value]) => {
         const escapedValue = this.formatValueForSQL(value);
         return `"${column}" = ${escapedValue}`;
       });
-      
+
       // Format the primary key value for the WHERE clause
       const escapedPkValue = this.formatValueForSQL(pkValue);
-      
+
       // Build and execute the UPDATE statement without parameters
       const sql = `
         UPDATE "${tableName}"
         SET ${setClauses.join(', ')}
         WHERE "${pkName}" = ${escapedPkValue};
       `;
-      
+
       console.log("Update SQL:", sql);
-      
+
       // Execute the query without using parameterized style
       const result = await window.electron?.executePostgresQuery({
         query: sql
       });
-      
+
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to update row");
       }
-      
+
       return true;
     } catch (error) {
       console.error("Update row error:", error);
@@ -448,30 +448,30 @@ class PgService {
       return false;
     }
   }
-  
+
   // Helper function to safely format values for SQL queries
   private formatValueForSQL(value: any): string {
     if (value === null || value === undefined) {
       return 'NULL';
     }
-    
+
     // Handle Date objects
     if (value instanceof Date) {
       // Format date as ISO string and escape properly
       return `'${value.toISOString().replace(/'/g, "''")}'`;
     }
-    
+
     // Handle strings with proper escaping
     if (typeof value === 'string') {
       // Escape single quotes by doubling them
       return `'${value.replace(/'/g, "''")}'`;
     }
-    
+
     // Handle booleans
     if (typeof value === 'boolean') {
       return value ? 'TRUE' : 'FALSE';
     }
-    
+
     // Handle numbers
     if (typeof value === 'number') {
       // Check if it's a valid number
@@ -480,12 +480,12 @@ class PgService {
       }
       return value.toString();
     }
-    
+
     // For objects or arrays, convert to JSON string and escape
     if (typeof value === 'object') {
       return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
     }
-    
+
     // Default fallback
     return `'${String(value).replace(/'/g, "''")}'`;
   }
@@ -501,15 +501,15 @@ class PgService {
 
   async deleteRows(tableName: string, primaryKeyColumn: string, rowIds: string[]): Promise<boolean> {
     if (!this.connected) return false;
-    
+
     try {
       const sql = `DELETE FROM "${tableName}" WHERE "${primaryKeyColumn}" IN (${rowIds.map(id => this.formatValueForSQL(id)).join(',')})`;
       const result = await window.electron?.executePostgresQuery({ query: sql });
-      
+
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to delete rows");
       }
-      
+
       return true;
     } catch (error) {
       console.error("Delete rows error:", error);
