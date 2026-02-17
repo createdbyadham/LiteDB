@@ -19,6 +19,7 @@ import {
   Download,
   Server,
   Table2,
+  TableOfContents,
   RefreshCw,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
@@ -341,7 +342,7 @@ const DatabaseView = () => {
     return tables.map(table => ({
       id: table.name,
       label: table.name,
-      icon: <Table2 />,
+      icon: <TableOfContents />,
       tooltip: table.name,
       onClick: () => handleTableSelect(table.name)
     }));
