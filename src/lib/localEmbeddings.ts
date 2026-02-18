@@ -4,11 +4,45 @@ import { pipeline, env } from '@xenova/transformers';
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
-// Model info
-const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
-const DIMENSIONS = 384;
+// Available models
+export interface EmbeddingModel {
+  id: string;
+  name: string;
+  huggingFaceId: string;
+  dimensions: number;
+  size: string;
+  description: string;
+}
 
-// Singleton pipeline instance
+export const AVAILABLE_MODELS: EmbeddingModel[] = [
+  {
+    id: 'minilm',
+    name: 'all-MiniLM-L6-v2',
+    huggingFaceId: 'Xenova/all-MiniLM-L6-v2',
+    dimensions: 384,
+    size: '~23MB',
+    description: 'Fast & lightweight'
+  },
+  {
+    id: 'bge-base',
+    name: 'bge-base-en-v1.5',
+    huggingFaceId: 'Xenova/bge-base-en-v1.5',
+    dimensions: 768,
+    size: '~110MB',
+    description: 'Balanced quality/speed'
+  },
+  {
+    id: 'bge-large',
+    name: 'bge-large-en-v1.5',
+    huggingFaceId: 'Xenova/bge-large-en-v1.5',
+    dimensions: 1024,
+    size: '~335MB',
+    description: 'Best quality'
+  }
+];
+
+// Current loaded model state
+let currentModel: EmbeddingModel | null = null;
 let embedder: any = null;
 let isLoading = false;
 let loadError: string | null = null;
@@ -17,11 +51,12 @@ export interface LocalEmbeddingService {
   isReady: boolean;
   isLoading: boolean;
   error: string | null;
-  modelName: string;
-  dimensions: number;
-  initialize: () => Promise<boolean>;
+  currentModel: EmbeddingModel | null;
+  availableModels: EmbeddingModel[];
+  initialize: (modelId: string) => Promise<boolean>;
   embed: (text: string) => Promise<number[]>;
   embedBatch: (texts: string[]) => Promise<number[][]>;
+  unload: () => void;
 }
 
 // Progress callback type
@@ -33,23 +68,40 @@ export function setProgressCallback(callback: ProgressCallback | null) {
   progressCallback = callback;
 }
 
-async function initializeEmbedder(): Promise<boolean> {
-  if (embedder) return true;
+async function initializeEmbedder(modelId: string): Promise<boolean> {
+  const model = AVAILABLE_MODELS.find(m => m.id === modelId);
+  if (!model) {
+    loadError = `Unknown model: ${modelId}`;
+    return false;
+  }
+
+  // If same model is already loaded, return true
+  if (embedder && currentModel?.id === modelId) {
+    return true;
+  }
+
+  // If different model, unload first
+  if (embedder && currentModel?.id !== modelId) {
+    console.log('Unloading previous model:', currentModel?.name);
+    embedder = null;
+    currentModel = null;
+  }
+
   if (isLoading) {
     // Wait for existing initialization
     while (isLoading) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    return embedder !== null;
+    return embedder !== null && currentModel?.id === modelId;
   }
 
   isLoading = true;
   loadError = null;
 
   try {
-    console.log('Initializing local embedding model:', MODEL_ID);
+    console.log('Initializing local embedding model:', model.huggingFaceId);
     
-    embedder = await pipeline('feature-extraction', MODEL_ID, {
+    embedder = await pipeline('feature-extraction', model.huggingFaceId, {
       progress_callback: (data: any) => {
         if (progressCallback) {
           progressCallback({
@@ -64,28 +116,27 @@ async function initializeEmbedder(): Promise<boolean> {
       }
     });
 
-    console.log('Local embedding model loaded successfully');
+    currentModel = model;
+    console.log('Local embedding model loaded successfully:', model.name);
     isLoading = false;
     return true;
   } catch (error) {
     console.error('Failed to initialize embedding model:', error);
     loadError = error instanceof Error ? error.message : 'Failed to load model';
     isLoading = false;
+    embedder = null;
+    currentModel = null;
     return false;
   }
 }
 
 async function embed(text: string): Promise<number[]> {
-  if (!embedder) {
-    const success = await initializeEmbedder();
-    if (!success) {
-      throw new Error(loadError || 'Embedding model not initialized');
-    }
+  if (!embedder || !currentModel) {
+    throw new Error('No embedding model loaded. Call initialize() first.');
   }
 
   try {
     const output = await embedder(text, { pooling: 'mean', normalize: true });
-    // Convert to regular array
     return Array.from(output.data as Float32Array);
   } catch (error) {
     console.error('Embedding error:', error);
@@ -94,11 +145,8 @@ async function embed(text: string): Promise<number[]> {
 }
 
 async function embedBatch(texts: string[]): Promise<number[][]> {
-  if (!embedder) {
-    const success = await initializeEmbedder();
-    if (!success) {
-      throw new Error(loadError || 'Embedding model not initialized');
-    }
+  if (!embedder || !currentModel) {
+    throw new Error('No embedding model loaded. Call initialize() first.');
   }
 
   try {
@@ -114,9 +162,15 @@ async function embedBatch(texts: string[]): Promise<number[][]> {
   }
 }
 
+function unload() {
+  embedder = null;
+  currentModel = null;
+  loadError = null;
+}
+
 export const localEmbeddings: LocalEmbeddingService = {
   get isReady() {
-    return embedder !== null;
+    return embedder !== null && currentModel !== null;
   },
   get isLoading() {
     return isLoading;
@@ -124,11 +178,14 @@ export const localEmbeddings: LocalEmbeddingService = {
   get error() {
     return loadError;
   },
-  modelName: 'all-MiniLM-L6-v2',
-  dimensions: DIMENSIONS,
+  get currentModel() {
+    return currentModel;
+  },
+  availableModels: AVAILABLE_MODELS,
   initialize: initializeEmbedder,
   embed,
-  embedBatch
+  embedBatch,
+  unload
 };
 
 export default localEmbeddings;
