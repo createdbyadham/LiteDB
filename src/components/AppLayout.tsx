@@ -11,7 +11,8 @@ import {
   Terminal,
   ChevronLeft,
   ChevronRight,
-  ArrowLeft
+  ArrowLeft,
+  Box
 } from 'lucide-react';
 import icon from '/titlebaricon2.png';
 
@@ -30,6 +31,7 @@ interface AppLayoutProps {
   isConnected?: boolean;
   connectionType?: 'sqlite' | 'postgres' | null;
   databaseName?: string;
+  hasPgVector?: boolean;
 }
 
 const AppLayout = ({ 
@@ -38,7 +40,8 @@ const AppLayout = ({
   onTabChange,
   isConnected = false,
   connectionType = null,
-  databaseName = ''
+  databaseName = '',
+  hasPgVector = false
 }: AppLayoutProps) => {
   const { navSidebarCollapsed: sidebarCollapsed, toggleNavSidebar } = useSidebar();
   const navigate = useNavigate();
@@ -74,6 +77,13 @@ const AppLayout = ({
       icon: <Terminal className="w-5 h-5" />,
       onClick: () => onTabChange?.('query'),
     },
+    // Only show Vectors tab for PostgreSQL with pgvector
+    ...(hasPgVector ? [{
+      id: 'vectors',
+      label: 'Vector Search',
+      icon: <Box className="w-5 h-5" />,
+      onClick: () => onTabChange?.('vectors'),
+    }] : []),
   ] : [];
 
   const renderNavItem = (item: NavItem, isActive: boolean) => {

@@ -19,10 +19,18 @@ declare global {
   interface Window {
     electron?: {
       saveDatabase: (filePath: string, data: Uint8Array) => Promise<{ success: boolean; error?: string }>;
-      exportDatabase: (data: string, format: string) => Promise<{ success: boolean; error?: string }>;
+      readDatabase: (filePath: string) => Promise<{ success: boolean; data?: Buffer; error?: string; filePath?: string }>;
+      exportDatabase: (data: string, format: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
       minimizeWindow: () => void;
       maximizeWindow: () => void;
       closeWindow: () => void;
+      openFileDialog: (callback: (filePath: string) => void) => () => void;
+      // PostgreSQL methods
+      connectPostgres: (config: { host: string; port: number; database: string; username: string; password: string; ssl?: boolean }) => 
+        Promise<{ success: boolean; error?: string }>;
+      executePostgresQuery: (params: { query: string; values?: any[] }) => 
+        Promise<{ success: boolean; columns?: string[]; rows?: any[]; error?: string; rowCount?: number }>;
+      disconnectPostgres: () => Promise<{ success: boolean; error?: string }>;
     };
     SQL: {
       Database: new (buffer?: ArrayBuffer) => unknown;

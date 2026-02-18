@@ -4,10 +4,19 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Save } from 'lucide-react';
+import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Save, Sparkles } from 'lucide-react';
 import { ColumnInfo, RowData, sqliteService } from '@/lib/sqliteService';
+import { VectorColumnInfo } from '@/lib/pgService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { 
+  ContextMenu, 
+  ContextMenuContent, 
+  ContextMenuItem, 
+  ContextMenuSeparator,
+  ContextMenuTrigger 
+} from '@/components/ui/context-menu';
 import { EditDialog } from '@/components/EditDialog';
+import { VectorBadge } from '@/components/VectorAdmin/VectorBadge';
 import { toast } from '@/hooks/use-toast';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Portal } from '@radix-ui/react-portal';
@@ -18,9 +27,22 @@ interface TableViewProps {
   columnInfo: ColumnInfo[];
   rows: RowData[];
   onUpdateRow?: (oldRow: RowData, newRow: RowData) => Promise<boolean>;
+  // Vector support
+  vectorColumns?: VectorColumnInfo[];
+  onInspectVector?: (value: unknown, columnName: string, rowId?: string | number, tableName?: string) => void;
+  onFindSimilar?: (row: RowData) => void;
 }
 
-const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: TableViewProps) => {
+const TableEditor = ({ 
+  tableName, 
+  columns, 
+  columnInfo, 
+  rows, 
+  onUpdateRow,
+  vectorColumns = [],
+  onInspectVector,
+  onFindSimilar
+}: TableViewProps) => {
   const [filteredRows, setFilteredRows] = useState<RowData[]>([]);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -110,8 +132,32 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
   // Get the primary key column (if any)
   const primaryKeyColumn = columnInfo.find(col => col.pk === 1)?.name;
 
-  const formatCellValue = (value: unknown) => {
+  // Check if a column is a vector column
+  const getVectorColumnInfo = (columnName: string): VectorColumnInfo | undefined => {
+    return vectorColumns.find(vc => vc.tableName === tableName && vc.columnName === columnName);
+  };
+
+  // Check if the table has any vector columns (for showing Find Similar option)
+  const hasVectorColumns = vectorColumns.some(vc => vc.tableName === tableName);
+
+  const formatCellValue = (value: unknown, columnName?: string, row?: RowData) => {
     if (value === null) return <span className="text-muted-foreground italic">NULL</span>;
+    
+    // Check if this column is a vector column
+    if (columnName) {
+      const vecInfo = getVectorColumnInfo(columnName);
+      if (vecInfo) {
+        const rowId = primaryKeyColumn && row ? row[primaryKeyColumn] as string | number | undefined : undefined;
+        return (
+          <VectorBadge
+            value={value}
+            dimensions={vecInfo.dimensions}
+            onClick={() => onInspectVector?.(value, columnName, rowId, tableName)}
+          />
+        );
+      }
+    }
+    
     if (typeof value === 'object') return JSON.stringify(value);
     return String(value);
   };
@@ -347,34 +393,51 @@ const TableEditor = ({ tableName, columns, columnInfo, rows, onUpdateRow }: Tabl
             <TableBody>
               {paginatedRows.length > 0 ? (
                 paginatedRows.map((row, rowIndex) => (
-                  <TableRow
-                    key={primaryKeyColumn && row[primaryKeyColumn] ? String(row[primaryKeyColumn]) : rowIndex}
-                    className="hover:bg-muted/30 cursor-pointer"
-                    onDoubleClick={() => handleRowDoubleClick(row)}
-                  >
-                    <TableCell className="px-4 py-2">
-                      <div className="flex items-center h-full ml-2">
-                        <Checkbox
-                          checked={selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))}
-                          onCheckedChange={(checked) => {
-                            const newSelected = new Set(selectedRows);
-                            const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
-                            if (checked) {
-                              newSelected.add(rowId);
-                            } else {
-                              newSelected.delete(rowId);
-                            }
-                            setSelectedRows(newSelected);
-                          }}
-                        />
-                      </div>
-                    </TableCell>
-                    {columns.map((column) => (
-                      <TableCell key={column} className="whitespace-nowrap pl-[24px]">
-                        {formatCellValue(row[column])}
-                      </TableCell>
-                    ))}
-                  </TableRow>
+                  <ContextMenu key={primaryKeyColumn && row[primaryKeyColumn] ? String(row[primaryKeyColumn]) : rowIndex}>
+                    <ContextMenuTrigger asChild>
+                      <TableRow
+                        className="hover:bg-muted/30 cursor-pointer"
+                        onDoubleClick={() => handleRowDoubleClick(row)}
+                      >
+                        <TableCell className="px-4 py-2">
+                          <div className="flex items-center h-full ml-2">
+                            <Checkbox
+                              checked={selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))}
+                              onCheckedChange={(checked) => {
+                                const newSelected = new Set(selectedRows);
+                                const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
+                                if (checked) {
+                                  newSelected.add(rowId);
+                                } else {
+                                  newSelected.delete(rowId);
+                                }
+                                setSelectedRows(newSelected);
+                              }}
+                            />
+                          </div>
+                        </TableCell>
+                        {columns.map((column) => (
+                          <TableCell key={column} className="whitespace-nowrap pl-[24px]">
+                            {formatCellValue(row[column], column, row)}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem onClick={() => handleRowDoubleClick(row)}>
+                        Edit Row
+                      </ContextMenuItem>
+                      {hasVectorColumns && onFindSimilar && (
+                        <>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => onFindSimilar(row)}>
+                            <Sparkles className="w-4 h-4 mr-2" />
+                            Find Similar Rows
+                          </ContextMenuItem>
+                        </>
+                      )}
+                    </ContextMenuContent>
+                  </ContextMenu>
                 ))
               ) : (
                 <TableRow>

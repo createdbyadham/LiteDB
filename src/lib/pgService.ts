@@ -12,6 +12,29 @@ export interface PgConfig {
   ssl?: boolean;
 }
 
+// Vector column info
+export interface VectorColumnInfo {
+  tableName: string;
+  columnName: string;
+  dimensions: number;
+}
+
+// Vector statistics for visualization
+export interface VectorStats {
+  dimensions: number;
+  min: number;
+  max: number;
+  mean: number;
+  histogram: number[]; // 10 buckets
+}
+
+// Similarity search result
+export interface SimilarityResult {
+  row: RowData;
+  distance: number;
+  similarity: number;
+}
+
 class PgService {
   private client: any = null;
   private pg: any = null;
@@ -20,6 +43,8 @@ class PgService {
   private currentTables: TableInfo[] = [];
   public currentConfig: PgConfig | null = null;
   public connected = false;
+  public hasPgVector = false;
+  public vectorColumns: VectorColumnInfo[] = [];
 
   async init() {
     if (this.pg) {
@@ -496,7 +521,294 @@ class PgService {
       this.connected = false;
       this.currentConfig = null;
       this.currentTables = [];
+      this.hasPgVector = false;
+      this.vectorColumns = [];
     }
+  }
+
+  // Check if pgvector extension is installed
+  async checkPgVectorExtension(): Promise<boolean> {
+    if (!this.connected) return false;
+
+    try {
+      const result = await window.electron?.executePostgresQuery({
+        query: `SELECT 1 FROM pg_extension WHERE extname = 'vector';`
+      });
+
+      this.hasPgVector = result?.success && result.rows.length > 0;
+      return this.hasPgVector;
+    } catch (error) {
+      console.error('Error checking pgvector extension:', error);
+      this.hasPgVector = false;
+      return false;
+    }
+  }
+
+  // Get all vector columns in the database
+  async getVectorColumns(): Promise<VectorColumnInfo[]> {
+    if (!this.connected || !this.hasPgVector) return [];
+
+    try {
+      const result = await window.electron?.executePostgresQuery({
+        query: `
+          SELECT 
+            c.table_name,
+            c.column_name,
+            CASE 
+              WHEN c.udt_name = 'vector' THEN 
+                COALESCE(
+                  (regexp_match(format_type(a.atttypid, a.atttypmod), 'vector\\((\\d+)\\)'))[1]::int,
+                  0
+                )
+              ELSE 0
+            END as dimensions
+          FROM information_schema.columns c
+          JOIN pg_attribute a ON a.attname = c.column_name
+          JOIN pg_class t ON t.relname = c.table_name AND a.attrelid = t.oid
+          WHERE c.table_schema = 'public'
+            AND c.udt_name = 'vector'
+          ORDER BY c.table_name, c.column_name;
+        `
+      });
+
+      if (!result?.success) return [];
+
+      this.vectorColumns = result.rows.map((row: any) => ({
+        tableName: row.table_name,
+        columnName: row.column_name,
+        dimensions: parseInt(row.dimensions) || 0
+      }));
+
+      return this.vectorColumns;
+    } catch (error) {
+      console.error('Error fetching vector columns:', error);
+      return [];
+    }
+  }
+
+  // Get vector columns for a specific table
+  getTableVectorColumns(tableName: string): VectorColumnInfo[] {
+    return this.vectorColumns.filter(vc => vc.tableName === tableName);
+  }
+
+  // Check if a column is a vector column
+  isVectorColumn(tableName: string, columnName: string): VectorColumnInfo | undefined {
+    return this.vectorColumns.find(
+      vc => vc.tableName === tableName && vc.columnName === columnName
+    );
+  }
+
+  // Parse vector string to array of numbers
+  parseVector(vectorStr: string): number[] {
+    if (!vectorStr) return [];
+    // Vector format is like "[0.1,0.2,0.3]" or just "0.1,0.2,0.3"
+    const cleaned = vectorStr.replace(/[\[\]]/g, '');
+    return cleaned.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+  }
+
+  // Get statistics for a vector column
+  async getVectorStats(tableName: string, columnName: string, sampleSize = 100): Promise<VectorStats | null> {
+    if (!this.connected || !this.hasPgVector) return null;
+
+    try {
+      // First, get a sample of vectors
+      const result = await window.electron?.executePostgresQuery({
+        query: `
+          SELECT "${columnName}"::text as vector_text
+          FROM "${tableName}"
+          WHERE "${columnName}" IS NOT NULL
+          LIMIT ${sampleSize};
+        `
+      });
+
+      if (!result?.success || result.rows.length === 0) return null;
+
+      // Parse vectors and compute statistics
+      const vectors = result.rows
+        .map((row: any) => this.parseVector(row.vector_text))
+        .filter((v: number[]) => v.length > 0);
+
+      if (vectors.length === 0) return null;
+
+      const dimensions = vectors[0].length;
+      
+      // Flatten all values for overall statistics
+      const allValues = vectors.flat();
+      const min = Math.min(...allValues);
+      const max = Math.max(...allValues);
+      const mean = allValues.reduce((a: number, b: number) => a + b, 0) / allValues.length;
+
+      // Compute histogram (10 buckets)
+      const bucketSize = (max - min) / 10 || 1;
+      const histogram = new Array(10).fill(0);
+      
+      for (const value of allValues) {
+        const bucketIndex = Math.min(Math.floor((value - min) / bucketSize), 9);
+        histogram[bucketIndex]++;
+      }
+
+      // Normalize histogram to percentages
+      const total = histogram.reduce((a: number, b: number) => a + b, 0);
+      const normalizedHistogram = histogram.map((count: number) => (count / total) * 100);
+
+      return {
+        dimensions,
+        min,
+        max,
+        mean,
+        histogram: normalizedHistogram
+      };
+    } catch (error) {
+      console.error('Error computing vector stats:', error);
+      return null;
+    }
+  }
+
+  // Run similarity search by vector (from row ID)
+  async findSimilarByRowId(
+    tableName: string,
+    vectorColumn: string,
+    primaryKeyColumn: string,
+    rowId: string | number,
+    limit = 10,
+    distanceMetric: '<=>' | '<->' | '<#>' = '<=>'
+  ): Promise<SimilarityResult[]> {
+    if (!this.connected || !this.hasPgVector) return [];
+
+    try {
+      // Build the query based on the distance metric
+      let distanceExpr: string;
+      let orderExpr: string;
+      let similarityExpr: string;
+
+      switch (distanceMetric) {
+        case '<->': // L2 distance
+          distanceExpr = `t."${vectorColumn}" <-> source."${vectorColumn}"`;
+          orderExpr = distanceExpr;
+          similarityExpr = `1.0 / (1.0 + ${distanceExpr})`;
+          break;
+        case '<#>': // Inner product (negative)
+          distanceExpr = `t."${vectorColumn}" <#> source."${vectorColumn}"`;
+          orderExpr = distanceExpr;
+          similarityExpr = `-(${distanceExpr})`; // Higher is more similar
+          break;
+        case '<=>': // Cosine distance
+        default:
+          distanceExpr = `t."${vectorColumn}" <=> source."${vectorColumn}"`;
+          orderExpr = distanceExpr;
+          similarityExpr = `1.0 - (${distanceExpr})`; // Convert to similarity
+          break;
+      }
+
+      const escapedRowId = typeof rowId === 'string' ? `'${rowId.replace(/'/g, "''")}'` : rowId;
+
+      const result = await window.electron?.executePostgresQuery({
+        query: `
+          SELECT 
+            t.*,
+            ${distanceExpr} as distance,
+            ${similarityExpr} as similarity
+          FROM "${tableName}" t
+          CROSS JOIN (
+            SELECT "${vectorColumn}" 
+            FROM "${tableName}" 
+            WHERE "${primaryKeyColumn}" = ${escapedRowId}
+          ) source
+          WHERE t."${primaryKeyColumn}" != ${escapedRowId}
+            AND t."${vectorColumn}" IS NOT NULL
+          ORDER BY ${orderExpr}
+          LIMIT ${limit};
+        `
+      });
+
+      if (!result?.success) return [];
+
+      return result.rows.map((row: any) => ({
+        row: { ...row },
+        distance: parseFloat(row.distance) || 0,
+        similarity: parseFloat(row.similarity) || 0
+      }));
+    } catch (error) {
+      console.error('Error finding similar rows:', error);
+      toast({
+        title: "Similarity Search Error",
+        description: error instanceof Error ? error.message : "Failed to find similar rows",
+        variant: "destructive"
+      });
+      return [];
+    }
+  }
+
+  // Run similarity search by raw vector
+  async findSimilarByVector(
+    tableName: string,
+    vectorColumn: string,
+    queryVector: number[],
+    limit = 10,
+    distanceMetric: '<=>' | '<->' | '<#>' = '<=>'
+  ): Promise<SimilarityResult[]> {
+    if (!this.connected || !this.hasPgVector) return [];
+
+    try {
+      const vectorStr = `[${queryVector.join(',')}]`;
+      
+      let distanceExpr: string;
+      let orderExpr: string;
+      let similarityExpr: string;
+
+      switch (distanceMetric) {
+        case '<->':
+          distanceExpr = `"${vectorColumn}" <-> '${vectorStr}'::vector`;
+          orderExpr = distanceExpr;
+          similarityExpr = `1.0 / (1.0 + ${distanceExpr})`;
+          break;
+        case '<#>':
+          distanceExpr = `"${vectorColumn}" <#> '${vectorStr}'::vector`;
+          orderExpr = distanceExpr;
+          similarityExpr = `-(${distanceExpr})`;
+          break;
+        case '<=>':
+        default:
+          distanceExpr = `"${vectorColumn}" <=> '${vectorStr}'::vector`;
+          orderExpr = distanceExpr;
+          similarityExpr = `1.0 - (${distanceExpr})`;
+          break;
+      }
+
+      const result = await window.electron?.executePostgresQuery({
+        query: `
+          SELECT 
+            *,
+            ${distanceExpr} as distance,
+            ${similarityExpr} as similarity
+          FROM "${tableName}"
+          WHERE "${vectorColumn}" IS NOT NULL
+          ORDER BY ${orderExpr}
+          LIMIT ${limit};
+        `
+      });
+
+      if (!result?.success) return [];
+
+      return result.rows.map((row: any) => ({
+        row: { ...row },
+        distance: parseFloat(row.distance) || 0,
+        similarity: parseFloat(row.similarity) || 0
+      }));
+    } catch (error) {
+      console.error('Error finding similar by vector:', error);
+      toast({
+        title: "Similarity Search Error",
+        description: error instanceof Error ? error.message : "Failed to find similar rows",
+        variant: "destructive"
+      });
+      return [];
+    }
+  }
+
+  // Get tables that have vector columns
+  getTablesWithVectors(): string[] {
+    return [...new Set(this.vectorColumns.map(vc => vc.tableName))];
   }
 
   async deleteRows(tableName: string, primaryKeyColumn: string, rowIds: string[]): Promise<boolean> {

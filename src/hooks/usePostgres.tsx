@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { pgService, PgConfig } from '@/lib/pgService';
+import { pgService, PgConfig, VectorColumnInfo, VectorStats, SimilarityResult } from '@/lib/pgService';
 import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
@@ -16,12 +16,37 @@ export interface UsePgReturn {
   executeQuery: (sql: string) => Promise<{ columns: string[], rows: unknown[][] } | null>;
   disconnect: () => void;
   refreshTables: () => Promise<void>;
+  // pgvector support
+  hasPgVector: boolean;
+  vectorColumns: VectorColumnInfo[];
+  getTableVectorColumns: (tableName: string) => VectorColumnInfo[];
+  isVectorColumn: (tableName: string, columnName: string) => VectorColumnInfo | undefined;
+  getVectorStats: (tableName: string, columnName: string) => Promise<VectorStats | null>;
+  findSimilarByRowId: (
+    tableName: string,
+    vectorColumn: string,
+    primaryKeyColumn: string,
+    rowId: string | number,
+    limit?: number,
+    distanceMetric?: '<=>' | '<->' | '<#>'
+  ) => Promise<SimilarityResult[]>;
+  findSimilarByVector: (
+    tableName: string,
+    vectorColumn: string,
+    queryVector: number[],
+    limit?: number,
+    distanceMetric?: '<=>' | '<->' | '<#>'
+  ) => Promise<SimilarityResult[]>;
+  getTablesWithVectors: () => string[];
+  refreshVectorColumns: () => Promise<void>;
 }
 
 export function usePostgres(): UsePgReturn {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [tables, setTables] = useState<TableInfo[]>([]);
+  const [hasPgVector, setHasPgVector] = useState(false);
+  const [vectorColumns, setVectorColumns] = useState<VectorColumnInfo[]>([]);
 
   const pushPgSchemaToAI = async (tableList: TableInfo[]) => {
     try {
@@ -67,6 +92,14 @@ export function usePostgres(): UsePgReturn {
             setIsConnected(true);
             // Push schema to AI
             await pushPgSchemaToAI(existingTables);
+            
+            // Check for pgvector support
+            const hasVector = await pgService.checkPgVectorExtension();
+            if (mounted && hasVector) {
+              setHasPgVector(true);
+              const vecCols = await pgService.getVectorColumns();
+              if (mounted) setVectorColumns(vecCols);
+            }
           }
         }
       } catch (error) {
@@ -74,6 +107,8 @@ export function usePostgres(): UsePgReturn {
         if (mounted) {
           setIsConnected(false);
           setTables([]);
+          setHasPgVector(false);
+          setVectorColumns([]);
           aiService.clearSchema();
         }
       }
@@ -91,6 +126,8 @@ export function usePostgres(): UsePgReturn {
     setIsConnecting(true);
     setIsConnected(false);
     setTables([]); // Clear existing tables while connecting
+    setHasPgVector(false);
+    setVectorColumns([]);
 
     try {
       // Ensure pgService is initialized
@@ -105,6 +142,17 @@ export function usePostgres(): UsePgReturn {
         const tableList = await pgService.getTables();
         console.log("Retrieved tables:", tableList);
 
+        // Check for pgvector extension
+        const hasVector = await pgService.checkPgVectorExtension();
+        setHasPgVector(hasVector);
+        
+        if (hasVector) {
+          console.log("pgvector extension detected");
+          const vecCols = await pgService.getVectorColumns();
+          setVectorColumns(vecCols);
+          console.log("Vector columns found:", vecCols.length);
+        }
+
         if (tableList.length > 0) {
           console.log("Setting state with tables");
           setTables(tableList);
@@ -112,9 +160,10 @@ export function usePostgres(): UsePgReturn {
           // Push schema to AI
           await pushPgSchemaToAI(tableList);
 
+          const vectorInfo = hasVector ? ` (pgvector enabled with ${vectorColumns.length} vector columns)` : '';
           toast({
             title: "Connected to PostgreSQL",
-            description: `Connected to ${config.database} with ${tableList.length} tables`,
+            description: `Connected to ${config.database} with ${tableList.length} tables${vectorInfo}`,
           });
 
           return true;
@@ -135,12 +184,16 @@ export function usePostgres(): UsePgReturn {
       console.log("Failed to connect to PostgreSQL database");
       setIsConnected(false);
       setTables([]);
+      setHasPgVector(false);
+      setVectorColumns([]);
       aiService.clearSchema();
       return false;
     } catch (error) {
       console.error("Error connecting to PostgreSQL:", error);
       setIsConnected(false);
       setTables([]);
+      setHasPgVector(false);
+      setVectorColumns([]);
       aiService.clearSchema();
 
       toast({
@@ -239,12 +292,62 @@ export function usePostgres(): UsePgReturn {
     pgService.disconnect();
     setIsConnected(false);
     setTables([]);
+    setHasPgVector(false);
+    setVectorColumns([]);
     aiService.clearSchema();
 
     toast({
       title: "Disconnected",
       description: "Disconnected from PostgreSQL database",
     });
+  };
+
+  // pgvector methods
+  const getTableVectorColumns = (tableName: string) => {
+    return pgService.getTableVectorColumns(tableName);
+  };
+
+  const isVectorColumn = (tableName: string, columnName: string) => {
+    return pgService.isVectorColumn(tableName, columnName);
+  };
+
+  const getVectorStats = async (tableName: string, columnName: string) => {
+    return pgService.getVectorStats(tableName, columnName);
+  };
+
+  const findSimilarByRowId = async (
+    tableName: string,
+    vectorColumn: string,
+    primaryKeyColumn: string,
+    rowId: string | number,
+    limit = 10,
+    distanceMetric: '<=>' | '<->' | '<#>' = '<=>'
+  ) => {
+    return pgService.findSimilarByRowId(tableName, vectorColumn, primaryKeyColumn, rowId, limit, distanceMetric);
+  };
+
+  const findSimilarByVector = async (
+    tableName: string,
+    vectorColumn: string,
+    queryVector: number[],
+    limit = 10,
+    distanceMetric: '<=>' | '<->' | '<#>' = '<=>'
+  ) => {
+    return pgService.findSimilarByVector(tableName, vectorColumn, queryVector, limit, distanceMetric);
+  };
+
+  const getTablesWithVectors = () => {
+    return pgService.getTablesWithVectors();
+  };
+
+  const refreshVectorColumns = async () => {
+    if (!isConnected) return;
+    const hasVector = await pgService.checkPgVectorExtension();
+    setHasPgVector(hasVector);
+    if (hasVector) {
+      const vecCols = await pgService.getVectorColumns();
+      setVectorColumns(vecCols);
+    }
   };
 
   return {
@@ -258,6 +361,16 @@ export function usePostgres(): UsePgReturn {
     getIndexes,
     executeQuery,
     disconnect,
-    refreshTables
+    refreshTables,
+    // pgvector support
+    hasPgVector,
+    vectorColumns,
+    getTableVectorColumns,
+    isVectorColumn,
+    getVectorStats,
+    findSimilarByRowId,
+    findSimilarByVector,
+    getTablesWithVectors,
+    refreshVectorColumns
   };
 } 

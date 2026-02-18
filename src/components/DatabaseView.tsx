@@ -21,9 +21,11 @@ import {
   Table2,
   TableOfContents,
   RefreshCw,
+  Box,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { ExportDialog } from '@/components/ExportDialog';
+import { SemanticSearch, VectorInspector, SimilarRowsModal } from '@/components/VectorAdmin';
 
 const DatabaseView = () => {
   const [selectedTable, setSelectedTable] = useState<string>('');
@@ -57,8 +59,25 @@ const DatabaseView = () => {
     getForeignKeys: getPostgresForeignKeys,
     getIndexes: getPostgresIndexes,
     disconnect: disconnectPostgres,
-    refreshTables: refreshPostgresTables
+    refreshTables: refreshPostgresTables,
+    // pgvector support
+    hasPgVector,
+    vectorColumns,
+    findSimilarByRowId
   } = usePostgres();
+
+  // Vector inspection state
+  const [vectorInspectorOpen, setVectorInspectorOpen] = useState(false);
+  const [inspectedVector, setInspectedVector] = useState<{
+    value: unknown;
+    columnName: string;
+    rowId?: string | number;
+    tableName?: string;
+  } | null>(null);
+
+  // Similar rows modal state
+  const [similarRowsModalOpen, setSimilarRowsModalOpen] = useState(false);
+  const [similarRowsSourceRow, setSimilarRowsSourceRow] = useState<RowData | null>(null);
 
   const navigate = useNavigate();
 
@@ -337,6 +356,37 @@ const DatabaseView = () => {
     setTimeout(() => setSelectedTable(tableName), 0);
   };
 
+  // Vector inspection handler
+  const handleInspectVector = (
+    value: unknown,
+    columnName: string,
+    rowId?: string | number,
+    tableName?: string
+  ) => {
+    setInspectedVector({ value, columnName, rowId, tableName });
+    setVectorInspectorOpen(true);
+  };
+
+  // Find similar rows handler
+  const handleFindSimilar = (row: RowData) => {
+    setSimilarRowsSourceRow(row);
+    setSimilarRowsModalOpen(true);
+  };
+
+  // Get primary key column for current table
+  const primaryKeyColumn = useMemo(() => {
+    const pk = tableColumns.find(col => col.pk === 1);
+    return pk?.name || 'id';
+  }, [tableColumns]);
+
+  // Wrapper for getTableColumns that returns the format SemanticSearch expects
+  const getTableColumnsForSearch = async (tableName: string) => {
+    const cols = isPostgresActive 
+      ? await getPostgresTableColumns(tableName)
+      : getSqliteTableColumns(tableName);
+    return cols.map(c => ({ name: c.name, pk: c.pk }));
+  };
+
   // Prepare sidebar items
   const sidebarItems: SidebarItem[] = useMemo(() => {
     return tables.map(table => ({
@@ -394,6 +444,7 @@ const DatabaseView = () => {
       isConnected={databaseAvailable}
       connectionType={isPostgresActive ? 'postgres' : 'sqlite'}
       databaseName={databaseName}
+      hasPgVector={hasPgVector}
     >
       <div className="flex flex-col h-full overflow-hidden">
         {/* Header */}
@@ -403,11 +454,18 @@ const DatabaseView = () => {
               {activeTab === 'browse' && 'Table Editor'}
               {activeTab === 'schema' && 'Schema Visualizer'}
               {activeTab === 'query' && 'SQL Editor'}
+              {activeTab === 'vectors' && 'Vector Search'}
             </h1>
             {isPostgresActive && (
               <Badge variant="outline" className="text-xs font-normal">
                 <Server className="w-3 h-3 mr-1" />
                 {pgService.currentConfig?.host}
+              </Badge>
+            )}
+            {hasPgVector && activeTab !== 'vectors' && (
+              <Badge variant="secondary" className="text-xs font-normal">
+                <Box className="w-3 h-3 mr-1" />
+                pgvector
               </Badge>
             )}
           </div>
@@ -476,6 +534,9 @@ const DatabaseView = () => {
                     rows={tableData.rows}
                     columnInfo={tableColumns}
                     onUpdateRow={handleUpdateRow}
+                    vectorColumns={isPostgresActive ? vectorColumns : []}
+                    onInspectVector={isPostgresActive && hasPgVector ? handleInspectVector : undefined}
+                    onFindSimilar={isPostgresActive && hasPgVector ? handleFindSimilar : undefined}
                   />
                 )
               ) : (
@@ -510,6 +571,15 @@ const DatabaseView = () => {
                 onAutosave={handleSaveDatabase}
               />
             )}
+
+            {activeTab === 'vectors' && hasPgVector && (
+              <SemanticSearch
+                vectorColumns={vectorColumns}
+                findSimilarByRowId={findSimilarByRowId}
+                getTableColumns={getTableColumnsForSearch}
+                onInspectVector={handleInspectVector}
+              />
+            )}
           </div>
         </div>
 
@@ -530,6 +600,32 @@ const DatabaseView = () => {
         mode={activeTab === 'schema' ? 'schema' : 'data'}
         onExportSchema={handleSchemaExport}
       />
+
+      {/* Vector Inspector Side Panel */}
+      {hasPgVector && (
+        <VectorInspector
+          isOpen={vectorInspectorOpen}
+          onClose={() => setVectorInspectorOpen(false)}
+          vectorValue={inspectedVector?.value}
+          columnName={inspectedVector?.columnName || ''}
+          rowId={inspectedVector?.rowId}
+          tableName={inspectedVector?.tableName}
+        />
+      )}
+
+      {/* Similar Rows Modal */}
+      {hasPgVector && (
+        <SimilarRowsModal
+          isOpen={similarRowsModalOpen}
+          onClose={() => setSimilarRowsModalOpen(false)}
+          sourceRow={similarRowsSourceRow}
+          tableName={selectedTable}
+          primaryKeyColumn={primaryKeyColumn}
+          vectorColumns={vectorColumns}
+          findSimilarByRowId={findSimilarByRowId}
+          onInspectVector={handleInspectVector}
+        />
+      )}
     </AppLayout>
   );
 };
