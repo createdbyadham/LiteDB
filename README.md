@@ -24,7 +24,10 @@ A modern, fast, and user-friendly database viewer/editor built with React and El
 - **Batch Operations**: Execute multiple SQL statements with transaction support
 - **SQL Script Management**: Save and reuse your SQL scripts
 - **Dual Database Support**: Works with SQLite and PostgreSQL
-- **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries (supports OpenAI, GitHub, and Azure providers), Schema is injected into the LLM upon initialization and refresh
+- **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries.
+  - **Privacy-First AI**: 100% Local Text-to-SQL support with Ollama.
+  - Supports OpenAI, GitHub, and Azure providers.
+  - Schema is injected into the LLM upon initialization and refresh.
 - **Autosave & Export**: Automatically save changes and export query results to **CSV, Excel, or JSON**.
 
 ## Schema Visualization
