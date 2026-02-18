@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   Select,
   SelectContent,
@@ -32,12 +33,14 @@ import {
   AlertCircle,
   Cpu,
   CheckCircle2,
-  Download
+  Download,
+  ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VectorColumnInfo, SimilarityResult } from '@/lib/pgService';
 import { VectorBadge } from './VectorBadge';
 import { localEmbeddings, setProgressCallback, AVAILABLE_MODELS } from '@/lib/localEmbeddings';
+import { useSidebar } from '@/contexts/SidebarContext';
 
 interface SemanticSearchProps {
   vectorColumns: VectorColumnInfo[];
@@ -105,6 +108,9 @@ export const SemanticSearch = ({
   getTableColumns,
   onInspectVector
 }: SemanticSearchProps) => {
+  // Sidebar state from context
+  const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
+  
   // Search mode: 'id' or 'text'
   const [searchMode, setSearchMode] = useState<'id' | 'text'>('id');
   const [selectedTable, setSelectedTable] = useState<string>('');
@@ -351,299 +357,325 @@ export const SemanticSearch = ({
   return (
     <div className="flex h-full">
       {/* Left Panel - Controls */}
-      <div className="w-80 border-r bg-muted/20 p-4 space-y-6">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Search className="w-5 h-5 text-primary" />
-            <h2 className="font-semibold">Semantic Search</h2>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Find similar rows using vector similarity
-          </p>
-        </div>
-
-        <Separator />
-
-        {/* Table Selection */}
-        <div className="space-y-2">
-          <Label className="text-xs">Table</Label>
-          <Select value={selectedTable} onValueChange={handleTableChange}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select a table" />
-            </SelectTrigger>
-            <SelectContent>
-              {tables.map(table => (
-                <SelectItem key={table} value={table}>
-                  {table}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Vector Column Selection */}
-        <div className="space-y-2">
-          <Label className="text-xs">Vector Column</Label>
-          <Select 
-            value={selectedColumn} 
-            onValueChange={setSelectedColumn}
-            disabled={!selectedTable}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select vector column" />
-            </SelectTrigger>
-            <SelectContent>
-              {columnsForTable.map(col => (
-                <SelectItem key={col.columnName} value={col.columnName}>
-                  <div className="flex items-center gap-2">
-                    <Box className="w-3.5 h-3.5" />
-                    {col.columnName}
-                    <Badge variant="outline" className="text-[10px] ml-1">
-                      {col.dimensions}d
-                    </Badge>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Separator />
-
-        {/* Search Mode Toggle */}
-        <div className="space-y-2">
-          <Label className="text-xs">Search Method</Label>
-          <div className="flex gap-2">
-            <Button
-              variant={searchMode === 'id' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setSearchMode('id')}
-              className="flex-1"
-            >
-              <Hash className="w-3.5 h-3.5 mr-1.5" />
-              By Row ID
-            </Button>
-            <Button
-              variant={searchMode === 'text' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setSearchMode('text')}
-              className="flex-1"
-            >
-              <Type className="w-3.5 h-3.5 mr-1.5" />
-              By Text
-            </Button>
-          </div>
-        </div>
-
-        {/* Row ID Input */}
-        {searchMode === 'id' && (
-          <div className="space-y-2">
-            <Label className="text-xs">Row ID</Label>
-            <Input
-              placeholder="Enter row ID..."
-              value={rowIdInput}
-              onChange={(e) => setRowIdInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            />
-            <p className="text-[10px] text-muted-foreground">
-              Find rows similar to this row's vector
-            </p>
-          </div>
-        )}
-
-        {/* Text Input - with local model */}
-        {searchMode === 'text' && (
-          <div className="space-y-3">
-            {/* Model Selection & Status */}
-            <div className="p-3 rounded-lg border bg-muted/30 space-y-3">
-              <div className="flex items-center gap-2">
-                <Cpu className="w-4 h-4" />
-                <span className="text-xs font-medium">Local Embedding Model</span>
-              </div>
-
-              {/* Model Selector */}
-              <Select 
-                value={selectedModelId} 
-                onValueChange={handleModelChange}
-                disabled={modelStatus === 'loading'}
+      <aside className={cn(
+        "h-full bg-background border-r transition-all duration-200 ease-out flex flex-col shrink-0",
+        sidebarCollapsed ? "w-12" : "w-72"
+      )}>
+        {/* Sidebar Header */}
+        <div className="flex items-center justify-between p-3 border-b">
+          {!sidebarCollapsed && (
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Search
+            </span>
+          )}
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-7 w-7 text-muted-foreground", sidebarCollapsed && "mx-auto")}
+                onClick={toggleContentSidebar}
               >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
+                <ChevronRight className={cn(
+                  "h-4 w-4 transition-transform duration-200",
+                  !sidebarCollapsed && "rotate-180"
+                )} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+
+        {/* Expanded state - show controls */}
+        {!sidebarCollapsed && (
+          <ScrollArea className="flex-1">
+            <div className="p-3 space-y-4">
+
+            {/* Table Selection */}
+            <div className="space-y-2">
+              <Label className="text-xs">Table</Label>
+              <Select value={selectedTable} onValueChange={handleTableChange}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a table" />
                 </SelectTrigger>
                 <SelectContent>
-                  {AVAILABLE_MODELS.map(model => (
-                    <SelectItem key={model.id} value={model.id}>
+                  {tables.map(table => (
+                    <SelectItem key={table} value={table}>
+                      {table}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Vector Column Selection */}
+            <div className="space-y-2">
+              <Label className="text-xs">Vector Column</Label>
+              <Select 
+                value={selectedColumn} 
+                onValueChange={setSelectedColumn}
+                disabled={!selectedTable}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select vector column" />
+                </SelectTrigger>
+                <SelectContent>
+                  {columnsForTable.map(col => (
+                    <SelectItem key={col.columnName} value={col.columnName}>
                       <div className="flex items-center gap-2">
-                        <span>{model.name}</span>
-                        <Badge variant="outline" className="text-[10px]">
-                          {model.dimensions}d
+                        <Box className="w-3.5 h-3.5" />
+                        {col.columnName}
+                        <Badge variant="outline" className="text-[10px] ml-1">
+                          {col.dimensions}d
                         </Badge>
                       </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-
-              {/* Model Info */}
-              {selectedModel && (
-                <p className="text-[10px] text-muted-foreground">
-                  {selectedModel.description} • {selectedModel.size}
-                </p>
-              )}
-              
-              {modelStatus === 'idle' && (
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  className="w-full"
-                  onClick={handleLoadModel}
-                >
-                  <Download className="w-3.5 h-3.5 mr-1.5" />
-                  Load {selectedModel?.name}
-                </Button>
-              )}
-              
-              {modelStatus === 'loading' && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span className="text-xs">Loading {selectedModel?.name}...</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground truncate">
-                    {modelProgress}
-                  </p>
-                </div>
-              )}
-              
-              {modelStatus === 'ready' && localEmbeddings.currentModel && (
-                <div className="flex items-center gap-2 text-green-600">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span className="text-xs">{localEmbeddings.currentModel.name} ready</span>
-                  <Badge variant="outline" className="text-[10px] ml-auto">
-                    {localEmbeddings.currentModel.dimensions}d
-                  </Badge>
-                </div>
-              )}
-              
-              {modelStatus === 'error' && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-red-500">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    <span className="text-xs">Failed to load</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">{modelProgress}</p>
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    className="w-full"
-                    onClick={handleLoadModel}
-                  >
-                    Retry
-                  </Button>
-                </div>
-              )}
             </div>
 
-            {/* Text Input */}
+            <Separator />
+
+            {/* Search Mode Toggle */}
             <div className="space-y-2">
-              <Label className="text-xs">Search Text</Label>
-              <Textarea
-                placeholder="Type your query... e.g., 'How to build an API?'"
-                value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                className="h-20 resize-none text-sm"
-                disabled={modelStatus !== 'ready'}
-              />
-              {selectedColumnInfo && localEmbeddings.currentModel && 
-               selectedColumnInfo.dimensions !== localEmbeddings.currentModel.dimensions && (
-                <p className="text-[10px] text-amber-500">
-                  ⚠️ Dimension mismatch: column has {selectedColumnInfo.dimensions}d, 
-                  model produces {localEmbeddings.currentModel.dimensions}d
-                </p>
-              )}
-              {selectedColumnInfo && !localEmbeddings.currentModel && (
-                <p className="text-[10px] text-muted-foreground">
-                  💡 Pick a model with {selectedColumnInfo.dimensions}d for best results
-                </p>
-              )}
+              <Label className="text-xs">Search Method</Label>
+              <div className="flex gap-2">
+                <Button
+                  variant={searchMode === 'id' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSearchMode('id')}
+                  className="flex-1"
+                >
+                  <Hash className="w-3.5 h-3.5 mr-1.5" />
+                  By Row ID
+                </Button>
+                <Button
+                  variant={searchMode === 'text' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSearchMode('text')}
+                  className="flex-1"
+                >
+                  <Type className="w-3.5 h-3.5 mr-1.5" />
+                  By Text
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
 
-        <Separator />
+            {/* Row ID Input */}
+            {searchMode === 'id' && (
+              <div className="space-y-2">
+                <Label className="text-xs">Row ID</Label>
+                <Input
+                  placeholder="Enter row ID..."
+                  value={rowIdInput}
+                  onChange={(e) => setRowIdInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Find rows similar to this row's vector
+                </p>
+              </div>
+            )}
 
-        {/* Distance Metric */}
-        <div className="space-y-2">
-          <Label className="text-xs">Distance Metric</Label>
-          <Select 
-            value={distanceMetric} 
-            onValueChange={(v) => setDistanceMetric(v as any)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISTANCE_METRICS.map(metric => (
-                <SelectItem key={metric.value} value={metric.value}>
-                  <div>
-                    <div className="font-medium">{metric.label}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {metric.description}
-                    </div>
+            {/* Text Input - with local model */}
+            {searchMode === 'text' && (
+              <div className="space-y-3">
+                {/* Model Selection & Status */}
+                <div className="p-3 rounded-lg border bg-muted/30 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4" />
+                    <span className="text-xs font-medium">Local Embedding Model</span>
                   </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
 
-        {/* Limit Slider */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">Results Limit</Label>
-            <span className="text-xs font-mono">{limit}</span>
-          </div>
-          <Slider
-            value={[limit]}
-            onValueChange={([v]) => setLimit(v)}
-            min={1}
-            max={100}
-            step={1}
-          />
-        </div>
+                  {/* Model Selector */}
+                  <Select 
+                    value={selectedModelId} 
+                    onValueChange={handleModelChange}
+                    disabled={modelStatus === 'loading'}
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AVAILABLE_MODELS.map(model => (
+                        <SelectItem key={model.id} value={model.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{model.name}</span>
+                            <Badge variant="outline" className="text-[10px]">
+                              {model.dimensions}d
+                            </Badge>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-        <Separator />
+                  {/* Model Info */}
+                  {selectedModel && (
+                    <p className="text-[10px] text-muted-foreground">
+                      {selectedModel.description} • {selectedModel.size}
+                    </p>
+                  )}
+                  
+                  {modelStatus === 'idle' && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="w-full"
+                      onClick={handleLoadModel}
+                    >
+                      <Download className="w-3.5 h-3.5 mr-1.5" />
+                      Load {selectedModel?.name}
+                    </Button>
+                  )}
+                  
+                  {modelStatus === 'loading' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span className="text-xs">Loading {selectedModel?.name}...</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {modelProgress}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {modelStatus === 'ready' && localEmbeddings.currentModel && (
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span className="text-xs">{localEmbeddings.currentModel.name} ready</span>
+                      <Badge variant="outline" className="text-[10px] ml-auto">
+                        {localEmbeddings.currentModel.dimensions}d
+                      </Badge>
+                    </div>
+                  )}
+                  
+                  {modelStatus === 'error' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-red-500">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        <span className="text-xs">Failed to load</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">{modelProgress}</p>
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="w-full"
+                        onClick={handleLoadModel}
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  )}
+                </div>
 
-        {/* Search Button */}
-        <Button 
-          className="w-full" 
-          onClick={handleSearch}
-          disabled={
-            isSearching || 
-            !selectedTable || 
-            !selectedColumn ||
-            (searchMode === 'text' && modelStatus !== 'ready')
-          }
-        >
-          {isSearching ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <Search className="w-4 h-4 mr-2" />
-          )}
-          Search Similar
-        </Button>
+                {/* Text Input */}
+                <div className="space-y-2">
+                  <Label className="text-xs">Search Text</Label>
+                  <Textarea
+                    placeholder="Type your query... e.g., 'How to build an API?'"
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    className="h-20 resize-none text-sm"
+                    disabled={modelStatus !== 'ready'}
+                  />
+                  {selectedColumnInfo && localEmbeddings.currentModel && 
+                   selectedColumnInfo.dimensions !== localEmbeddings.currentModel.dimensions && (
+                    <p className="text-[10px] text-amber-500">
+                      ⚠️ Dimension mismatch: column has {selectedColumnInfo.dimensions}d, 
+                      model produces {localEmbeddings.currentModel.dimensions}d
+                    </p>
+                  )}
+                  {selectedColumnInfo && !localEmbeddings.currentModel && (
+                    <p className="text-[10px] text-muted-foreground">
+                      💡 Pick a model with {selectedColumnInfo.dimensions}d for best results
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
-        {selectedColumnInfo && (
-          <div className="text-xs text-muted-foreground text-center">
-            Searching {selectedColumnInfo.dimensions}-dimensional space
-          </div>
+            <Separator />
+
+            {/* Distance Metric */}
+            <div className="space-y-2">
+              <Label className="text-xs">Distance Metric</Label>
+              <Select 
+                value={distanceMetric} 
+                onValueChange={(v) => setDistanceMetric(v as any)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DISTANCE_METRICS.map(metric => (
+                    <SelectItem key={metric.value} value={metric.value}>
+                      <div>
+                        <div className="font-medium">{metric.label}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {metric.description}
+                        </div>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Limit Slider */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Results Limit</Label>
+                <span className="text-xs font-mono">{limit}</span>
+              </div>
+              <Slider
+                value={[limit]}
+                onValueChange={([v]) => setLimit(v)}
+                min={1}
+                max={100}
+                step={1}
+              />
+            </div>
+
+            <Separator />
+
+            {/* Search Button */}
+            <Button 
+              className="w-full" 
+              onClick={handleSearch}
+              disabled={
+                isSearching || 
+                !selectedTable || 
+                !selectedColumn ||
+                (searchMode === 'text' && modelStatus !== 'ready')
+              }
+            >
+              {isSearching ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Search className="w-4 h-4 mr-2" />
+              )}
+              Search Similar
+            </Button>
+
+            {selectedColumnInfo && (
+              <div className="text-xs text-muted-foreground text-center">
+                Searching {selectedColumnInfo.dimensions}-dimensional space
+              </div>
+            )}
+            </div>
+          </ScrollArea>
         )}
-      </div>
+      </aside>
 
       {/* Right Panel - Results */}
       <div className="flex-1 flex flex-col">
         {/* Results Header */}
-        <div className="p-4 border-b">
+        <div className="p-3.5 border-b">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h3 className="font-medium">Results</h3>
