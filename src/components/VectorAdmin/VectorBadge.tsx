@@ -51,7 +51,7 @@ export const VectorBadge = ({ value, dimensions, onClick, className }: VectorBad
           <Badge
             variant={getBadgeVariant()}
             className={cn(
-              "cursor-pointer transition-all hover:scale-105 font-mono text-xs gap-1",
+              "cursor-pointer transition-all font-mono text-xs gap-1",
               isHovered && "ring-2 ring-primary/50",
               className
             )}
