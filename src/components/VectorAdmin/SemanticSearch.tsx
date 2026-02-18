@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -28,12 +29,15 @@ import {
   Type, 
   Loader2, 
   Box,
-  ArrowRight,
-  AlertCircle
+  AlertCircle,
+  Cpu,
+  CheckCircle2,
+  Download
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VectorColumnInfo, SimilarityResult } from '@/lib/pgService';
 import { VectorBadge } from './VectorBadge';
+import { localEmbeddings, setProgressCallback } from '@/lib/localEmbeddings';
 
 interface SemanticSearchProps {
   vectorColumns: VectorColumnInfo[];
@@ -42,6 +46,13 @@ interface SemanticSearchProps {
     vectorColumn: string,
     primaryKeyColumn: string,
     rowId: string | number,
+    limit?: number,
+    distanceMetric?: '<=>' | '<->' | '<#>'
+  ) => Promise<SimilarityResult[]>;
+  findSimilarByVector: (
+    tableName: string,
+    vectorColumn: string,
+    queryVector: number[],
     limit?: number,
     distanceMetric?: '<=>' | '<->' | '<#>'
   ) => Promise<SimilarityResult[]>;
@@ -90,20 +101,68 @@ const SimilarityBar = ({ score, isDistance = false }: { score: number; isDistanc
 export const SemanticSearch = ({
   vectorColumns,
   findSimilarByRowId,
+  findSimilarByVector,
   getTableColumns,
   onInspectVector
 }: SemanticSearchProps) => {
-  // Search mode: 'id' or 'text' (text requires external embedding)
-  const [searchMode, setSearchMode] = useState<'id'>('id');
+  // Search mode: 'id' or 'text'
+  const [searchMode, setSearchMode] = useState<'id' | 'text'>('id');
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [selectedColumn, setSelectedColumn] = useState<string>('');
   const [rowIdInput, setRowIdInput] = useState('');
+  const [textInput, setTextInput] = useState('');
   const [distanceMetric, setDistanceMetric] = useState<'<=>' | '<->' | '<#>'>('<=>');
   const [limit, setLimit] = useState(10);
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState<SimilarityResult[]>([]);
   const [primaryKeyColumn, setPrimaryKeyColumn] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  
+  // Local embedding model state
+  const [modelStatus, setModelStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [modelProgress, setModelProgress] = useState<string>('');
+
+  // Initialize model status on mount
+  useEffect(() => {
+    if (localEmbeddings.isReady) {
+      setModelStatus('ready');
+    } else if (localEmbeddings.error) {
+      setModelStatus('error');
+    }
+  }, []);
+
+  // Load the local embedding model
+  const handleLoadModel = async () => {
+    setModelStatus('loading');
+    setModelProgress('Downloading model...');
+    
+    setProgressCallback((progress) => {
+      if (progress.file) {
+        const percent = progress.progress ? Math.round(progress.progress) : 0;
+        setModelProgress(`${progress.file}: ${percent}%`);
+      }
+    });
+
+    try {
+      const success = await localEmbeddings.initialize();
+      if (success) {
+        setModelStatus('ready');
+        setModelProgress('');
+        toast({
+          title: "Model Loaded",
+          description: `${localEmbeddings.modelName} (${localEmbeddings.dimensions}d) ready for text search`,
+        });
+      } else {
+        setModelStatus('error');
+        setModelProgress(localEmbeddings.error || 'Failed to load model');
+      }
+    } catch (e) {
+      setModelStatus('error');
+      setModelProgress(e instanceof Error ? e.message : 'Failed to load model');
+    } finally {
+      setProgressCallback(null);
+    }
+  };
 
   // Get unique tables
   const tables = useMemo(() => {
@@ -151,10 +210,28 @@ export const SemanticSearch = ({
 
   // Handle search
   const handleSearch = async () => {
-    if (!selectedTable || !selectedColumn || !rowIdInput.trim()) {
+    if (!selectedTable || !selectedColumn) {
       toast({
         title: "Missing Input",
-        description: "Please select a table, column, and enter a row ID",
+        description: "Please select a table and vector column",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (searchMode === 'id' && !rowIdInput.trim()) {
+      toast({
+        title: "Missing Input",
+        description: "Please enter a row ID",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (searchMode === 'text' && !textInput.trim()) {
+      toast({
+        title: "Missing Input",
+        description: "Please enter search text",
         variant: "destructive"
       });
       return;
@@ -165,19 +242,50 @@ export const SemanticSearch = ({
     setResults([]);
 
     try {
-      const searchResults = await findSimilarByRowId(
-        selectedTable,
-        selectedColumn,
-        primaryKeyColumn,
-        rowIdInput.trim(),
-        limit,
-        distanceMetric
-      );
+      let searchResults: SimilarityResult[];
+
+      if (searchMode === 'id') {
+        searchResults = await findSimilarByRowId(
+          selectedTable,
+          selectedColumn,
+          primaryKeyColumn,
+          rowIdInput.trim(),
+          limit,
+          distanceMetric
+        );
+      } else {
+        // Text search - embed the query first
+        if (!localEmbeddings.isReady) {
+          throw new Error('Embedding model not loaded. Click "Load Model" first.');
+        }
+
+        // Check dimension compatibility
+        const columnDims = selectedColumnInfo?.dimensions || 0;
+        if (columnDims !== localEmbeddings.dimensions) {
+          throw new Error(
+            `Dimension mismatch: Your column has ${columnDims} dimensions, ` +
+            `but ${localEmbeddings.modelName} produces ${localEmbeddings.dimensions} dimensions. ` +
+            `Use "By Row ID" instead, or ensure your vectors were created with the same model.`
+          );
+        }
+
+        const queryVector = await localEmbeddings.embed(textInput.trim());
+        searchResults = await findSimilarByVector(
+          selectedTable,
+          selectedColumn,
+          queryVector,
+          limit,
+          distanceMetric
+        );
+      }
       
       setResults(searchResults);
       
       if (searchResults.length === 0) {
-        setError('No similar rows found. Check that the row ID exists and has a valid vector.');
+        setError(searchMode === 'id' 
+          ? 'No similar rows found. Check that the row ID exists and has a valid vector.'
+          : 'No similar rows found.'
+        );
       }
     } catch (e) {
       console.error('Search error:', e);
@@ -299,19 +407,15 @@ export const SemanticSearch = ({
               By Row ID
             </Button>
             <Button
-              variant="outline"
+              variant={searchMode === 'text' ? 'default' : 'outline'}
               size="sm"
+              onClick={() => setSearchMode('text')}
               className="flex-1"
-              disabled
-              title="Requires external embedding API"
             >
               <Type className="w-3.5 h-3.5 mr-1.5" />
               By Text
             </Button>
           </div>
-          <p className="text-[10px] text-muted-foreground">
-            "By Text" requires connecting to Ollama/OpenAI (coming soon)
-          </p>
         </div>
 
         {/* Row ID Input */}
@@ -327,6 +431,92 @@ export const SemanticSearch = ({
             <p className="text-[10px] text-muted-foreground">
               Find rows similar to this row's vector
             </p>
+          </div>
+        )}
+
+        {/* Text Input - with local model */}
+        {searchMode === 'text' && (
+          <div className="space-y-3">
+            {/* Model Status */}
+            <div className="p-3 rounded-lg border bg-muted/30">
+              <div className="flex items-center gap-2 mb-2">
+                <Cpu className="w-4 h-4" />
+                <span className="text-xs font-medium">Local Embedding Model</span>
+              </div>
+              
+              {modelStatus === 'idle' && (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-muted-foreground">
+                    {localEmbeddings.modelName} ({localEmbeddings.dimensions}d) - runs locally in browser
+                  </p>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={handleLoadModel}
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1.5" />
+                    Load Model (~30MB)
+                  </Button>
+                </div>
+              )}
+              
+              {modelStatus === 'loading' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span className="text-xs">Loading model...</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    {modelProgress}
+                  </p>
+                </div>
+              )}
+              
+              {modelStatus === 'ready' && (
+                <div className="flex items-center gap-2 text-green-600">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span className="text-xs">Model ready</span>
+                  <Badge variant="outline" className="text-[10px] ml-auto">
+                    {localEmbeddings.dimensions}d
+                  </Badge>
+                </div>
+              )}
+              
+              {modelStatus === 'error' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-red-500">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span className="text-xs">Failed to load</span>
+                  </div>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={handleLoadModel}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Text Input */}
+            <div className="space-y-2">
+              <Label className="text-xs">Search Text</Label>
+              <Textarea
+                placeholder="Type your query... e.g., 'How to build an API?'"
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                className="h-20 resize-none text-sm"
+                disabled={modelStatus !== 'ready'}
+              />
+              {selectedColumnInfo && selectedColumnInfo.dimensions !== localEmbeddings.dimensions && (
+                <p className="text-[10px] text-amber-500">
+                  ⚠️ Dimension mismatch: column has {selectedColumnInfo.dimensions}d, model produces {localEmbeddings.dimensions}d
+                </p>
+              )}
+            </div>
           </div>
         )}
 
@@ -378,7 +568,12 @@ export const SemanticSearch = ({
         <Button 
           className="w-full" 
           onClick={handleSearch}
-          disabled={isSearching || !selectedTable || !selectedColumn}
+          disabled={
+            isSearching || 
+            !selectedTable || 
+            !selectedColumn ||
+            (searchMode === 'text' && modelStatus !== 'ready')
+          }
         >
           {isSearching ? (
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />

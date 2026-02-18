@@ -63,7 +63,8 @@ const DatabaseView = () => {
     // pgvector support
     hasPgVector,
     vectorColumns,
-    findSimilarByRowId
+    findSimilarByRowId,
+    findSimilarByVector
   } = usePostgres();
 
   // Vector inspection state
@@ -576,6 +577,7 @@ const DatabaseView = () => {
               <SemanticSearch
                 vectorColumns={vectorColumns}
                 findSimilarByRowId={findSimilarByRowId}
+                findSimilarByVector={findSimilarByVector}
                 getTableColumns={getTableColumnsForSearch}
                 onInspectVector={handleInspectVector}
               />
