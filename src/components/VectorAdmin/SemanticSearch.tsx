@@ -37,7 +37,7 @@ import {
 import { cn } from '@/lib/utils';
 import { VectorColumnInfo, SimilarityResult } from '@/lib/pgService';
 import { VectorBadge } from './VectorBadge';
-import { localEmbeddings, setProgressCallback } from '@/lib/localEmbeddings';
+import { localEmbeddings, setProgressCallback, AVAILABLE_MODELS } from '@/lib/localEmbeddings';
 
 interface SemanticSearchProps {
   vectorColumns: VectorColumnInfo[];
@@ -121,11 +121,18 @@ export const SemanticSearch = ({
   // Local embedding model state
   const [modelStatus, setModelStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [modelProgress, setModelProgress] = useState<string>('');
+  const [selectedModelId, setSelectedModelId] = useState<string>('minilm');
+
+  // Get the selected model info
+  const selectedModel = useMemo(() => {
+    return AVAILABLE_MODELS.find(m => m.id === selectedModelId);
+  }, [selectedModelId]);
 
   // Initialize model status on mount
   useEffect(() => {
-    if (localEmbeddings.isReady) {
+    if (localEmbeddings.isReady && localEmbeddings.currentModel) {
       setModelStatus('ready');
+      setSelectedModelId(localEmbeddings.currentModel.id);
     } else if (localEmbeddings.error) {
       setModelStatus('error');
     }
@@ -144,13 +151,13 @@ export const SemanticSearch = ({
     });
 
     try {
-      const success = await localEmbeddings.initialize();
-      if (success) {
+      const success = await localEmbeddings.initialize(selectedModelId);
+      if (success && localEmbeddings.currentModel) {
         setModelStatus('ready');
         setModelProgress('');
         toast({
           title: "Model Loaded",
-          description: `${localEmbeddings.modelName} (${localEmbeddings.dimensions}d) ready for text search`,
+          description: `${localEmbeddings.currentModel.name} (${localEmbeddings.currentModel.dimensions}d) ready for text search`,
         });
       } else {
         setModelStatus('error');
@@ -161,6 +168,15 @@ export const SemanticSearch = ({
       setModelProgress(e instanceof Error ? e.message : 'Failed to load model');
     } finally {
       setProgressCallback(null);
+    }
+  };
+
+  // Handle model change - reset status if different model selected
+  const handleModelChange = (modelId: string) => {
+    setSelectedModelId(modelId);
+    if (localEmbeddings.currentModel?.id !== modelId) {
+      setModelStatus('idle');
+      setModelProgress('');
     }
   };
 
@@ -255,17 +271,18 @@ export const SemanticSearch = ({
         );
       } else {
         // Text search - embed the query first
-        if (!localEmbeddings.isReady) {
+        if (!localEmbeddings.isReady || !localEmbeddings.currentModel) {
           throw new Error('Embedding model not loaded. Click "Load Model" first.');
         }
 
         // Check dimension compatibility
         const columnDims = selectedColumnInfo?.dimensions || 0;
-        if (columnDims !== localEmbeddings.dimensions) {
+        const modelDims = localEmbeddings.currentModel.dimensions;
+        if (columnDims !== modelDims) {
           throw new Error(
             `Dimension mismatch: Your column has ${columnDims} dimensions, ` +
-            `but ${localEmbeddings.modelName} produces ${localEmbeddings.dimensions} dimensions. ` +
-            `Use "By Row ID" instead, or ensure your vectors were created with the same model.`
+            `but ${localEmbeddings.currentModel.name} produces ${modelDims} dimensions. ` +
+            `Use "By Row ID" instead, or select a model with matching dimensions.`
           );
         }
 
@@ -437,48 +454,73 @@ export const SemanticSearch = ({
         {/* Text Input - with local model */}
         {searchMode === 'text' && (
           <div className="space-y-3">
-            {/* Model Status */}
-            <div className="p-3 rounded-lg border bg-muted/30">
-              <div className="flex items-center gap-2 mb-2">
+            {/* Model Selection & Status */}
+            <div className="p-3 rounded-lg border bg-muted/30 space-y-3">
+              <div className="flex items-center gap-2">
                 <Cpu className="w-4 h-4" />
                 <span className="text-xs font-medium">Local Embedding Model</span>
               </div>
+
+              {/* Model Selector */}
+              <Select 
+                value={selectedModelId} 
+                onValueChange={handleModelChange}
+                disabled={modelStatus === 'loading'}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AVAILABLE_MODELS.map(model => (
+                    <SelectItem key={model.id} value={model.id}>
+                      <div className="flex items-center gap-2">
+                        <span>{model.name}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {model.dimensions}d
+                        </Badge>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Model Info */}
+              {selectedModel && (
+                <p className="text-[10px] text-muted-foreground">
+                  {selectedModel.description} • {selectedModel.size}
+                </p>
+              )}
               
               {modelStatus === 'idle' && (
-                <div className="space-y-2">
-                  <p className="text-[10px] text-muted-foreground">
-                    {localEmbeddings.modelName} ({localEmbeddings.dimensions}d) - runs locally in browser
-                  </p>
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    className="w-full"
-                    onClick={handleLoadModel}
-                  >
-                    <Download className="w-3.5 h-3.5 mr-1.5" />
-                    Load Model (~30MB)
-                  </Button>
-                </div>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={handleLoadModel}
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" />
+                  Load {selectedModel?.name}
+                </Button>
               )}
               
               {modelStatus === 'loading' && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span className="text-xs">Loading model...</span>
+                    <span className="text-xs">Loading {selectedModel?.name}...</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[10px] text-muted-foreground truncate">
                     {modelProgress}
                   </p>
                 </div>
               )}
               
-              {modelStatus === 'ready' && (
+              {modelStatus === 'ready' && localEmbeddings.currentModel && (
                 <div className="flex items-center gap-2 text-green-600">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span className="text-xs">Model ready</span>
+                  <span className="text-xs">{localEmbeddings.currentModel.name} ready</span>
                   <Badge variant="outline" className="text-[10px] ml-auto">
-                    {localEmbeddings.dimensions}d
+                    {localEmbeddings.currentModel.dimensions}d
                   </Badge>
                 </div>
               )}
@@ -489,6 +531,7 @@ export const SemanticSearch = ({
                     <AlertCircle className="w-3.5 h-3.5" />
                     <span className="text-xs">Failed to load</span>
                   </div>
+                  <p className="text-[10px] text-muted-foreground">{modelProgress}</p>
                   <Button 
                     size="sm" 
                     variant="outline" 
@@ -511,9 +554,16 @@ export const SemanticSearch = ({
                 className="h-20 resize-none text-sm"
                 disabled={modelStatus !== 'ready'}
               />
-              {selectedColumnInfo && selectedColumnInfo.dimensions !== localEmbeddings.dimensions && (
+              {selectedColumnInfo && localEmbeddings.currentModel && 
+               selectedColumnInfo.dimensions !== localEmbeddings.currentModel.dimensions && (
                 <p className="text-[10px] text-amber-500">
-                  ⚠️ Dimension mismatch: column has {selectedColumnInfo.dimensions}d, model produces {localEmbeddings.dimensions}d
+                  ⚠️ Dimension mismatch: column has {selectedColumnInfo.dimensions}d, 
+                  model produces {localEmbeddings.currentModel.dimensions}d
+                </p>
+              )}
+              {selectedColumnInfo && !localEmbeddings.currentModel && (
+                <p className="text-[10px] text-muted-foreground">
+                  💡 Pick a model with {selectedColumnInfo.dimensions}d for best results
                 </p>
               )}
             </div>
