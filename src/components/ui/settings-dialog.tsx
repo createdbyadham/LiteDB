@@ -14,19 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Settings2 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useToast } from "./use-toast"
-
-type AIProvider = 'github' | 'azure' | 'openai';
-type AISettings = {
-  provider: AIProvider;
-  apiKey: string;
-  endpoint?: string;
-};
-
-const defaultSettings: AISettings = {
-  provider: 'github',
-  apiKey: '',
-  endpoint: 'https://models.github.ai/inference'
-};
+import { AIProvider, AISettings, defaultSettings } from "@/lib/aiService"
 
 export function SettingsDialog() {
   const [settings, setSettings] = useState<AISettings>(defaultSettings);
@@ -36,7 +24,28 @@ export function SettingsDialog() {
     // Load saved settings on component mount
     const savedSettings = localStorage.getItem('aiSettings');
     if (savedSettings) {
-      setSettings(JSON.parse(savedSettings));
+      const parsed = JSON.parse(savedSettings);
+      
+      // Migration for old settings format
+      if (!parsed.configs) {
+        const oldSettings = parsed as any;
+        const newSettings = { ...defaultSettings };
+        
+        if (oldSettings.provider) {
+          newSettings.activeProvider = oldSettings.provider;
+          // Only migrate if we have a valid provider
+          if (newSettings.configs[oldSettings.provider as AIProvider]) {
+            newSettings.configs[oldSettings.provider as AIProvider] = {
+              apiKey: oldSettings.apiKey || '',
+              endpoint: oldSettings.endpoint,
+              modelName: oldSettings.modelName
+            };
+          }
+        }
+        setSettings(newSettings);
+      } else {
+        setSettings(parsed);
+      }
     }
   }, []);
 
@@ -47,6 +56,21 @@ export function SettingsDialog() {
       title: "Settings saved",
       description: "Your AI provider settings have been saved successfully.",
     });
+  };
+
+  const currentConfig = settings.configs[settings.activeProvider];
+
+  const updateCurrentConfig = (updates: Partial<typeof currentConfig>) => {
+    setSettings(prev => ({
+      ...prev,
+      configs: {
+        ...prev.configs,
+        [prev.activeProvider]: {
+          ...prev.configs[prev.activeProvider],
+          ...updates
+        }
+      }
+    }));
   };
 
   return (
@@ -69,12 +93,13 @@ export function SettingsDialog() {
               Provider
             </Label>
             <Select 
-              value={settings.provider}
-              onValueChange={(value: AIProvider) => setSettings(prev => ({ 
-                ...prev, 
-                provider: value,
-                endpoint: value === 'github' ? 'https://models.github.ai/inference' : ''
-              }))}
+              value={settings.activeProvider}
+              onValueChange={(value: AIProvider) => {
+                setSettings(prev => ({ 
+                  ...prev, 
+                  activeProvider: value
+                }));
+              }}
             >
               <SelectTrigger className="col-span-3">
                 <SelectValue placeholder="Select provider" />
@@ -83,6 +108,7 @@ export function SettingsDialog() {
                 <SelectItem value="github">GitHub</SelectItem>
                 <SelectItem value="azure">Azure OpenAI</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
+                <SelectItem value="ollama">Ollama (Local)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -93,12 +119,12 @@ export function SettingsDialog() {
             <Input
               id="apiKey"
               type="password"
-              value={settings.apiKey}
-              onChange={(e) => setSettings(prev => ({ ...prev, apiKey: e.target.value }))}
+              value={currentConfig.apiKey}
+              onChange={(e) => updateCurrentConfig({ apiKey: e.target.value })}
               className="col-span-3"
             />
           </div>
-          {settings.provider !== 'openai' && (
+          {settings.activeProvider !== 'openai' && (
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="endpoint" className="text-right">
                 Endpoint
@@ -106,12 +132,26 @@ export function SettingsDialog() {
               <Input
                 id="endpoint"
                 type="text"
-                value={settings.endpoint}
-                onChange={(e) => setSettings(prev => ({ ...prev, endpoint: e.target.value }))}
+                value={currentConfig.endpoint || ''}
+                onChange={(e) => updateCurrentConfig({ endpoint: e.target.value })}
                 className="col-span-3"
+                placeholder={settings.activeProvider === 'ollama' ? 'http://localhost:11434/v1' : ''}
               />
             </div>
           )}
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label htmlFor="modelName" className="text-right">
+              Model Name
+            </Label>
+            <Input
+              id="modelName"
+              type="text"
+              value={currentConfig.modelName || ''}
+              onChange={(e) => updateCurrentConfig({ modelName: e.target.value })}
+              className="col-span-3"
+              placeholder={settings.activeProvider === 'ollama' ? 'llama3' : 'gpt-4'}
+            />
+          </div>
         </div>
         <DialogFooter>
           <Button onClick={handleSave}>Save changes</Button>
