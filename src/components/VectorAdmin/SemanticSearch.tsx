@@ -673,14 +673,17 @@ export const SemanticSearch = ({
       </aside>
 
       {/* Right Panel - Results */}
-      <div className="flex-1 flex flex-col">
-        {/* Results Header */}
-        <div className="p-3.5 border-b">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium">Results</h3>
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Results Header - matches TableEditor sticky header */}
+        <div className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex items-center justify-between px-4 h-[52px]">
+            <div className="flex items-center space-x-2">
+              <Search className="h-4 w-4 text-primary/80" />
+              <h1 className="text-sm font-semibold tracking-tight">Search Results</h1>
               {results.length > 0 && (
-                <Badge variant="secondary">{results.length} rows</Badge>
+                <Badge variant="outline" className="ml-2 text-xs font-normal">
+                  {results.length} {results.length === 1 ? 'row' : 'rows'}
+                </Badge>
               )}
             </div>
             {results.length > 0 && (
@@ -692,57 +695,59 @@ export const SemanticSearch = ({
         </div>
 
         {/* Results Table */}
-        <ScrollArea className="flex-1">
-          {error ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="text-center space-y-2">
-                <AlertCircle className="w-10 h-10 text-muted-foreground mx-auto" />
-                <p className="text-muted-foreground">{error}</p>
+        <div className="flex-1 overflow-hidden">
+          <div className="h-full overflow-auto">
+            {error ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="text-center space-y-2">
+                  <AlertCircle className="w-10 h-10 text-muted-foreground mx-auto" />
+                  <p className="text-muted-foreground">{error}</p>
+                </div>
               </div>
-            </div>
-          ) : results.length === 0 ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="text-center space-y-2">
-                <Search className="w-10 h-10 text-muted-foreground mx-auto" />
-                <p className="text-muted-foreground">
-                  Select a table and column, then enter a row ID to search
-                </p>
+            ) : results.length === 0 ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="text-center space-y-2">
+                  <Search className="w-10 h-10 text-muted-foreground mx-auto" />
+                  <p className="text-muted-foreground">
+                    Select a table and column, then enter a row ID to search
+                  </p>
+                </div>
               </div>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[150px] sticky left-0 bg-background">
-                    Similarity
-                  </TableHead>
-                  {displayColumns.slice(0, 5).map(col => (
-                    <TableHead key={col} className="min-w-[100px]">
-                      {col}
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[180px] whitespace-nowrap sticky top-0 bg-background z-40 pl-4">
+                      Similarity
                     </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {results.map((result, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell className="sticky left-0 bg-background">
-                      <SimilarityBar 
-                        score={result.similarity} 
-                        isDistance={distanceMetric !== '<=>'} 
-                      />
-                    </TableCell>
                     {displayColumns.slice(0, 5).map(col => (
-                      <TableCell key={col} className="max-w-[200px] truncate">
-                        {formatCellValue(result.row[col], col)}
-                      </TableCell>
+                      <TableHead key={col} className="whitespace-nowrap sticky top-0 bg-background z-40">
+                        {col}
+                      </TableHead>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </ScrollArea>
+                </TableHeader>
+                <TableBody>
+                  {results.map((result, idx) => (
+                    <TableRow key={idx} className="hover:bg-muted/30">
+                      <TableCell className="whitespace-nowrap pl-4">
+                        <SimilarityBar 
+                          score={result.similarity} 
+                          isDistance={distanceMetric !== '<=>'} 
+                        />
+                      </TableCell>
+                      {displayColumns.slice(0, 5).map(col => (
+                        <TableCell key={col} className="whitespace-nowrap max-w-[200px] truncate">
+                          {formatCellValue(result.row[col], col)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
