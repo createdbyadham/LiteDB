@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/hooks/use-toast';
 import { sqliteService } from '@/lib/sqliteService';
 import { usePostgres } from '@/hooks/usePostgres';
+import { tauriService } from '@/lib/tauri';
 
 type ExportFormat = 'csv' | 'json' | 'xlsx' | 'png' | 'svg';
 
@@ -129,17 +130,8 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         return;
       }
 
-      if (!window.electron) {
-        toast({
-          title: "Error",
-          description: "Electron API not available",
-          variant: "destructive"
-        });
-        return;
-      }
-
       // Export the data
-      const result = await window.electron.exportDatabase(exportData, exportFormat);
+      const result = await tauriService.exportDatabase(exportData, exportFormat);
 
       if (result.success) {
         toast({

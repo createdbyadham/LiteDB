@@ -15,14 +15,14 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { AiQueryDialog } from './AiQueryDialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { tauriService } from '@/lib/tauri';
 
 interface SqlEditorProps {
   isPostgres?: boolean;
   refreshTables?: () => Promise<void> | void;
-  onAutosave?: () => Promise<void> | void;
 }
 
-const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorProps) => {
+const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
   const [sqlScript, setSqlScript] = useState('');
   const [useTransaction, setUseTransaction] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -193,10 +193,6 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
           title: "Success",
           description: `Executed ${statements.length} statement${statements.length > 1 ? 's' : ''} successfully`
         });
-        // Trigger autosave only when statements are mutating
-        if (isMutating && onAutosave) {
-          void Promise.resolve(onAutosave());
-        }
       } else {
         toast({
           title: "Execution Error",
@@ -337,20 +333,19 @@ const SqlEditor = ({ isPostgres = false, refreshTables, onAutosave }: SqlEditorP
         exportData = JSON.stringify(data);
       }
 
-      if (window.electron) {
-        const result = await window.electron.exportDatabase(exportData, format);
-        if (result.success) {
-          toast({
-            title: "Success",
-            description: `Results exported to ${result.filePath}`
-          });
-        } else {
-          toast({
-            title: "Error",
-            description: result.error || "Failed to export results",
-            variant: "destructive"
-          });
-        }
+      // Export using Tauri service
+      const result = await tauriService.exportDatabase(exportData, format);
+      if (result.success) {
+        toast({
+          title: "Success",
+          description: `Results exported to ${result.filePath}`
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: result.error || "Failed to export results",
+          variant: "destructive"
+        });
       }
     } catch (error) {
       toast({

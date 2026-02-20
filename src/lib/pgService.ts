@@ -1,5 +1,6 @@
 // This service handles PostgreSQL database operations
 import { toast } from "@/hooks/use-toast";
+import { tauriService } from '@/lib/tauri';
 import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 
 // Define PostgreSQL connection config
@@ -63,7 +64,7 @@ class PgService {
     this.initPromise = new Promise((resolve, reject) => {
       const initializeAsync = async () => {
         try {
-          // In Electron we can use pg-promise directly through electron's IPC
+          // In Tauri we can use rust postgres client directly through tauri's IPC
           // For security reasons, we'll implement the actual connection in main process
           console.log("pg-promise initialized successfully");
           this.isInitializing = false;
@@ -95,8 +96,7 @@ class PgService {
       this.currentConfig = config;
 
       // Call main process to establish connection
-      // This will be implemented in the Electron main process
-      const result = await window.electron?.connectPostgres(config);
+      const result = await tauriService.connectPostgres(config);
 
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to connect to PostgreSQL database");
@@ -131,7 +131,7 @@ class PgService {
     }
 
     try {
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `
           SELECT 
             table_name as name,
@@ -172,7 +172,7 @@ class PgService {
     }
 
     try {
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `
           SELECT 
             a.attnum as cid,
@@ -221,8 +221,28 @@ class PgService {
     }
 
     try {
-      const result = await window.electron?.executePostgresQuery({
-        query: `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset};`
+      // By default, SELECT * might return vector types as raw binary which sqlx fails to decode to string (returning null).
+      // We try to fetch column info first to cast vector columns to text explicitly.
+      let query = `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset};`;
+
+      try {
+        const columns = await this.getTableColumns(tableName);
+        if (columns.length > 0) {
+          const selectClause = columns.map(col => {
+            // Check if it's a vector type (udt_name usually 'vector')
+            if (col.type.startsWith('vector')) {
+              return `"${col.name}"::text`;
+            }
+            return `"${col.name}"`;
+          }).join(', ');
+          query = `SELECT ${selectClause} FROM "${tableName}" LIMIT ${limit} OFFSET ${offset};`;
+        }
+      } catch (e) {
+        console.warn("Failed to fetch columns for smart select, falling back to SELECT *", e);
+      }
+
+      const result = await tauriService.executePostgresQuery({
+        query
       });
 
       if (!result || !result.success) {
@@ -250,7 +270,7 @@ class PgService {
     }
 
     try {
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `
           SELECT
             tc.constraint_name,
@@ -302,7 +322,7 @@ class PgService {
     }
 
     try {
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `
           SELECT
             i.relname as index_name,
@@ -368,7 +388,7 @@ class PgService {
     }
 
     try {
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: sql
       });
 
@@ -417,7 +437,7 @@ class PgService {
         VALUES (${valuePlaceholders});
       `;
 
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: sql
       });
 
@@ -500,7 +520,7 @@ class PgService {
       console.log("Update SQL:", sql);
 
       // Execute the query without using parameterized style
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: sql
       });
 
@@ -563,7 +583,7 @@ class PgService {
 
   disconnect() {
     if (this.connected) {
-      window.electron?.disconnectPostgres();
+      tauriService.disconnectPostgres();
       this.connected = false;
       this.currentConfig = null;
       this.currentTables = [];
@@ -577,7 +597,7 @@ class PgService {
     if (!this.connected) return false;
 
     try {
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `SELECT 1 FROM pg_extension WHERE extname = 'vector';`
       });
 
@@ -595,7 +615,7 @@ class PgService {
     if (!this.connected || !this.hasPgVector) return [];
 
     try {
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `
           SELECT 
             c.table_name,
@@ -658,7 +678,7 @@ class PgService {
 
     try {
       // First, get a sample of vectors
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `
           SELECT "${columnName}"::text as vector_text
           FROM "${tableName}"
@@ -748,7 +768,7 @@ class PgService {
 
       const escapedRowId = typeof rowId === 'string' ? `'${rowId.replace(/'/g, "''")}'` : rowId;
 
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `
           SELECT 
             t.*,
@@ -821,7 +841,7 @@ class PgService {
           break;
       }
 
-      const result = await window.electron?.executePostgresQuery({
+      const result = await tauriService.executePostgresQuery({
         query: `
           SELECT 
             *,
@@ -862,7 +882,7 @@ class PgService {
 
     try {
       const sql = `DELETE FROM "${tableName}" WHERE "${primaryKeyColumn}" IN (${rowIds.map(id => this.formatValueForSQL(id)).join(',')})`;
-      const result = await window.electron?.executePostgresQuery({ query: sql });
+      const result = await tauriService.executePostgresQuery({ query: sql });
 
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to delete rows");

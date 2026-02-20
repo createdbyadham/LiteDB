@@ -4,7 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Save, Sparkles } from 'lucide-react';
+import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { ColumnInfo, RowData, sqliteService } from '@/lib/sqliteService';
 import { VectorColumnInfo } from '@/lib/pgService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -282,37 +282,6 @@ const TableEditor = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              className="h-8 px-2 text-xs"
-              onClick={async () => {
-                const data = sqliteService.exportDatabase();
-                console.log('Exporting database data:', data);
-                if (data && window.electron) {
-                  // If we don't have a current file path, show save dialog
-                  if (!sqliteService.currentFilePath) {
-                    toast({
-                      title: "Error",
-                      description: "No database file loaded. Please load a database file first.",
-                      variant: "destructive"
-                    });
-                    return;
-                  }
-
-                  console.log('Current file path:', sqliteService.currentFilePath);
-                  const result = await window.electron.saveDatabase(sqliteService.currentFilePath, data);
-                  console.log('Save result:', result);
-                  if (result.success) {
-                    toast({ title: "Success", description: "Database saved successfully" });
-                  } else if (result.error !== 'Save cancelled') {
-                    toast({ title: "Error", description: result.error || "Failed to save database", variant: "destructive" });
-                  }
-                }
-              }}
-            >
-              <Save className="h-3.5 w-3.5 mr-1.5" />
-              Save Changes
-            </Button>
             <div className="relative w-64">
               <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
               <Input
