@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
 import { Upload, FileUp } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useSqlite } from '@/hooks/useSqlite';
-import { ElectronFile } from '@/types/electron';
+import { FileWithPath } from '@/types/global';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PostgresConnectionForm from '@/components/PostgresConnectionForm';
 import icon from '/titlebaricon2.png';
+import { tauriService } from '@/lib/tauri';
+import { listen } from '@tauri-apps/api/event';
+import { pgService } from '@/lib/pgService';
 
 const UploadView = () => {
   const { loadDatabase } = useSqlite();
@@ -17,14 +20,97 @@ const UploadView = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Cleanup function for file dialog subscription
-    let unsubscribe: (() => void) | undefined;
+    let isMounted = true;
+    let unlisteners: (() => void)[] = [];
+
+    const setupListeners = async () => {
+      // Listener for 'tauri://file-drop' (legacy/standard)
+      const unlistenDrop = await listen('tauri://file-drop', async (event) => {
+        if (!isMounted) return;
+        setIsDragging(false);
+        
+        const paths = event.payload as string[];
+        if (paths && Array.isArray(paths) && paths.length > 0) {
+          await loadAndProcessDatabase(paths[0]);
+        }
+      });
+      if (!isMounted) { unlistenDrop(); return; }
+      unlisteners.push(unlistenDrop);
+
+      // Listener for 'tauri://drag-drop' (potential v2 alternative)
+      const unlistenDragDrop = await listen('tauri://drag-drop', async (event) => {
+        if (!isMounted) return;
+        setIsDragging(false);
+        
+        const payload = event.payload as any;
+        const paths = payload?.paths || (Array.isArray(payload) ? payload : []);
+        
+        if (paths && Array.isArray(paths) && paths.length > 0) {
+          await loadAndProcessDatabase(paths[0]);
+        }
+      });
+      if (!isMounted) { unlistenDragDrop(); return; }
+      unlisteners.push(unlistenDragDrop);
+
+      const unlistenHover = await listen('tauri://file-drop-hover', () => {
+        if (isMounted) setIsDragging(true);
+      });
+      if (!isMounted) { unlistenHover(); return; }
+      unlisteners.push(unlistenHover);
+
+      const unlistenDragEnter = await listen('tauri://drag-enter', () => {
+        if (isMounted) setIsDragging(true);
+      });
+      if (!isMounted) { unlistenDragEnter(); return; }
+      unlisteners.push(unlistenDragEnter);
+
+      const unlistenCancel = await listen('tauri://file-drop-cancelled', () => {
+        if (isMounted) setIsDragging(false);
+      });
+      if (!isMounted) { unlistenCancel(); return; }
+      unlisteners.push(unlistenCancel);
+
+      const unlistenDragLeave = await listen('tauri://drag-leave', () => {
+        if (isMounted) setIsDragging(false);
+      });
+      if (!isMounted) { unlistenDragLeave(); return; }
+      unlisteners.push(unlistenDragLeave);
+    };
+
+    setupListeners();
+
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      isMounted = false;
+      unlisteners.forEach(fn => fn());
     };
   }, []);
+
+  const loadAndProcessDatabase = async (filePath: string) => {
+    // Ensure Postgres is disconnected before loading SQLite
+    pgService.disconnect();
+    
+    setIsLoading(true);
+    try {
+      const result = await tauriService.readDatabase(filePath);
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to read database file');
+      }
+      
+      const loadResult = await loadDatabase(result.data.buffer, filePath);
+      if (loadResult) {
+        navigate('/database');
+      }
+    } catch (error) {
+      console.error('Database load error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to process file",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -41,92 +127,42 @@ const UploadView = () => {
 
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      const file = files[0] as ElectronFile;
-      try {
-        console.log('Drag and drop file:', { name: file.name, path: file.path, type: file.type });
-
-        let arrayBuffer: ArrayBuffer;
-
-        // If we have a path (desktop file), use electron API
-        if (file.path && window.electron) {
-          const result = await window.electron.readDatabase(file.path);
-          if (!result.success || !result.data) {
-            throw new Error(result.error || 'Failed to read database file');
-          }
-          arrayBuffer = result.data.buffer;
-        } else {
-          // Fallback to browser File API for files without path
-          arrayBuffer = await file.arrayBuffer();
-        }
-
-        const processResult = await processFile(arrayBuffer, file.path);
-        console.log('Drag and drop process result:', processResult);
-        if (processResult.success) {
-          navigate('/database');
-        }
-      } catch (error) {
-        console.error('Drag and drop error:', error);
-        toast({
-          title: "Error",
-          description: error instanceof Error ? error.message : "Failed to process file",
-          variant: "destructive"
-        });
-      }
-    }
-  };
-
-  const handleButtonClick = () => {
-    if (!window.electron) {
-      toast({
-        title: "Error",
-        description: "Electron API not available",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsLoading(true);
-    const unsubscribe = window.electron.openFileDialog(async (filePath: string) => {
-      try {
-        console.log('Selected file:', filePath);
-        if (!window.electron) {
-          throw new Error('Electron API not available');
-        }
-        const result = await window.electron.readDatabase(filePath);
-        if (result.success && result.data) {
-          const arrayBuffer = result.data.buffer;
-          const processResult = await processFile(arrayBuffer, filePath);
-          if (processResult.success) {
+      const file = files[0] as FileWithPath;
+      
+      // If we have a path, use the unified loader
+      if (file.path) {
+        await loadAndProcessDatabase(file.path);
+      } else {
+        // Fallback for files without path (less likely in Tauri but possible in browser mode)
+        try {
+          setIsLoading(true);
+          const arrayBuffer = await file.arrayBuffer();
+          const loadResult = await loadDatabase(arrayBuffer);
+          if (loadResult) {
             navigate('/database');
           }
-        } else {
-          throw new Error(result.error || 'Failed to read database file');
+        } catch (error) {
+          console.error('Browser drop error:', error);
+          toast({
+            title: "Error",
+            description: "Failed to process file",
+            variant: "destructive"
+          });
+        } finally {
+          setIsLoading(false);
         }
-      } catch (error) {
-        console.error('File selection error:', error);
-        toast({
-          title: "Error",
-          description: error instanceof Error ? error.message : "Failed to process file",
-          variant: "destructive"
-        });
-      } finally {
-        setIsLoading(false);
       }
-    });
+    }
   };
 
-  const processFile = async (arrayBuffer: ArrayBuffer, filePath?: string) => {
+  const handleButtonClick = async () => {
     try {
-      console.log('Processing file with path:', filePath);
-      const result = await loadDatabase(arrayBuffer, filePath);
-      console.log('Database load result:', { success: result, filePath });
-      return { success: true };
+      const filePath = await tauriService.openFileDialog();
+      if (filePath) {
+        await loadAndProcessDatabase(filePath);
+      }
     } catch (error) {
-      console.error('Process file error:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Failed to process file"
-      };
+      console.error('File selection error:', error);
     }
   };
 

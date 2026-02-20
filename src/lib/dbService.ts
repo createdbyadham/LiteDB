@@ -1,5 +1,6 @@
 // This service handles SQLite database operations
 import { toast } from "@/hooks/use-toast";
+import { tauriService } from "@/lib/tauri";
 
 export interface TableInfo {
   name: string;
@@ -54,10 +55,6 @@ declare global {
   interface Window {
     SQL: SqlJs;
     initSqlJs: (config: { locateFile: (file: string) => string }) => Promise<SqlJs>;
-    electron?: {
-      saveDatabase: (filePath: string, data: Uint8Array) => Promise<{ success: boolean; error?: string }>;
-      exportDatabase: (data: string, format: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
-    };
   }
 }
 
@@ -525,8 +522,8 @@ class DbService {
       this.lastSavedData = this.db.export();
 
       // Save changes to file if we have a file path
-      if (this.currentFilePath && window.electron) {
-        window.electron.saveDatabase(this.currentFilePath, this.lastSavedData)
+      if (this.currentFilePath) {
+        tauriService.saveDatabase(this.currentFilePath, this.lastSavedData)
           .then(({ success, error }) => {
             if (success) {
               toast({

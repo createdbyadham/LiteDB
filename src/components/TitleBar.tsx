@@ -1,24 +1,25 @@
 import { Minus, X, Copy } from 'lucide-react';
 import { Button } from './ui/button';
 import { SettingsDialog } from "./ui/settings-dialog";
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const TitleBar = () => {
   const handleMinimize = () => {
-    window.electron?.minimizeWindow();
+    getCurrentWindow().minimize();
   };
 
   const handleMaximize = () => {
-    window.electron?.maximizeWindow();
+    getCurrentWindow().toggleMaximize();
   };
 
   const handleClose = () => {
-    window.electron?.closeWindow();
+    getCurrentWindow().close();
   };
 
   return (
     <div className="h-8 flex items-center justify-between bg-[#020817] border-b border-border/40 select-none shrink-0 z-50">
       {/* Draggable area */}
-      <div className="flex-1 app-drag-handle h-full flex items-center">
+      <div className="flex-1 app-drag-handle h-full flex items-center" data-tauri-drag-region>
         {/* Empty draggable area */}
       </div>
 

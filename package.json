@@ -1,8 +1,7 @@
 {
-  "name": "litedb",
+  "name": "LiteDB",
   "private": true,
   "version": "2.0.0",
-  "main": "dist-electron/main.js",
   "description": "LiteDB - A simple and lightweight database viewer/editor for your projects",
   "author": "Adham Ehab",
   "contributors": [
@@ -14,8 +13,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "electron:dev": "tsc -p electron/tsconfig.json && concurrently -k \"cross-env BROWSER=none ELECTRON=true vite\" \"wait-on tcp:3001 && cross-env NODE_ENV=development electron .\"",
-    "electron:build": "npm run build && tsc -p electron/tsconfig.json && electron-builder"
+    "tauri": "tauri"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.5",
@@ -34,6 +32,9 @@
     "@radix-ui/react-tabs": "^1.1.0",
     "@radix-ui/react-toast": "^1.2.1",
     "@radix-ui/react-tooltip": "^1.1.4",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
     "@xenova/transformers": "^2.17.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -41,7 +42,6 @@
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
     "openai": "^5.21.0",
-    "pg": "^8.11.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
@@ -53,18 +53,12 @@
   "devDependencies": {
     "@eslint/js": "^9.9.0",
     "@tailwindcss/typography": "^0.5.15",
-    "@types/electron": "^1.6.12",
+    "@tauri-apps/cli": "^2.10.0",
     "@types/node": "^22.13.10",
-    "@types/pg": "^8.11.2",
-    "@types/pg-format": "^1.0.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.20",
-    "concurrently": "^9.1.2",
-    "cross-env": "^7.0.3",
-    "electron": "^38.1.0",
-    "electron-builder": "^24.13.3",
     "eslint": "^9.9.0",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.9",
@@ -73,53 +67,6 @@
     "tailwindcss": "^3.4.11",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.1",
-    "vite": "^5.4.1",
-    "wait-on": "^8.0.2"
-  },
-  "build": {
-    "appId": "com.litedb.app",
-    "productName": "LiteDB",
-    "directories": {
-      "output": "release/${version}",
-      "buildResources": "assets"
-    },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
-      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
-      "!**/node_modules/.bin",
-      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
-      "!.editorconfig",
-      "!**/._*",
-      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
-      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
-      "package.json"
-    ],
-    "asar": true,
-    "asarUnpack": [
-      "dist-electron/preload.js",
-      "dist-electron/preload.js.map"
-    ],
-    "win": {
-      "icon": "public/appicon2.png",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "${productName}_${version}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": false
-    }
+    "vite": "^5.4.1"
   }
 }

@@ -1,5 +1,6 @@
 // This service handles SQLite database operations
 import { toast } from "@/hooks/use-toast";
+import { tauriService } from '@/lib/tauri';
 
 export interface TableInfo {
     name: string;
@@ -54,10 +55,6 @@ declare global {
     interface Window {
         SQL: SqlJs;
         initSqlJs: (config: { locateFile: (file: string) => string }) => Promise<SqlJs>;
-        electron?: {
-            saveDatabase: (filePath: string, data: Uint8Array) => Promise<{ success: boolean; error?: string }>;
-            exportDatabase: (data: string, format: string) => Promise<{ success: boolean; error?: string; filePath?: string }>;
-        };
     }
 }
 
@@ -395,6 +392,30 @@ class SqliteService {
         }
     }
 
+    private async saveToDisk(): Promise<boolean> {
+        if (!this.db || !this.currentFilePath) return false;
+
+        try {
+            this.lastSavedData = this.db.export();
+            const result = await tauriService.saveDatabase(this.currentFilePath, this.lastSavedData);
+            
+            if (result.success) {
+                return true;
+            } else {
+                console.error('Failed to auto-save database:', result.error);
+                toast({
+                    title: "Auto-save Failed",
+                    description: result.error || "Failed to save changes to disk",
+                    variant: "destructive"
+                });
+                return false;
+            }
+        } catch (error) {
+            console.error('Error during auto-save:', error);
+            return false;
+        }
+    }
+
     executeQuery(sql: string): { columns: string[], rows: unknown[][] } | null {
         if (!this.db) {
             return null;
@@ -402,6 +423,19 @@ class SqliteService {
 
         try {
             const result = this.db.exec(sql);
+            
+            // Check if this was a modification query and trigger auto-save
+            const upperSql = sql.trim().toUpperCase();
+            if (this.currentFilePath && (
+                upperSql.startsWith('INSERT') || 
+                upperSql.startsWith('UPDATE') || 
+                upperSql.startsWith('DELETE') || 
+                upperSql.startsWith('CREATE') || 
+                upperSql.startsWith('DROP') || 
+                upperSql.startsWith('ALTER')
+            )) {
+                void this.saveToDisk();
+            }
 
             if (result.length === 0) {
                 return { columns: [], rows: [] };
@@ -469,6 +503,11 @@ class SqliteService {
                 this.db.exec("COMMIT");
             }
 
+            // Trigger auto-save if successful and we have a file path
+            if (errors.length === 0 && this.currentFilePath) {
+                void this.saveToDisk();
+            }
+
             return {
                 success: errors.length === 0,
                 affectedTables: Array.from(affectedTables),
@@ -521,34 +560,16 @@ class SqliteService {
             const sql = `UPDATE \`${tableName}\` SET ${setClause} WHERE ${whereClause}`;
             this.db.exec(sql);
 
-            // Export and save the updated database
-            this.lastSavedData = this.db.export();
-
-            // Save changes to file if we have a file path
-            if (this.currentFilePath && window.electron) {
-                window.electron.saveDatabase(this.currentFilePath, this.lastSavedData)
-                    .then(({ success, error }) => {
-                        if (success) {
-                            toast({
-                                title: "Success",
-                                description: "Changes saved to database file"
-                            });
-                        } else {
-                            toast({
-                                title: "Error",
-                                description: `Failed to save changes: ${error}`,
-                                variant: "destructive"
-                            });
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error saving database:', error);
+            // Auto-save
+            if (this.currentFilePath) {
+                void this.saveToDisk().then(success => {
+                    if (success) {
                         toast({
-                            title: "Error",
-                            description: "Failed to save changes to database file",
-                            variant: "destructive"
+                            title: "Success",
+                            description: "Changes saved to database file"
                         });
-                    });
+                    }
+                });
             }
 
             return true;

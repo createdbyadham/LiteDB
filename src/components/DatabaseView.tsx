@@ -11,11 +11,11 @@ import { usePostgres } from '@/hooks/usePostgres';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { sqliteService, RowData, ColumnInfo } from '@/lib/sqliteService';
 import { pgService } from '@/lib/pgService';
+import { tauriService } from '@/lib/tauri';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   Database,
-  Save,
   Download,
   Server,
   Table2,
@@ -166,8 +166,8 @@ const DatabaseView = () => {
         return;
       }
 
-      if (window.electron) {
-        const result = await window.electron.exportDatabase(dataUrl, format);
+      if (true) {
+        const result = await tauriService.exportDatabase(dataUrl, format);
         if (result.success) {
           toast({ title: "Success", description: `Schema exported as ${format.toUpperCase()}` });
         } else if (result.error !== 'Export cancelled') {
@@ -179,6 +179,15 @@ const DatabaseView = () => {
       toast({ title: "Error", description: "Failed to export schema", variant: "destructive" });
     }
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Ensure Postgres is disconnected when leaving the database view
+      // This handles browser back button navigation
+      pgService.disconnect();
+    };
+  }, []);
 
   // Effect to load table data when a table is selected
   useEffect(() => {
@@ -282,58 +291,6 @@ const DatabaseView = () => {
         return sqliteService.updateRow(selectedTable, oldRow, newRow as RowData);
       }
       return false;
-    }
-  };
-
-  const handleSaveDatabase = async () => {
-    if (isPostgresActive) {
-      toast({
-        title: "Information",
-        description: "PostgreSQL databases are saved on the server automatically",
-      });
-      return;
-    }
-
-    const data = sqliteService.exportDatabase();
-    if (!data) {
-      toast({
-        title: "Error",
-        description: "No database changes to save",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    if (!sqliteService.currentFilePath || !window.electron) {
-      toast({
-        title: "Error",
-        description: "No database file loaded. Please load a database file first.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    try {
-      const result = await window.electron.saveDatabase(sqliteService.currentFilePath, data);
-      if (result.success) {
-        setLastSaved(new Date());
-        toast({
-          title: "Success",
-          description: "Database saved successfully"
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: result.error || "Failed to save database",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to save database",
-        variant: "destructive"
-      });
     }
   };
 
@@ -481,17 +438,6 @@ const DatabaseView = () => {
             >
               <RefreshCw className="w-4 h-4" />
             </Button>
-            {isSqliteActive && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSaveDatabase}
-                className="h-8"
-              >
-                <Save className="w-4 h-4 mr-1.5" />
-                Save
-              </Button>
-            )}
             <Button
               variant="outline"
               size="sm"
@@ -570,7 +516,6 @@ const DatabaseView = () => {
               <SqlEditor
                 isPostgres={isPostgresActive}
                 refreshTables={isPostgresActive ? refreshPostgresTables : refreshSqliteTables}
-                onAutosave={handleSaveDatabase}
               />
             )}
 
