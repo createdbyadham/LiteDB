@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { ExportDialog } from '@/components/ExportDialog';
-import { SemanticSearch, VectorInspector, SimilarRowsModal } from '@/components/VectorAdmin';
+import { SemanticSearch, VectorInspector, SimilarRowsModal, MockDataGenerator } from '@/components/VectorAdmin';
 
 const DatabaseView = () => {
   const [selectedTable, setSelectedTable] = useState<string>('');
@@ -385,7 +385,7 @@ const DatabaseView = () => {
     const cols = isPostgresActive 
       ? await getPostgresTableColumns(tableName)
       : getSqliteTableColumns(tableName);
-    return cols.map(c => ({ name: c.name, pk: c.pk }));
+    return cols.map(c => ({ name: c.name, pk: c.pk, type: c.type }));
   };
 
   // Prepare sidebar items
@@ -456,6 +456,7 @@ const DatabaseView = () => {
               {activeTab === 'schema' && 'Schema Visualizer'}
               {activeTab === 'query' && 'SQL Editor'}
               {activeTab === 'vectors' && 'Vector Search'}
+              {activeTab === 'mock' && 'Mock Data Generator'}
             </h1>
             {isPostgresActive && (
               <Badge variant="outline" className="text-xs font-normal">
@@ -580,6 +581,14 @@ const DatabaseView = () => {
                 findSimilarByVector={findSimilarByVector}
                 getTableColumns={getTableColumnsForSearch}
                 onInspectVector={handleInspectVector}
+              />
+            )}
+
+            {activeTab === 'mock' && hasPgVector && (
+              <MockDataGenerator
+                vectorColumns={vectorColumns}
+                getTableColumns={getTableColumnsForSearch}
+                onInsertComplete={handleRefresh}
               />
             )}
           </div>

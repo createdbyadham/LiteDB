@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -12,7 +13,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowLeft,
-  Box
+  Box,
+  Sparkles
 } from 'lucide-react';
 import icon from '/titlebaricon2.png';
 
@@ -46,6 +48,19 @@ const AppLayout = ({
   const { navSidebarCollapsed: sidebarCollapsed, toggleNavSidebar } = useSidebar();
   const navigate = useNavigate();
   const location = useLocation();
+  const [showMockData, setShowMockData] = useState(false);
+
+  // Easter egg: Toggle mock data tab with Ctrl+Shift+M
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'M') {
+        setShowMockData(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const isInDatabase = location.pathname === '/database';
 
@@ -78,12 +93,21 @@ const AppLayout = ({
       onClick: () => onTabChange?.('query'),
     },
     // Only show Vectors tab for PostgreSQL with pgvector
-    ...(hasPgVector ? [{
-      id: 'vectors',
-      label: 'Vector Search',
-      icon: <Box className="w-5 h-5" />,
-      onClick: () => onTabChange?.('vectors'),
-    }] : []),
+    ...(hasPgVector ? [
+      {
+        id: 'vectors',
+        label: 'Vector Search',
+        icon: <Box className="w-5 h-5" />,
+        onClick: () => onTabChange?.('vectors'),
+      },
+      // Easter egg: Mock Data Generator (Ctrl+Shift+M)
+      ...(showMockData || activeTab === 'mock' ? [{
+        id: 'mock',
+        label: 'Mock Data',
+        icon: <Sparkles className="w-5 h-5" />,
+        onClick: () => onTabChange?.('mock'),
+      }] : [])
+    ] : []),
   ] : [];
 
   const renderNavItem = (item: NavItem, isActive: boolean) => {

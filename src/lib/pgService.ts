@@ -391,6 +391,52 @@ class PgService {
     }
   }
 
+  async insertRow(tableName: string, rowData: RowData): Promise<boolean> {
+    if (!this.connected) {
+      toast({
+        title: "Error",
+        description: "No PostgreSQL connection",
+        variant: "destructive"
+      });
+      return false;
+    }
+
+    try {
+      const columns = Object.keys(rowData);
+      const values = Object.values(rowData);
+
+      if (columns.length === 0) {
+        return false;
+      }
+
+      const columnNames = columns.map(c => `"${c}"`).join(', ');
+      const valuePlaceholders = values.map(v => this.formatValueForSQL(v)).join(', ');
+
+      const sql = `
+        INSERT INTO "${tableName}" (${columnNames})
+        VALUES (${valuePlaceholders});
+      `;
+
+      const result = await window.electron?.executePostgresQuery({
+        query: sql
+      });
+
+      if (!result || !result.success) {
+        throw new Error(result?.error || "Failed to insert row");
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Insert row error:", error);
+      toast({
+        title: "Insert Error",
+        description: error instanceof Error ? error.message : "Failed to insert row",
+        variant: "destructive"
+      });
+      return false;
+    }
+  }
+
   async updateRow(tableName: string, oldRow: RowData, newRow: RowData): Promise<boolean> {
     if (!this.connected) {
       toast({
