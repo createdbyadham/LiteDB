@@ -1,6 +1,6 @@
 # LiteDB
 
-A modern, fast, and user-friendly database viewer/editor built with React and Electron. Now supporting both SQLite and PostgreSQL with seamless database management.
+A modern, fast, and user-friendly database viewer/editor built with React and Tauri (Rust). Now supporting both SQLite and PostgreSQL with seamless database management and advanced vector search capabilities.
 
 <div align="center">
 
@@ -29,6 +29,7 @@ A modern, fast, and user-friendly database viewer/editor built with React and El
   - Supports OpenAI, GitHub, and Azure providers.
   - Schema is injected into the LLM upon initialization and refresh.
 - **Autosave & Export**: Automatically save changes and export query results to **CSV, Excel, or JSON**.
+- **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
 
 ## Schema Visualization
 
@@ -37,6 +38,22 @@ LiteDB now includes a powerful **Entity Relationship Diagram (ERD)** generator:
 2. **Visual Foreign Keys**: Lines connect Foreign Keys (Source) to Primary Keys (Target) automatically.
 3. **Key Indicators**: Visual icons for Primary Keys (🔑), Foreign Keys (🔗), and Unique constraints (#).
 4. **Export Ready**: One-click export to high-quality images for your technical documentation.
+
+## Vector Search & Semantic Search
+
+LiteDB integrates advanced vector search capabilities powered by **pgvector** and local embedding models:
+
+1.  **Semantic Search**: Find similar rows based on vector embeddings.
+    *   **Search by Row ID**: Find rows that are semantically similar to a specific record.
+    *   **Search by Text**: Enter natural language queries to find relevant records using local embedding models.
+2.  **Local Embedding Models**: Run embedding models locally in your browser/app using Transformers.js.
+    *   Supported models: `all-MiniLM-L6-v2`, `bge-base-en-v1.5`, `bge-large-en-v1.5`.
+    *   Privacy-first: No data is sent to external APIs for embedding generation.
+3.  **Distance Metrics**: Support for multiple distance metrics to suit your data:
+    *   **Cosine Distance** (`<=>`): Best for normalized vectors.
+    *   **L2 Distance** (`<->`): Euclidean distance.
+    *   **Inner Product** (`<#>`): Dot product (negative).
+4.  **Visual Feedback**: Color-coded similarity bars to quickly identify the most relevant results.
 
 ## AI Architecture (Text-to-SQL)
 
@@ -52,14 +69,16 @@ Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline**
 - TypeScript
 - Vite
 - Tailwind CSS
-- Electron
+- Tauri (Rust)
 - PostgreSQL
+- SQLite
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js (v16 or higher)
+- Rust (latest stable)
 - PostgreSQL (if using PostgreSQL features)
 
 ### Installation
@@ -76,13 +95,13 @@ npm install
 
 3. Start the development server:
 ```bash
-npm run dev
+npm run tauri dev
 ```
 
 ### Building for Production
 
 ```bash
-npm run build
+npm run tauri build
 ```
 
 ## Usage
