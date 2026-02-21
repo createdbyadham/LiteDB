@@ -65,9 +65,8 @@ export function usePostgres(): UsePgReturn {
       }
       const schema: DatabaseSchema = { dialect: 'postgres', tables: tableSchemas };
       aiService.setSchema(schema);
-    } catch (e) {
+    } catch {
       // Best-effort; ignore schema push errors
-      console.warn('Failed to push PostgreSQL schema to AI service', e);
     }
   };
 
@@ -77,14 +76,12 @@ export function usePostgres(): UsePgReturn {
 
     const initPg = async () => {
       try {
-        console.log("Initializing PostgreSQL service");
         await pgService.init();
 
         if (!mounted) return;
 
         // Check if we already have a connection
         if (pgService.connected) {
-          console.log("Found existing PostgreSQL connection");
           const existingTables = await pgService.getTables();
 
           if (mounted) {
@@ -102,8 +99,7 @@ export function usePostgres(): UsePgReturn {
             }
           }
         }
-      } catch (error) {
-        console.error("Failed to initialize PostgreSQL service:", error);
+      } catch {
         if (mounted) {
           setIsConnected(false);
           setTables([]);
@@ -122,7 +118,6 @@ export function usePostgres(): UsePgReturn {
   }, []);
 
   const connectToDatabase = async (config: PgConfig): Promise<boolean> => {
-    console.log("Starting PostgreSQL connection process");
     setIsConnecting(true);
     setIsConnected(false);
     setTables([]); // Clear existing tables while connecting
@@ -131,30 +126,23 @@ export function usePostgres(): UsePgReturn {
 
     try {
       // Ensure pgService is initialized
-      console.log("Ensuring pgService is initialized");
       await pgService.init();
 
-      console.log("Connecting to PostgreSQL database");
       const success = await pgService.connect(config);
 
       if (success) {
-        console.log("PostgreSQL connection successful, getting tables");
         const tableList = await pgService.getTables();
-        console.log("Retrieved tables:", tableList);
 
         // Check for pgvector extension
         const hasVector = await pgService.checkPgVectorExtension();
         setHasPgVector(hasVector);
         
         if (hasVector) {
-          console.log("pgvector extension detected");
           const vecCols = await pgService.getVectorColumns();
           setVectorColumns(vecCols);
-          console.log("Vector columns found:", vecCols.length);
         }
 
         if (tableList.length > 0) {
-          console.log("Setting state with tables");
           setTables(tableList);
           setIsConnected(true);
           // Push schema to AI
@@ -168,7 +156,6 @@ export function usePostgres(): UsePgReturn {
 
           return true;
         } else {
-          console.log("No tables found in database");
           setIsConnected(true); // Still connected, just no tables
           setTables([]);
           aiService.clearSchema();
@@ -181,7 +168,6 @@ export function usePostgres(): UsePgReturn {
         }
       }
 
-      console.log("Failed to connect to PostgreSQL database");
       setIsConnected(false);
       setTables([]);
       setHasPgVector(false);
@@ -189,7 +175,6 @@ export function usePostgres(): UsePgReturn {
       aiService.clearSchema();
       return false;
     } catch (error) {
-      console.error("Error connecting to PostgreSQL:", error);
       setIsConnected(false);
       setTables([]);
       setHasPgVector(false);
@@ -210,7 +195,6 @@ export function usePostgres(): UsePgReturn {
 
   const getTableData = async (tableName: string) => {
     if (!isConnected || !tables.length) {
-      console.log("Attempted to get table data without PostgreSQL connection");
       toast({
         title: "Error",
         description: "Not connected to PostgreSQL. Please connect first.",
@@ -223,7 +207,6 @@ export function usePostgres(): UsePgReturn {
 
   const getTableColumns = async (tableName: string) => {
     if (!isConnected || !tables.length) {
-      console.log("Attempted to get table columns without PostgreSQL connection");
       toast({
         title: "Error",
         description: "Not connected to PostgreSQL. Please connect first.",
@@ -236,7 +219,6 @@ export function usePostgres(): UsePgReturn {
 
   const getForeignKeys = async (tableName: string) => {
     if (!isConnected) {
-      console.log("Attempted to get foreign keys without PostgreSQL connection");
       return [];
     }
     return pgService.getForeignKeys(tableName);
@@ -244,7 +226,6 @@ export function usePostgres(): UsePgReturn {
 
   const getIndexes = async (tableName: string) => {
     if (!isConnected) {
-      console.log("Attempted to get indexes without PostgreSQL connection");
       return [];
     }
     return pgService.getIndexes(tableName);
@@ -252,7 +233,6 @@ export function usePostgres(): UsePgReturn {
 
   const executeQuery = async (sql: string) => {
     if (!isConnected) {
-      console.log("Attempted to execute query without PostgreSQL connection");
       toast({
         title: "Error",
         description: "Not connected to PostgreSQL. Please connect first.",
@@ -265,11 +245,9 @@ export function usePostgres(): UsePgReturn {
 
   const refreshTables = async () => {
     if (!isConnected) {
-      console.log("Attempted to refresh tables without PostgreSQL connection");
       return;
     }
     try {
-      console.log("Refreshing PostgreSQL tables");
       const tableList = await pgService.getTables();
       setTables(tableList);
       // Update AI schema
@@ -278,8 +256,7 @@ export function usePostgres(): UsePgReturn {
       } else {
         aiService.clearSchema();
       }
-    } catch (error) {
-      console.error("Error refreshing tables:", error);
+    } catch {
       toast({
         title: "Error",
         description: "Failed to refresh table list",

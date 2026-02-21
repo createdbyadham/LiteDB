@@ -12,6 +12,7 @@ import ReactFlow, {
   ConnectionMode,
   ReactFlowInstance,
   getNodesBounds,
+  MarkerType,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { toPng, toSvg } from 'html-to-image';
@@ -19,12 +20,24 @@ import { toPng, toSvg } from 'html-to-image';
 import TableNode, { TableNodeData } from './TableNode';
 import { Button } from '@/components/ui/button';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Database,
   LayoutGrid,
   Link2,
   Key,
   Table2,
-  TableOfContents
+  TableOfContents,
+  ArrowDownUp,
+  CircleDot,
+  ChevronDown,
+  Workflow
 } from 'lucide-react';
 import { ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo } from '@/lib/sqliteService';
 import { Sidebar, SidebarItem } from '@/components/Sidebar';
@@ -61,107 +74,18 @@ interface SchemaTable {
   indexes: IndexInfo[];
 }
 
+type LayoutMode = 'Default' | 'Grid' | 'TB';
+
 // Auto-layout algorithm
-const calculateLayout = (tables: SchemaTable[], onEditTable?: (name: string) => void): { nodes: Node<TableNodeData>[]; edges: Edge[] } => {
+const calculateLayout = (
+  tables: SchemaTable[],
+  mode: LayoutMode = 'Default',
+  onEditTable?: (name: string) => void
+): { nodes: Node<TableNodeData>[]; edges: Edge[] } => {
   const nodes: Node<TableNodeData>[] = [];
   const edges: Edge[] = [];
 
-  // Build a graph of relationships
-  const relationships = new Map<string, Set<string>>();
-  const incomingRelationships = new Map<string, Set<string>>();
-
-  tables.forEach(table => {
-    relationships.set(table.name, new Set());
-    incomingRelationships.set(table.name, new Set());
-  });
-
-  tables.forEach(table => {
-    table.foreignKeys.forEach(fk => {
-      relationships.get(table.name)?.add(fk.table);
-      incomingRelationships.get(fk.table)?.add(table.name);
-    });
-  });
-
-  // Calculate levels (topological sort-ish)
-  const levels = new Map<string, number>();
-  const visited = new Set<string>();
-
-  const calculateLevel = (tableName: string, currentLevel: number = 0): number => {
-    if (visited.has(tableName)) return levels.get(tableName) || 0;
-    visited.add(tableName);
-
-    let maxLevel = currentLevel;
-    const refs = relationships.get(tableName);
-    if (refs) {
-      refs.forEach(ref => {
-        if (!visited.has(ref)) {
-          calculateLevel(ref, currentLevel + 1);
-          maxLevel = Math.max(maxLevel, currentLevel);
-        }
-      });
-    }
-
-    levels.set(tableName, maxLevel);
-    return maxLevel;
-  };
-
-  // Start with tables that have no outgoing relationships
-  tables.forEach(table => {
-    if (relationships.get(table.name)?.size === 0) {
-      calculateLevel(table.name, 0);
-    }
-  });
-
-  // Handle any remaining tables
-  tables.forEach(table => {
-    if (!levels.has(table.name)) {
-      calculateLevel(table.name, 0);
-    }
-  });
-
-  // Group tables by level
-  const levelGroups = new Map<number, SchemaTable[]>();
-  tables.forEach(table => {
-    const level = levels.get(table.name) || 0;
-    if (!levelGroups.has(level)) {
-      levelGroups.set(level, []);
-    }
-    levelGroups.get(level)?.push(table);
-  });
-
-  // Position nodes
-  const nodeWidth = 250;
-  const nodeHeight = 200;
-  const horizontalGap = 100;
-  const verticalGap = 80;
-
-  const sortedLevels = Array.from(levelGroups.keys()).sort((a, b) => b - a);
-
-  sortedLevels.forEach((level, levelIndex) => {
-    const tablesInLevel = levelGroups.get(level) || [];
-    const levelWidth = tablesInLevel.length * (nodeWidth + horizontalGap);
-    const startX = -(levelWidth / 2) + (nodeWidth / 2);
-
-    tablesInLevel.forEach((table, tableIndex) => {
-      const x = startX + tableIndex * (nodeWidth + horizontalGap);
-      const y = levelIndex * (nodeHeight + verticalGap);
-
-      nodes.push({
-        id: table.name,
-        type: 'tableNode',
-        position: { x, y },
-        data: {
-          name: table.name,
-          columns: table.columns,
-          foreignKeys: table.foreignKeys,
-          indexes: table.indexes,
-          onEdit: onEditTable,
-        },
-      });
-    });
-  });
-
-  // Create edges for relationships
+  // Common edge creation logic
   tables.forEach(table => {
     table.foreignKeys.forEach((fk) => {
       edges.push({
@@ -176,9 +100,240 @@ const calculateLayout = (tables: SchemaTable[], onEditTable?: (name: string) => 
         label: fk.from,
         labelStyle: { fill: '#ffffff', fontSize: 10 },
         labelBgStyle: { fill: 'hsl(var(--card))', fillOpacity: 0.8 },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 20,
+          height: 20,
+          color: '#ffffff',
+        },
       });
     });
   });
+
+  if (mode === 'Default') {
+    // Default Layout - relationship-based topological sort
+    const relationships = new Map<string, Set<string>>();
+    const incomingRelationships = new Map<string, Set<string>>();
+
+    tables.forEach(table => {
+      relationships.set(table.name, new Set());
+      incomingRelationships.set(table.name, new Set());
+    });
+
+    tables.forEach(table => {
+      table.foreignKeys.forEach(fk => {
+        relationships.get(table.name)?.add(fk.table);
+        incomingRelationships.get(fk.table)?.add(table.name);
+      });
+    });
+
+    // Calculate levels (topological sort)
+    const levels = new Map<string, number>();
+    const visited = new Set<string>();
+
+    const calculateLevel = (tableName: string, currentLevel: number = 0): number => {
+      if (visited.has(tableName)) return levels.get(tableName) || 0;
+      visited.add(tableName);
+
+      let maxLevel = currentLevel;
+      const refs = relationships.get(tableName);
+      if (refs) {
+        refs.forEach(ref => {
+          if (!visited.has(ref)) {
+            calculateLevel(ref, currentLevel + 1);
+            maxLevel = Math.max(maxLevel, currentLevel);
+          }
+        });
+      }
+
+      levels.set(tableName, maxLevel);
+      return maxLevel;
+    };
+
+    // Start with tables that have no outgoing relationships
+    tables.forEach(table => {
+      if (relationships.get(table.name)?.size === 0) {
+        calculateLevel(table.name, 0);
+      }
+    });
+
+    // Handle remaining tables
+    tables.forEach(table => {
+      if (!levels.has(table.name)) {
+        calculateLevel(table.name, 0);
+      }
+    });
+
+    // Group tables by level
+    const levelGroups = new Map<number, SchemaTable[]>();
+    tables.forEach(table => {
+      const level = levels.get(table.name) || 0;
+      if (!levelGroups.has(level)) {
+        levelGroups.set(level, []);
+      }
+      levelGroups.get(level)?.push(table);
+    });
+
+    // Position nodes
+    const nodeWidth = 300;
+    const nodeHeight = 200;
+    const horizontalGap = 80;
+    const verticalGap = 60;
+
+    const sortedLevels = Array.from(levelGroups.keys()).sort((a, b) => b - a);
+
+    sortedLevels.forEach((level, levelIndex) => {
+      const tablesInLevel = levelGroups.get(level) || [];
+      const levelWidth = tablesInLevel.length * (nodeWidth + horizontalGap);
+      const startX = -(levelWidth / 2) + (nodeWidth / 2);
+
+      tablesInLevel.forEach((table, tableIndex) => {
+        const x = startX + tableIndex * (nodeWidth + horizontalGap);
+        const y = levelIndex * (nodeHeight + verticalGap);
+
+        nodes.push({
+          id: table.name,
+          type: 'tableNode',
+          position: { x, y },
+          data: {
+            name: table.name,
+            columns: table.columns,
+            foreignKeys: table.foreignKeys,
+            indexes: table.indexes,
+            onEdit: onEditTable,
+          },
+        });
+      });
+    });
+  } else if (mode === 'Grid') {
+    // Grid Layout - tables arranged in columns left to right
+    const nodeWidth = 300;
+    const gapX = 80;
+    const gapY = 25;
+    const cols = Math.ceil(Math.sqrt(tables.length));
+    const rows = Math.ceil(tables.length / cols);
+
+    // Calculate heights for all tables
+    const tableHeights = tables.map(table => 
+      40 + (table.columns.length * 32) + (table.columns.length > 10 ? 30 : 0)
+    );
+
+    // Arrange in columns (left to right flow)
+    const colHeights: number[][] = [];
+    for (let c = 0; c < cols; c++) {
+      const colItems: number[] = [];
+      for (let r = 0; r < rows; r++) {
+        const idx = c * rows + r;
+        if (idx < tables.length) {
+          colItems.push(tableHeights[idx]);
+        }
+      }
+      colHeights.push(colItems);
+    }
+
+    tables.forEach((table, index) => {
+      const col = Math.floor(index / rows);
+      const row = index % rows;
+
+      // Calculate Y position based on previous items in this column
+      let yPos = 0;
+      for (let r = 0; r < row; r++) {
+        const prevIdx = col * rows + r;
+        if (prevIdx < tableHeights.length) {
+          yPos += tableHeights[prevIdx] + gapY;
+        }
+      }
+
+      nodes.push({
+        id: table.name,
+        type: 'tableNode',
+        position: {
+          x: col * (nodeWidth + gapX),
+          y: yPos,
+        },
+        data: {
+          name: table.name,
+          columns: table.columns,
+          foreignKeys: table.foreignKeys,
+          indexes: table.indexes,
+          onEdit: onEditTable,
+        },
+      });
+    });
+  } else {
+    // TB - Pyramid Layout (visual pyramid shape: 1, 2, 3, 4... tables per row)
+    const nodeWidth = 300;
+    const gapX = 50;
+    const gapY = 40;
+
+    // Sort tables by importance: tables with most incoming refs (referenced by others) first
+    const tableNames = new Set(tables.map(t => t.name));
+    const incomingCount = new Map<string, number>();
+    
+    tables.forEach(t => incomingCount.set(t.name, 0));
+    tables.forEach(table => {
+      table.foreignKeys.forEach(fk => {
+        if (tableNames.has(fk.table)) {
+          incomingCount.set(fk.table, (incomingCount.get(fk.table) || 0) + 1);
+        }
+      });
+    });
+
+    const sortedTables = [...tables].sort((a, b) => 
+      (incomingCount.get(b.name) || 0) - (incomingCount.get(a.name) || 0)
+    );
+
+    // Build pyramid tiers: row 0 has 1 table, row 1 has 2, row 2 has 3, etc.
+    const tiers: SchemaTable[][] = [];
+    let tableIndex = 0;
+    let tierSize = 1;
+    
+    while (tableIndex < sortedTables.length) {
+      const tier: SchemaTable[] = [];
+      for (let i = 0; i < tierSize && tableIndex < sortedTables.length; i++) {
+        tier.push(sortedTables[tableIndex]);
+        tableIndex++;
+      }
+      tiers.push(tier);
+      tierSize++;
+    }
+
+    // Calculate the width of the bottom (widest) tier for centering
+    const bottomTier = tiers[tiers.length - 1];
+    const maxTierWidth = bottomTier.length * nodeWidth + (bottomTier.length - 1) * gapX;
+
+    let currentY = 0;
+    tiers.forEach((tierTables) => {
+      const tierWidth = tierTables.length * nodeWidth + (tierTables.length - 1) * gapX;
+      const startX = (maxTierWidth - tierWidth) / 2;
+
+      // Calculate max height in this tier
+      const tierHeights = tierTables.map(t => 
+        40 + (t.columns.length * 32) + (t.columns.length > 10 ? 30 : 0)
+      );
+      const maxHeight = Math.max(...tierHeights);
+
+      tierTables.forEach((table, idx) => {
+        nodes.push({
+          id: table.name,
+          type: 'tableNode',
+          position: {
+            x: startX + idx * (nodeWidth + gapX),
+            y: currentY,
+          },
+          data: {
+            name: table.name,
+            columns: table.columns,
+            foreignKeys: table.foreignKeys,
+            indexes: table.indexes,
+            onEdit: onEditTable,
+          },
+        });
+      });
+
+      currentY += maxHeight + gapY;
+    });
+  }
 
   return { nodes, edges };
 };
@@ -188,8 +343,6 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
   getTableColumns,
   getForeignKeys,
   getIndexes,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  isPostgres = false,
   onEditTable
 }, ref) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -200,6 +353,8 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
   const [hasLoaded, setHasLoaded] = useState(false);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('Default');
 
   useImperativeHandle(ref, () => ({
     exportSchema: async (format: 'png' | 'svg') => {
@@ -302,11 +457,6 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
 
         setSchemaData(data);
         setHasLoaded(true);
-
-        // Calculate layout
-        const { nodes: newNodes, edges: newEdges } = calculateLayout(data, (name) => onEditTableRef.current?.(name));
-        setNodes(newNodes);
-        setEdges(newEdges);
       } catch (error) {
         console.error('Error loading schema:', error);
       } finally {
@@ -325,17 +475,42 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
     };
   }, [tableKey]); // Only depend on tableKey
 
+  // Handle layout changes
+  const handleLayoutSelect = useCallback((mode: LayoutMode) => {
+    setLayoutMode(mode);
+    const { nodes: newNodes, edges: newEdges } = calculateLayout(schemaData, mode, (name) => onEditTableRef.current?.(name));
+    setNodes(newNodes);
+    setEdges(newEdges);
+    
+    // Fit view after layout
+    setTimeout(() => {
+      if (reactFlowInstance) {
+        reactFlowInstance.fitView({ padding: 0.2, duration: 800 });
+      }
+    }, 10);
+  }, [schemaData, reactFlowInstance, setNodes, setEdges]);
+
+  // Handle schema data changes
+  useEffect(() => {
+    if (schemaData.length > 0) {
+      const { nodes: newNodes, edges: newEdges } = calculateLayout(schemaData, layoutMode, (name) => onEditTableRef.current?.(name));
+      setNodes(newNodes);
+      setEdges(newEdges);
+      
+      // Fit view after layout
+      setTimeout(() => {
+        if (reactFlowInstance) {
+          reactFlowInstance.fitView({ padding: 0.2, duration: 800 });
+        }
+      }, 10);
+    }
+  }, [schemaData, reactFlowInstance]);
+
   // Handle node selection
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     setSelectedTable(node.id);
   }, []);
 
-  // Handle auto-layout
-  const handleAutoLayout = useCallback(() => {
-    const { nodes: newNodes, edges: newEdges } = calculateLayout(schemaData, (name) => onEditTableRef.current?.(name));
-    setNodes(newNodes);
-    setEdges(newEdges);
-  }, [schemaData, setNodes, setEdges]);
 
   // Focus on a specific table
   const focusTable = useCallback((tableName: string) => {
@@ -483,15 +658,38 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
 
           {/* Top Panel */}
           <Panel position="top-right" className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleAutoLayout}
-              className="bg-card"
-            >
-              <LayoutGrid className="w-4 h-4 mr-2" />
-              Auto Layout
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="bg-card"
+                >
+                  <LayoutGrid className="w-4 h-4 mr-2" />
+                  Layout
+                  <ChevronDown className="w-3 h-3 ml-2 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>Layout Strategy</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleLayoutSelect('Default')}>
+                  <Workflow className="w-4 h-4 mr-2 text-muted-foreground" />
+                  Default
+                  {layoutMode === 'Default' && <CircleDot className="w-3 h-3 ml-auto text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleLayoutSelect('Grid')}>
+                  <LayoutGrid className="w-4 h-4 mr-2 text-muted-foreground" />
+                  Grid
+                  {layoutMode === 'Grid' && <CircleDot className="w-3 h-3 ml-auto text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleLayoutSelect('TB')}>
+                  <ArrowDownUp className="w-4 h-4 mr-2 text-muted-foreground" />
+                  Pyramid
+                  {layoutMode === 'TB' && <CircleDot className="w-3 h-3 ml-auto text-primary" />}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </Panel>
 
           {/* Legend Panel */}

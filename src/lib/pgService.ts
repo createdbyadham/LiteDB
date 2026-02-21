@@ -49,24 +49,20 @@ class PgService {
 
   async init() {
     if (this.pg) {
-      console.log("pg-promise already initialized");
       return this;
     }
 
     if (this.initPromise) {
-      console.log("Waiting for existing initialization to complete");
       await this.initPromise;
       return this;
     }
 
-    console.log("Starting pg initialization");
     this.isInitializing = true;
     this.initPromise = new Promise((resolve, reject) => {
       const initializeAsync = async () => {
         try {
           // In Tauri we can use rust postgres client directly through tauri's IPC
           // For security reasons, we'll implement the actual connection in main process
-          console.log("pg-promise initialized successfully");
           this.isInitializing = false;
           resolve(this);
         } catch (error) {
@@ -90,8 +86,6 @@ class PgService {
 
   async connect(config: PgConfig) {
     try {
-      console.log("Connecting to PostgreSQL database");
-
       // Save the config
       this.currentConfig = config;
 
@@ -106,7 +100,6 @@ class PgService {
 
       // Fetch tables to verify connection
       this.currentTables = await this.getTables();
-      console.log("Connected to PostgreSQL with tables:", this.currentTables);
 
       return true;
     } catch (error) {
@@ -237,8 +230,8 @@ class PgService {
           }).join(', ');
           query = `SELECT ${selectClause} FROM "${tableName}" LIMIT ${limit} OFFSET ${offset};`;
         }
-      } catch (e) {
-        console.warn("Failed to fetch columns for smart select, falling back to SELECT *", e);
+      } catch {
+        // Failed to fetch columns for smart select, falling back to SELECT *
       }
 
       const result = await tauriService.executePostgresQuery({
@@ -516,8 +509,6 @@ class PgService {
         SET ${setClauses.join(', ')}
         WHERE "${pkName}" = ${escapedPkValue};
       `;
-
-      console.log("Update SQL:", sql);
 
       // Execute the query without using parameterized style
       const result = await tauriService.executePostgresQuery({

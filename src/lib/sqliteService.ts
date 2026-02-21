@@ -69,24 +69,20 @@ class SqliteService {
 
     async init() {
         if (this.SQL) {
-            console.log("SQL.js already initialized");
             return this;
         }
 
         if (this.initPromise) {
-            console.log("Waiting for existing initialization to complete");
             await this.initPromise;
             return this;
         }
 
-        console.log("Starting SQL.js initialization");
         this.isInitializing = true;
         this.initPromise = new Promise((resolve, reject) => {
             const initializeAsync = async () => {
                 try {
                     // Load SQL.js script if not already loaded
                     if (!window.initSqlJs) {
-                        console.log("Loading SQL.js script");
                         const script = document.createElement('script');
                         script.src = process.env.NODE_ENV === 'production' ? './sql-wasm.js' : '/sql-wasm.js';
                         script.async = true;
@@ -94,28 +90,21 @@ class SqliteService {
 
                         await new Promise<void>((resolveScript) => {
                             script.onload = () => {
-                                console.log("SQL.js script loaded successfully");
                                 resolveScript();
                             };
                             script.onerror = () => {
-                                console.error("Failed to load SQL.js script");
                                 reject(new Error('Failed to load SQL.js script'));
                             };
                         });
-                    } else {
-                        console.log("SQL.js script already loaded");
                     }
 
                     // Initialize SQL.js with WASM file
-                    console.log("Initializing SQL.js with WASM file");
                     this.SQL = await window.initSqlJs({
                         locateFile: (file: string) => {
-                            console.log("Locating file:", file);
                             return process.env.NODE_ENV === 'production' ? `./${file}` : `/${file}`;
                         }
                     });
 
-                    console.log("SQL.js initialized successfully");
                     this.isInitializing = false;
                     resolve();
                 } catch (error) {
@@ -139,9 +128,7 @@ class SqliteService {
 
     async loadDbFromArrayBuffer(buffer: ArrayBuffer, filePath?: string) {
         try {
-            console.log("Starting database load from ArrayBuffer");
             if (!this.SQL) {
-                console.log("SQL.js not initialized, initializing now");
                 await this.init();
             }
 
@@ -150,7 +137,6 @@ class SqliteService {
             }
 
             // Convert ArrayBuffer to Uint8Array properly
-            console.log("Converting ArrayBuffer to Uint8Array, size:", buffer.byteLength);
             const data = new Uint8Array(buffer);
 
             // Store the initial data and file path
@@ -161,20 +147,16 @@ class SqliteService {
 
             // Close existing database if any
             if (this.db) {
-                console.log("Closing existing database connection");
                 this.db.close();
                 this.db = null;
             }
 
             try {
                 // Create new database instance
-                console.log("Creating new database instance");
                 this.db = new this.SQL.Database(data);
 
                 // Verify database is valid by trying to read tables
-                console.log("Verifying database by reading tables");
                 this.currentTables = this.getTables();
-                console.log("Database loaded successfully with tables:", this.currentTables);
 
                 return true;
             } catch (dbError) {
