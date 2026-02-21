@@ -1,7 +1,7 @@
 {
   "productName": "LiteDB",
   "version": "2.0.0",
-  "identifier": "com.litedb.app",
+  "identifier": "com.adhamehab.litedb",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -18,7 +18,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://*; connect-src 'self' http://localhost:* https://api.openai.com https://models.github.ai https://*.openai.azure.com;"
     }
   },
   "bundle": {

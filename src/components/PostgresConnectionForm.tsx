@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { usePostgres } from '@/hooks/usePostgres';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ChevronUp, ChevronDown } from 'lucide-react';
 
 interface PostgresConnectionFormProps {
   onConnectionSuccess?: () => void;
@@ -78,16 +79,38 @@ export default function PostgresConnectionForm({ onConnectionSuccess }: Postgres
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="port">Port</Label>
-                <Input 
-                  id="port" 
-                  name="port" 
-                  type="number" 
-                  value={config.port} 
-                  onChange={handleChange} 
-                  required 
-                />
-              </div>
+  <Label htmlFor="port">Port</Label>
+  <div className="relative">
+    <Input 
+      id="port" 
+      name="port" 
+      type="number" 
+      value={config.port} 
+      onChange={handleChange} 
+      required 
+      /* Hide default browser spinners and add right padding to make room for custom buttons */
+      className="pr-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+    />
+    <div className="absolute right-1 top-1 bottom-1 flex flex-col justify-center border-l pl-1 border-border/50">
+      <button
+        type="button"
+        tabIndex={-1} // Prevents these buttons from interrupting normal form tabbing
+        className="flex-1 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted rounded-tr-sm px-1 transition-colors"
+        onClick={() => setConfig(prev => ({ ...prev, port: Number(prev.port) + 1 }))}
+      >
+        <ChevronUp className="h-3 w-3" />
+      </button>
+      <button
+        type="button"
+        tabIndex={-1}
+        className="flex-1 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted rounded-br-sm px-1 transition-colors"
+        onClick={() => setConfig(prev => ({ ...prev, port: Math.max(0, Number(prev.port) - 1) }))}
+      >
+        <ChevronDown className="h-3 w-3" />
+      </button>
+    </div>
+  </div>
+</div>
             </div>
             
             <div className="space-y-2">
