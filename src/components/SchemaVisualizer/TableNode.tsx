@@ -103,7 +103,6 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
         <button
           className="text-muted-foreground hover:text-foreground transition-colors nodrag"
           onClick={(e) => {
-            console.log('Edit table clicked:', name);
             e.stopPropagation();
             onEdit?.(name);
           }}

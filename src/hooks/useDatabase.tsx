@@ -37,9 +37,8 @@ export function useDatabase(): UseDbReturn {
       });
       const schema: DatabaseSchema = { dialect: 'sqlite', tables: tableSchemas };
       aiService.setSchema(schema);
-    } catch (e) {
+    } catch {
       // Best-effort; ignore schema push errors
-      console.warn('Failed to push SQLite schema to AI service', e);
     }
   };
 
@@ -49,24 +48,20 @@ export function useDatabase(): UseDbReturn {
 
     const initDb = async () => {
       try {
-        console.log("Initializing database service");
         await dbService.init();
         
         if (!mounted) return;
 
         // Check if we already have tables loaded
         const existingTables = dbService.getTables();
-        console.log("Checking for existing tables:", existingTables);
         
         if (existingTables.length > 0 && mounted) {
-          console.log("Found existing tables, setting state");
           setTables(existingTables);
           setIsLoaded(true);
           // Push schema to AI
           pushSQLiteSchemaToAI(existingTables);
         }
-      } catch (error) {
-        console.error("Failed to initialize database:", error);
+      } catch {
         if (mounted) {
           setIsLoaded(false);
           setTables([]);
@@ -83,26 +78,20 @@ export function useDatabase(): UseDbReturn {
   }, []);
 
   const loadDatabase = async (data: ArrayBuffer | Buffer, filePath?: string): Promise<boolean> => {
-    console.log("Starting database load process");
     setIsLoading(true);
     setIsLoaded(false);
     setTables([]); // Clear existing tables while loading
     
     try {
       // Ensure dbService is initialized
-      console.log("Ensuring dbService is initialized");
       await dbService.init();
       
-      console.log("Loading database from ArrayBuffer");
       const success = await dbService.loadDbFromArrayBuffer(data, filePath);
       
       if (success) {
-        console.log("Database loaded successfully, getting tables");
         const tableList = dbService.getTables();
-        console.log("Retrieved tables:", tableList);
         
         if (tableList.length > 0) {
-          console.log("Setting state with tables");
           setTables(tableList);
           setIsLoaded(true);
           // Push schema to AI
@@ -115,7 +104,6 @@ export function useDatabase(): UseDbReturn {
           
           return true;
         } else {
-          console.log("No tables found in database");
           setIsLoaded(false);
           setTables([]);
           aiService.clearSchema();
@@ -129,13 +117,11 @@ export function useDatabase(): UseDbReturn {
         }
       }
       
-      console.log("Failed to load database");
       setIsLoaded(false);
       setTables([]);
       aiService.clearSchema();
       return false;
     } catch (error) {
-      console.error("Error loading database:", error);
       setIsLoaded(false);
       setTables([]);
       aiService.clearSchema();
@@ -154,7 +140,6 @@ export function useDatabase(): UseDbReturn {
 
   const getTableData = (tableName: string) => {
     if (!isLoaded || !tables.length) {
-      console.log("Attempted to get table data without loaded database");
       toast({
         title: "Error",
         description: "No database loaded. Please load a database first.",
@@ -167,7 +152,6 @@ export function useDatabase(): UseDbReturn {
 
   const getTableColumns = (tableName: string) => {
     if (!isLoaded || !tables.length) {
-      console.log("Attempted to get table columns without loaded database");
       toast({
         title: "Error",
         description: "No database loaded. Please load a database first.",
@@ -180,7 +164,6 @@ export function useDatabase(): UseDbReturn {
 
   const getForeignKeys = (tableName: string) => {
     if (!isLoaded || !tables.length) {
-      console.log("Attempted to get foreign keys without loaded database");
       return [];
     }
     return dbService.getForeignKeys(tableName);
@@ -188,7 +171,6 @@ export function useDatabase(): UseDbReturn {
 
   const getIndexes = (tableName: string) => {
     if (!isLoaded || !tables.length) {
-      console.log("Attempted to get indexes without loaded database");
       return [];
     }
     return dbService.getIndexes(tableName);
@@ -196,7 +178,6 @@ export function useDatabase(): UseDbReturn {
 
   const executeQuery = (sql: string) => {
     if (!isLoaded || !tables.length) {
-      console.log("Attempted to execute query without loaded database");
       toast({
         title: "Error",
         description: "No database loaded. Please load a database first.",
@@ -209,11 +190,9 @@ export function useDatabase(): UseDbReturn {
 
   const refreshTables = () => {
     if (!isLoaded) {
-      console.log("Attempted to refresh tables without loaded database");
       return;
     }
     try {
-      console.log("Refreshing SQLite tables");
       const tableList = dbService.getTables();
       setTables(tableList);
       // Update AI schema
@@ -222,8 +201,7 @@ export function useDatabase(): UseDbReturn {
       } else {
         aiService.clearSchema();
       }
-    } catch (error) {
-      console.error("Error refreshing tables:", error);
+    } catch {
       toast({
         title: "Error",
         description: "Failed to refresh table list",

@@ -82,7 +82,6 @@ async function initializeEmbedder(modelId: string): Promise<boolean> {
 
   // If different model, unload first
   if (embedder && currentModel?.id !== modelId) {
-    console.log('Unloading previous model:', currentModel?.name);
     embedder = null;
     currentModel = null;
   }
@@ -99,8 +98,6 @@ async function initializeEmbedder(modelId: string): Promise<boolean> {
   loadError = null;
 
   try {
-    console.log('Initializing local embedding model:', model.huggingFaceId);
-    
     embedder = await pipeline('feature-extraction', model.huggingFaceId, {
       progress_callback: (data: any) => {
         if (progressCallback) {
@@ -110,14 +107,10 @@ async function initializeEmbedder(modelId: string): Promise<boolean> {
             file: data.file
           });
         }
-        if (data.status === 'progress') {
-          console.log(`Loading model: ${data.file} - ${Math.round(data.progress || 0)}%`);
-        }
       }
     });
 
     currentModel = model;
-    console.log('Local embedding model loaded successfully:', model.name);
     isLoading = false;
     return true;
   } catch (error) {
