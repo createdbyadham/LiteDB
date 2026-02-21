@@ -187,10 +187,10 @@ const UploadView = () => {
 
             <TabsContent value="sqlite" className="space-y-4 mt-4">
               <div
-                className={`border-2 border-dashed rounded-lg p-8 transition-all duration-200 ease-in-out ${isDragging
-                  ? 'border-primary/80 bg-primary/5'
-                  : 'border-border hover:border-primary/40 hover:bg-primary/5'
-                  }`}
+                className={`border-2 border-dashed rounded-lg px-8 py-[40px] transition-all duration-200 ease-in-out ${isDragging
+                ? 'border-primary/80 bg-primary/5'
+                : 'border-border hover:border-primary/40 hover:bg-primary/5'
+                }`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
