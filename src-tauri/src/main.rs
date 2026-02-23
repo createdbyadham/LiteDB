@@ -3,12 +3,12 @@
     windows_subsystem = "windows"
 )]
 
-use tokio::sync::Mutex;
-use tauri::State;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use sqlx::postgres::{PgPool, PgPoolOptions};
-use sqlx::{Row, Column};
-use serde::{Serialize, Deserialize};
-use serde_json::{Value, Map};
+use sqlx::{Column, Row};
+use tauri::State;
+use tokio::sync::Mutex;
 
 struct PostgresState {
     pool: Mutex<Option<PgPool>>,
@@ -74,7 +74,10 @@ async fn execute_postgres_query(
 ) -> Result<QueryResult, String> {
     let pool = {
         let pool_guard = state.pool.lock().await;
-        pool_guard.as_ref().ok_or("No PostgreSQL connection")?.clone()
+        pool_guard
+            .as_ref()
+            .ok_or("No PostgreSQL connection")?
+            .clone()
     };
 
     let rows = sqlx::query(&query)
@@ -86,13 +89,17 @@ async fn execute_postgres_query(
     let mut json_rows = Vec::new();
 
     if !rows.is_empty() {
-        columns = rows[0].columns().iter().map(|c| c.name().to_string()).collect();
-        
+        columns = rows[0]
+            .columns()
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect();
+
         for row in rows {
             let mut json_row = Map::new();
             for (i, col) in row.columns().iter().enumerate() {
                 let col_name = col.name();
-                
+
                 // Try to get as various types
                 if let Ok(v) = row.try_get::<String, _>(i) {
                     json_row.insert(col_name.to_string(), Value::String(v));
@@ -150,6 +157,7 @@ async fn disconnect_postgres(state: State<'_, PostgresState>) -> Result<QueryRes
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(PostgresState {

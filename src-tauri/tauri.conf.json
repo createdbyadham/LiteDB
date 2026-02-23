@@ -1,6 +1,6 @@
 {
   "productName": "LiteDB",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "identifier": "com.adhamehab.litedb",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -24,6 +24,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -33,6 +34,12 @@
     ]
   },
   "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJENjZFQ0YxRDE3NTgyQUEKUldTcWduWFI4ZXhtdlpNNEhuYk5ybWxWWDFRVTZ1SWJMOU5yVWVNQlFLZk1yempYRTY4N1RtRE4K",
+      "endpoints": [
+        "https://github.com/createdbyadham/LiteDB/releases/latest/download/latest.json"
+      ]
+    },
     "fs": {}
   }
 }
