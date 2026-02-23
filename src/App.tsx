@@ -6,8 +6,40 @@ import { SidebarProvider } from "@/contexts/SidebarContext";
 import DatabaseView from "./components/DatabaseView";
 import UploadView from '@/components/UploadView';
 import TitleBar from '@/components/TitleBar';
+import { useEffect } from 'react';
+import { check } from '@tauri-apps/plugin-updater';
+import { ask } from '@tauri-apps/plugin-dialog';
+import { relaunch } from '@tauri-apps/plugin-process';
 
-const App = () => (
+const App = () => {
+  useEffect(() => {
+    const checkForAppUpdates = async () => {
+      try {
+        const update = await check();
+        if (update) {
+          const wantsToUpdate = await ask(
+            `LiteDB ${update.version} is available!\n\nRelease notes: ${update.body}\n\nDo you want to install it now?`, 
+            {
+              title: 'Update Available',
+              kind: 'info',
+              okLabel: 'Install and Relaunch',
+              cancelLabel: 'Later'
+            }
+          );
+
+          if (wantsToUpdate) {
+            await update.downloadAndInstall();
+            await relaunch();
+          }
+        }
+      } catch (error) {
+        console.error("Failed to check for updates:", error);
+      }
+    };
+    checkForAppUpdates();
+  }, []);
+
+  return (
   <SidebarProvider>
     <TooltipProvider>
       <div className="flex flex-col h-screen overflow-hidden">
@@ -25,6 +57,7 @@ const App = () => (
       <Sonner />
     </TooltipProvider>
   </SidebarProvider>
-);
+  );
+};
 
 export default App;
