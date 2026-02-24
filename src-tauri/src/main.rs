@@ -160,7 +160,8 @@ async fn disconnect_postgres(state: State<'_, PostgresState>) -> Result<QueryRes
 #[derive(Serialize)]
 struct ProxyResponse {
     status: u16,
-    statusText: String,
+    #[serde(rename = "statusText")]
+    status_text: String,
     headers: HashMap<String, String>,
     body: String,
 }
@@ -208,7 +209,7 @@ async fn proxy_request(
 
     Ok(ProxyResponse {
         status,
-        statusText: status_text,
+        status_text,
         headers: response_headers,
         body: body_text,
     })
