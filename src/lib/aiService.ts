@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 export type AIProvider = 'github' | 'azure' | 'openai' | 'ollama';
 
@@ -78,7 +79,48 @@ function createClient() {
   return new OpenAI({ 
     baseURL: config.endpoint || undefined,
     apiKey: apiKey,
-    dangerouslyAllowBrowser: true 
+    dangerouslyAllowBrowser: true,
+    fetch: async (url, init) => {
+      // Convert headers to Record<string, string>
+      const headers: Record<string, string> = {};
+      if (init?.headers) {
+        new Headers(init.headers).forEach((value, key) => {
+          headers[key] = value;
+        });
+      }
+      
+      // Force Origin to localhost to bypass Ollama's CORS check
+      headers['Origin'] = 'http://localhost';
+
+      try {
+        console.log('Invoking proxy_request with url:', url);
+        if (typeof tauriInvoke !== 'function') {
+          console.error('tauriInvoke is not a function:', tauriInvoke);
+          throw new Error('tauriInvoke is not defined');
+        }
+
+        const response = await tauriInvoke<{
+          status: number;
+          statusText: string;
+          headers: Record<string, string>;
+          body: string;
+        }>('proxy_request', {
+          url: url.toString(),
+          method: init?.method || 'GET',
+          headers,
+          body: init?.body ? String(init.body) : null,
+        });
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        });
+      } catch (e) {
+        console.error('Proxy request failed:', e);
+        throw e;
+      }
+    }
   });
 }
 

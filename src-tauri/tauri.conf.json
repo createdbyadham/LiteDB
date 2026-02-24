@@ -18,7 +18,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://*; connect-src 'self' http://localhost:* https://api.openai.com https://models.github.ai https://*.openai.azure.com;"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.gpteng.co; style-src 'self' 'unsafe-inline' https://rsms.me; font-src 'self' https://rsms.me; img-src 'self' data: asset: blob: https://*; connect-src * 'unsafe-inline';"
     }
   },
   "bundle": {
