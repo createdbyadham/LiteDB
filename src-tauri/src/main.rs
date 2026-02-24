@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Column, Row};
+use std::collections::HashMap;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tauri::State;
 use tokio::sync::Mutex;
 
@@ -155,18 +157,77 @@ async fn disconnect_postgres(state: State<'_, PostgresState>) -> Result<QueryRes
     })
 }
 
+#[derive(Serialize)]
+struct ProxyResponse {
+    status: u16,
+    statusText: String,
+    headers: HashMap<String, String>,
+    body: String,
+}
+
+#[tauri::command]
+async fn proxy_request(
+    url: String,
+    method: String,
+    headers: HashMap<String, String>,
+    body: Option<String>,
+) -> Result<ProxyResponse, String> {
+    let client = reqwest::Client::new();
+    
+    let mut header_map = HeaderMap::new();
+    for (key, value) in headers {
+        if let (Ok(k), Ok(v)) = (HeaderName::from_bytes(key.as_bytes()), HeaderValue::from_str(&value)) {
+            header_map.insert(k, v);
+        }
+    }
+
+    let mut request_builder = client
+        .request(method.parse().unwrap_or(reqwest::Method::GET), &url)
+        .headers(header_map);
+
+    if let Some(b) = body {
+        request_builder = request_builder.body(b);
+    }
+
+    let response = request_builder
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let status = response.status().as_u16();
+    let status_text = response.status().canonical_reason().unwrap_or("").to_string();
+    
+    let mut response_headers = HashMap::new();
+    for (key, value) in response.headers() {
+        if let Ok(v) = value.to_str() {
+            response_headers.insert(key.to_string(), v.to_string());
+        }
+    }
+
+    let body_text = response.text().await.map_err(|e| e.to_string())?;
+
+    Ok(ProxyResponse {
+        status,
+        statusText: status_text,
+        headers: response_headers,
+        body: body_text,
+    })
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
         .manage(PostgresState {
             pool: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             connect_postgres,
             execute_postgres_query,
-            disconnect_postgres
+            disconnect_postgres,
+            proxy_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

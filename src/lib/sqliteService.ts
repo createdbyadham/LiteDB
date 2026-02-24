@@ -84,7 +84,7 @@ class SqliteService {
                     // Load SQL.js script if not already loaded
                     if (!window.initSqlJs) {
                         const script = document.createElement('script');
-                        script.src = process.env.NODE_ENV === 'production' ? './sql-wasm.js' : '/sql-wasm.js';
+                        script.src = import.meta.env.PROD ? './sql-wasm.js' : '/sql-wasm.js';
                         script.async = true;
                         document.body.appendChild(script);
 
@@ -101,7 +101,7 @@ class SqliteService {
                     // Initialize SQL.js with WASM file
                     this.SQL = await window.initSqlJs({
                         locateFile: (file: string) => {
-                            return process.env.NODE_ENV === 'production' ? `./${file}` : `/${file}`;
+                            return import.meta.env.PROD ? `./${file}` : `/${file}`;
                         }
                     });
 
