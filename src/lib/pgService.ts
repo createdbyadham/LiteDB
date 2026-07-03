@@ -1,7 +1,8 @@
 // This service handles PostgreSQL database operations
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
-import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
+import { assertIdent } from '@/lib/types';
+import type { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/types';
 
 // Define PostgreSQL connection config
 export interface PgConfig {
@@ -37,50 +38,16 @@ export interface SimilarityResult {
 }
 
 class PgService {
-  private client: any = null;
-  private pg: any = null;
-  private isInitializing = false;
-  private initPromise: Promise<PgService> | null = null;
   private currentTables: TableInfo[] = [];
   public currentConfig: PgConfig | null = null;
   public connected = false;
   public hasPgVector = false;
   public vectorColumns: VectorColumnInfo[] = [];
 
+  // Kept for API compatibility with the SQLite service. All real connection
+  // setup happens in connect() through a Rust command, so there's nothing to
+  // initialize on the JS side.
   async init() {
-    if (this.pg) {
-      return this;
-    }
-
-    if (this.initPromise) {
-      await this.initPromise;
-      return this;
-    }
-
-    this.isInitializing = true;
-    this.initPromise = new Promise((resolve, reject) => {
-      const initializeAsync = async () => {
-        try {
-          // In Tauri we can use rust postgres client directly through tauri's IPC
-          // For security reasons, we'll implement the actual connection in main process
-          this.isInitializing = false;
-          resolve(this);
-        } catch (error) {
-          this.isInitializing = false;
-          console.error("Failed to initialize pg-promise:", error);
-          toast({
-            title: "Error",
-            description: "Failed to initialize PostgreSQL engine",
-            variant: "destructive"
-          });
-          reject(error);
-        }
-      };
-
-      void initializeAsync();
-    });
-
-    await this.initPromise;
     return this;
   }
 
@@ -120,7 +87,7 @@ class PgService {
 
   async getTables(): Promise<TableInfo[]> {
     if (!this.connected) {
-      return this.currentTables;
+      return [];
     }
 
     try {
@@ -155,7 +122,7 @@ class PgService {
         description: "Failed to retrieve table list",
         variant: "destructive"
       });
-      return this.currentTables;
+      return [];
     }
   }
 
@@ -165,6 +132,7 @@ class PgService {
     }
 
     try {
+      assertIdent(tableName, 'table');
       const result = await tauriService.executePostgresQuery({
         query: `
           SELECT 
@@ -214,15 +182,16 @@ class PgService {
     }
 
     try {
-      // By default, SELECT * might return vector types as raw binary which sqlx fails to decode to string (returning null).
-      // We try to fetch column info first to cast vector columns to text explicitly.
+      assertIdent(tableName, 'table');
+      // SELECT * returns pgvector columns as raw binary which sqlx can't decode to string,
+      // so we try to introspect columns and cast vector columns to text. Falls back to *.
       let query = `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset};`;
 
       try {
         const columns = await this.getTableColumns(tableName);
         if (columns.length > 0) {
           const selectClause = columns.map(col => {
-            // Check if it's a vector type (udt_name usually 'vector')
+            assertIdent(col.name, 'column');
             if (col.type.startsWith('vector')) {
               return `"${col.name}"::text`;
             }
@@ -263,6 +232,7 @@ class PgService {
     }
 
     try {
+      assertIdent(tableName, 'table');
       const result = await tauriService.executePostgresQuery({
         query: `
           SELECT
@@ -315,6 +285,7 @@ class PgService {
     }
 
     try {
+      assertIdent(tableName, 'table');
       const result = await tauriService.executePostgresQuery({
         query: `
           SELECT
@@ -415,6 +386,7 @@ class PgService {
     }
 
     try {
+      assertIdent(tableName, 'table');
       const columns = Object.keys(rowData);
       const values = Object.values(rowData);
 
@@ -422,6 +394,7 @@ class PgService {
         return false;
       }
 
+      columns.forEach(c => assertIdent(c, 'column'));
       const columnNames = columns.map(c => `"${c}"`).join(', ');
       const valuePlaceholders = values.map(v => this.formatValueForSQL(v)).join(', ');
 
@@ -461,7 +434,7 @@ class PgService {
     }
 
     try {
-      // Get the table columns to determine primary key and data types
+      assertIdent(tableName, 'table');
       const columns = await this.getTableColumns(tableName);
 
       // Find the primary key column
@@ -496,6 +469,7 @@ class PgService {
 
       // Manually construct the SET part with proper escaping
       const setClauses = changes.map(([column, value]) => {
+        assertIdent(column, 'column');
         const escapedValue = this.formatValueForSQL(value);
         return `"${column}" = ${escapedValue}`;
       });
@@ -668,7 +642,8 @@ class PgService {
     if (!this.connected || !this.hasPgVector) return null;
 
     try {
-      // First, get a sample of vectors
+      assertIdent(tableName, 'table');
+      assertIdent(columnName, 'column');
       const result = await tauriService.executePostgresQuery({
         query: `
           SELECT "${columnName}"::text as vector_text
@@ -733,6 +708,9 @@ class PgService {
     if (!this.connected || !this.hasPgVector) return [];
 
     try {
+      assertIdent(tableName, 'table');
+      assertIdent(vectorColumn, 'column');
+      assertIdent(primaryKeyColumn, 'column');
       // Build the query based on the distance metric
       let distanceExpr: string;
       let orderExpr: string;
@@ -807,6 +785,8 @@ class PgService {
     if (!this.connected || !this.hasPgVector) return [];
 
     try {
+      assertIdent(tableName, 'table');
+      assertIdent(vectorColumn, 'column');
       const vectorStr = `[${queryVector.join(',')}]`;
       
       let distanceExpr: string;
@@ -872,6 +852,8 @@ class PgService {
     if (!this.connected) return false;
 
     try {
+      assertIdent(tableName, 'table');
+      assertIdent(primaryKeyColumn, 'column');
       const sql = `DELETE FROM "${tableName}" WHERE "${primaryKeyColumn}" IN (${rowIds.map(id => this.formatValueForSQL(id)).join(',')})`;
       const result = await tauriService.executePostgresQuery({ query: sql });
 

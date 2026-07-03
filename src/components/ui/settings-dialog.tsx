@@ -3,7 +3,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -11,42 +10,22 @@ import {
 import { Input } from "./input"
 import { Label } from "./label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select"
-import { Settings2 } from "lucide-react"
+import { Settings2, Copy, Download } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useToast } from "./use-toast"
-import { AIProvider, AISettings, defaultSettings } from "@/lib/aiService"
+import { AIProvider, AISettings, defaultSettings, loadAISettings } from "@/lib/aiService"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs"
+import { appLogDir } from '@tauri-apps/api/path'
+import { readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
+import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { save } from '@tauri-apps/plugin-dialog'
 
 export function SettingsDialog() {
   const [settings, setSettings] = useState<AISettings>(defaultSettings);
   const { toast } = useToast();
 
   useEffect(() => {
-    // Load saved settings on component mount
-    const savedSettings = localStorage.getItem('aiSettings');
-    if (savedSettings) {
-      const parsed = JSON.parse(savedSettings);
-      
-      // Migration for old settings format
-      if (!parsed.configs) {
-        const oldSettings = parsed as any;
-        const newSettings = { ...defaultSettings };
-        
-        if (oldSettings.provider) {
-          newSettings.activeProvider = oldSettings.provider;
-          // Only migrate if we have a valid provider
-          if (newSettings.configs[oldSettings.provider as AIProvider]) {
-            newSettings.configs[oldSettings.provider as AIProvider] = {
-              apiKey: oldSettings.apiKey || '',
-              endpoint: oldSettings.endpoint,
-              modelName: oldSettings.modelName
-            };
-          }
-        }
-        setSettings(newSettings);
-      } else {
-        setSettings(parsed);
-      }
-    }
+    setSettings(loadAISettings());
   }, []);
 
   const handleSave = () => {
@@ -73,6 +52,64 @@ export function SettingsDialog() {
     }));
   };
 
+  const getLogsContent = async () => {
+    try {
+      const logDir = await appLogDir();
+      const entries = await readDir(logDir);
+      const logFiles = entries.filter(e => e.name.endsWith('.log'));
+      
+      if (logFiles.length === 0) return null;
+
+      let allLogs = '';
+      for (const file of logFiles) {
+        const content = await readTextFile(`${logDir}/${file.name}`);
+        allLogs += `\n--- ${file.name} ---\n${content}`;
+      }
+      return allLogs;
+    } catch (e) {
+      console.error("Failed to read logs:", e);
+      return null;
+    }
+  };
+
+  const handleCopyLogs = async () => {
+    const logs = await getLogsContent();
+    if (!logs) {
+      toast({ title: "Error", description: "No logs found or failed to read", variant: "destructive" });
+      return;
+    }
+    try {
+      await writeText(logs);
+      toast({ title: "Copied", description: "Logs copied to clipboard" });
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Error", description: "Failed to copy logs", variant: "destructive" });
+    }
+  };
+
+  const handleExportLogs = async () => {
+    const logs = await getLogsContent();
+    if (!logs) {
+      toast({ title: "Error", description: "No logs found or failed to read", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const path = await save({
+        filters: [{ name: 'Log Files', extensions: ['log', 'txt'] }],
+        defaultPath: 'LiteDB_Logs.log'
+      });
+      
+      if (path) {
+        await writeTextFile(path, logs);
+        toast({ title: "Success", description: "Logs exported successfully" });
+      }
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Error", description: "Failed to save logs", variant: "destructive" });
+    }
+  };
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -82,81 +119,112 @@ export function SettingsDialog() {
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>AI Provider Settings</DialogTitle>
+          <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Configure your AI provider settings. These will be saved for future use.
+            Manage application settings and configurations.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="provider" className="text-right">
-              Provider
-            </Label>
-            <Select 
-              value={settings.activeProvider}
-              onValueChange={(value: AIProvider) => {
-                setSettings(prev => ({ 
-                  ...prev, 
-                  activeProvider: value
-                }));
-              }}
-            >
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Select provider" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="github">GitHub</SelectItem>
-                <SelectItem value="azure">Azure OpenAI</SelectItem>
-                <SelectItem value="openai">OpenAI</SelectItem>
-                <SelectItem value="ollama">Ollama (Local)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="apiKey" className="text-right">
-              API Key
-            </Label>
-            <Input
-              id="apiKey"
-              type="password"
-              value={currentConfig.apiKey}
-              onChange={(e) => updateCurrentConfig({ apiKey: e.target.value })}
-              className="col-span-3"
-            />
-          </div>
-          {settings.activeProvider !== 'openai' && (
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="endpoint" className="text-right">
-                Endpoint
-              </Label>
-              <Input
-                id="endpoint"
-                type="text"
-                value={currentConfig.endpoint || ''}
-                onChange={(e) => updateCurrentConfig({ endpoint: e.target.value })}
-                className="col-span-3"
-                placeholder={settings.activeProvider === 'ollama' ? 'http://localhost:11434/v1' : ''}
-              />
+        
+        <Tabs defaultValue="ai" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="ai">AI Provider</TabsTrigger>
+            <TabsTrigger value="logs">Logs & Debug</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="ai" className="space-y-4 py-4">
+            <div className="grid gap-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="provider" className="text-right">
+                  Provider
+                </Label>
+                <Select 
+                  value={settings.activeProvider}
+                  onValueChange={(value: AIProvider) => {
+                    setSettings(prev => ({ 
+                      ...prev, 
+                      activeProvider: value
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="github">GitHub</SelectItem>
+                    <SelectItem value="azure">Azure OpenAI</SelectItem>
+                    <SelectItem value="openai">OpenAI</SelectItem>
+                    <SelectItem value="ollama">Ollama (Local)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="apiKey" className="text-right">
+                  API Key
+                </Label>
+                <Input
+                  id="apiKey"
+                  type="password"
+                  value={currentConfig.apiKey}
+                  onChange={(e) => updateCurrentConfig({ apiKey: e.target.value })}
+                  className="col-span-3"
+                />
+              </div>
+              {settings.activeProvider !== 'openai' && (
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="endpoint" className="text-right">
+                    Endpoint
+                  </Label>
+                  <Input
+                    id="endpoint"
+                    type="text"
+                    value={currentConfig.endpoint || ''}
+                    onChange={(e) => updateCurrentConfig({ endpoint: e.target.value })}
+                    className="col-span-3"
+                    placeholder={settings.activeProvider === 'ollama' ? 'http://localhost:11434/v1' : ''}
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="modelName" className="text-right">
+                  Model Name
+                </Label>
+                <Input
+                  id="modelName"
+                  type="text"
+                  value={currentConfig.modelName || ''}
+                  onChange={(e) => updateCurrentConfig({ modelName: e.target.value })}
+                  className="col-span-3"
+                  placeholder={settings.activeProvider === 'ollama' ? 'llama3' : 'gpt-4'}
+                />
+              </div>
+              <div className="flex justify-end pt-2">
+                <Button onClick={handleSave}>Save changes</Button>
+              </div>
             </div>
-          )}
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="modelName" className="text-right">
-              Model Name
-            </Label>
-            <Input
-              id="modelName"
-              type="text"
-              value={currentConfig.modelName || ''}
-              onChange={(e) => updateCurrentConfig({ modelName: e.target.value })}
-              className="col-span-3"
-              placeholder={settings.activeProvider === 'ollama' ? 'llama3' : 'gpt-4'}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={handleSave}>Save changes</Button>
-        </DialogFooter>
+          </TabsContent>
+
+          <TabsContent value="logs" className="space-y-4 py-4">
+            <div className="space-y-4">
+              <div className="rounded-md bg-muted p-4">
+                <h4 className="mb-2 text-sm font-medium">Export Error Logs</h4>
+                <p className="text-xs text-muted-foreground mb-4">
+                  If you're experiencing issues, you can export the application logs to attach to a bug report.
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={handleCopyLogs} className="flex-1">
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy to Clipboard
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleExportLogs} className="flex-1">
+                    <Download className="mr-2 h-4 w-4" />
+                    Export to File
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );
-} 
+}

@@ -32,11 +32,10 @@ export const tauriService = {
     }
   },
 
-  executePostgresQuery: async (params: { query: string; values?: any[] }): Promise<QueryResult> => {
+  executePostgresQuery: async (params: { query: string }): Promise<QueryResult> => {
     try {
-      return await invoke<QueryResult>('execute_postgres_query', { 
-        query: params.query, 
-        values: params.values 
+      return await invoke<QueryResult>('execute_postgres_query', {
+        query: params.query
       });
     } catch (e) {
       return { 

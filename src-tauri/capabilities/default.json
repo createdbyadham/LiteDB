@@ -14,16 +14,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-start-dragging",
-    "core:webview:allow-internal-toggle-devtools",
-    {
-      "identifier": "http:default",
-      "allow": [
-        { "url": "https://*" },
-        { "url": "http://*" },
-        { "url": "http://localhost:11434/*" },
-        { "url": "http://127.0.0.1:11434/*" }
-      ],
-      "deny": []
-    }
+    "clipboard-manager:default",
+    "log:default"
   ]
 }
