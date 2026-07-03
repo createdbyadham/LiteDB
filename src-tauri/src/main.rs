@@ -72,7 +72,6 @@ async fn connect_postgres(
 async fn execute_postgres_query(
     state: State<'_, PostgresState>,
     query: String,
-    _values: Option<Vec<Value>>,
 ) -> Result<QueryResult, String> {
     let pool = {
         let pool_guard = state.pool.lock().await;
@@ -133,11 +132,12 @@ async fn execute_postgres_query(
         }
     }
 
+    let row_count = json_rows.len() as u64;
     Ok(QueryResult {
         success: true,
         columns,
         rows: json_rows,
-        row_count: 0,
+        row_count,
         error: None,
     })
 }
@@ -166,6 +166,21 @@ struct ProxyResponse {
     body: String,
 }
 
+// Hosts that proxy_request is allowed to reach. Keeps the proxy from being a
+// general-purpose SSRF tool. Localhost is for Ollama; the rest are the AI
+// providers advertised in the README.
+fn is_proxy_host_allowed(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    matches!(
+        host.as_str(),
+        "localhost"
+            | "127.0.0.1"
+            | "::1"
+            | "models.github.ai"
+            | "api.openai.com"
+    ) || host.ends_with(".openai.azure.com")
+}
+
 #[tauri::command]
 async fn proxy_request(
     url: String,
@@ -173,8 +188,18 @@ async fn proxy_request(
     headers: HashMap<String, String>,
     body: Option<String>,
 ) -> Result<ProxyResponse, String> {
+    let parsed = reqwest::Url::parse(&url).map_err(|e| format!("invalid url: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        s => return Err(format!("scheme not allowed: {s}")),
+    }
+    let host = parsed.host_str().ok_or("url has no host")?;
+    if !is_proxy_host_allowed(host) {
+        return Err(format!("host not allowed: {host}"));
+    }
+
     let client = reqwest::Client::new();
-    
+
     let mut header_map = HeaderMap::new();
     for (key, value) in headers {
         if let (Ok(k), Ok(v)) = (HeaderName::from_bytes(key.as_bytes()), HeaderValue::from_str(&value)) {
@@ -183,7 +208,7 @@ async fn proxy_request(
     }
 
     let mut request_builder = client
-        .request(method.parse().unwrap_or(reqwest::Method::GET), &url)
+        .request(method.parse().unwrap_or(reqwest::Method::GET), parsed)
         .headers(header_map);
 
     if let Some(b) = body {
@@ -217,10 +242,11 @@ async fn proxy_request(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_http::init())
         .manage(PostgresState {
             pool: Mutex::new(None),
         })

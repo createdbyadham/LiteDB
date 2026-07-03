@@ -18,7 +18,7 @@ export const defaultSettings: AISettings = {
   activeProvider: 'github',
   configs: {
     github: {
-      apiKey: import.meta.env.VITE_GITHUB_TOKEN || '',
+      apiKey: '',
       endpoint: 'https://models.github.ai/inference',
       modelName: 'openai/gpt-4o-mini'
     },
@@ -39,32 +39,35 @@ export const defaultSettings: AISettings = {
   }
 };
 
-function getSettings(): AISettings {
+export function loadAISettings(): AISettings {
   const savedSettings = localStorage.getItem('aiSettings');
   if (!savedSettings) return defaultSettings;
-  
+
   const parsed = JSON.parse(savedSettings);
-  
-  // Migration for old settings format
+
+  // Migrate legacy flat-shape settings (pre-v2 multi-provider) into the
+  // current configs-by-provider shape. Safe to delete once no users remain
+  // on the old format.
   if (!parsed.configs) {
-    const oldSettings = parsed as any;
-    const newSettings = { ...defaultSettings };
-    
-    // Try to preserve the old setting into the correct config slot if possible
-    if (oldSettings.provider) {
+    const oldSettings = parsed as { provider?: AIProvider; apiKey?: string; endpoint?: string; modelName?: string };
+    const newSettings: AISettings = { ...defaultSettings };
+
+    if (oldSettings.provider && newSettings.configs[oldSettings.provider]) {
       newSettings.activeProvider = oldSettings.provider;
-      if (newSettings.configs[oldSettings.provider as AIProvider]) {
-        newSettings.configs[oldSettings.provider as AIProvider] = {
-          apiKey: oldSettings.apiKey || '',
-          endpoint: oldSettings.endpoint,
-          modelName: oldSettings.modelName
-        };
-      }
+      newSettings.configs[oldSettings.provider] = {
+        apiKey: oldSettings.apiKey || '',
+        endpoint: oldSettings.endpoint,
+        modelName: oldSettings.modelName
+      };
     }
     return newSettings;
   }
-  
+
   return parsed;
+}
+
+function getSettings(): AISettings {
+  return loadAISettings();
 }
 
 function createClient() {

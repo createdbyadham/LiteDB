@@ -1,40 +1,10 @@
 // This service handles SQLite database operations
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
+import { assertIdent } from '@/lib/types';
+import type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData } from '@/lib/types';
 
-export interface TableInfo {
-    name: string;
-    sql: string;
-}
-
-export interface ColumnInfo {
-    cid: number;
-    name: string;
-    type: string;
-    notnull: number;
-    pk: number;
-}
-
-export interface ForeignKeyInfo {
-    id: number;
-    seq: number;
-    table: string;        // Referenced table
-    from: string;         // Column in this table
-    to: string;           // Column in referenced table
-    on_update: string;
-    on_delete: string;
-    match: string;
-}
-
-export interface IndexInfo {
-    name: string;
-    unique: boolean;
-    columns: string[];
-}
-
-export interface RowData {
-    [key: string]: unknown;
-}
+export type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData };
 
 interface SqlJs {
     Database: new (data: Uint8Array) => Database;
@@ -61,7 +31,6 @@ declare global {
 class SqliteService {
     private db: Database | null = null;
     private SQL: SqlJs | null = null;
-    private isInitializing = false;
     private initPromise: Promise<SqliteService> | null = null;
     private currentTables: TableInfo[] = [];
     private lastSavedData: Uint8Array | null = null;
@@ -77,7 +46,6 @@ class SqliteService {
             return this;
         }
 
-        this.isInitializing = true;
         this.initPromise = new Promise((resolve, reject) => {
             const initializeAsync = async () => {
                 try {
@@ -105,10 +73,8 @@ class SqliteService {
                         }
                     });
 
-                    this.isInitializing = false;
                     resolve();
                 } catch (error) {
-                    this.isInitializing = false;
                     console.error("Failed to initialize SQL.js:", error);
                     toast({
                         title: "Error",
@@ -185,7 +151,7 @@ class SqliteService {
 
     getTables(): TableInfo[] {
         if (!this.db) {
-            return this.currentTables;
+            return [];
         }
 
         try {
@@ -210,7 +176,7 @@ class SqliteService {
                 description: "Failed to retrieve table list",
                 variant: "destructive"
             });
-            return this.currentTables;
+            return [];
         }
     }
 
@@ -220,6 +186,7 @@ class SqliteService {
         }
 
         try {
+            assertIdent(tableName, 'table');
             const pragmaResult = this.db.exec(`PRAGMA table_info('${tableName}')`);
 
             if (pragmaResult.length === 0 || !pragmaResult[0].values) {
@@ -250,6 +217,7 @@ class SqliteService {
         }
 
         try {
+            assertIdent(tableName, 'table');
             const pragmaResult = this.db.exec(`PRAGMA foreign_key_list('${tableName}')`);
 
             if (pragmaResult.length === 0 || !pragmaResult[0].values) {
@@ -278,6 +246,7 @@ class SqliteService {
         }
 
         try {
+            assertIdent(tableName, 'table');
             const indexListResult = this.db.exec(`PRAGMA index_list('${tableName}')`);
 
             if (indexListResult.length === 0 || !indexListResult[0].values) {
@@ -340,9 +309,11 @@ class SqliteService {
         }
 
         try {
+            assertIdent(tableName, 'table');
             // First get the column information
             const columns = this.getTableColumns(tableName);
             const columnNames = columns.map(col => col.name);
+            columnNames.forEach(n => assertIdent(n, 'column'));
 
             // Execute the query with proper column names
             const result = this.db.exec(
@@ -517,28 +488,31 @@ class SqliteService {
         if (!this.db) return false;
 
         try {
+            assertIdent(tableName, 'table');
             // Get primary key column
             const primaryKeyColumn = this.getTableColumns(tableName).find(col => col.pk === 1);
             if (!primaryKeyColumn) {
                 throw new Error('Table has no primary key');
             }
 
-            // Build SET clause with placeholders
+            const escapeValue = (v: unknown): string => {
+                if (v === null || v === undefined) return 'NULL';
+                if (typeof v === 'number' && Number.isFinite(v)) return v.toString();
+                if (typeof v === 'boolean') return v ? '1' : '0';
+                return `'${String(v).replace(/'/g, "''")}'`;
+            };
+
             const setClause = Object.entries(newRow)
-                .filter(([column]) => column !== primaryKeyColumn.name) // Don't update PK
+                .filter(([column]) => column !== primaryKeyColumn.name)
                 .map(([column, value]) => {
-                    if (value === null) {
-                        return `\`${column}\` = NULL`;
-                    }
-                    return `\`${column}\` = '${value}'`;
+                    assertIdent(column, 'column');
+                    return `\`${column}\` = ${escapeValue(value)}`;
                 })
                 .join(', ');
 
-            // Build WHERE clause using PK
-            const whereValue = oldRow[primaryKeyColumn.name];
-            const whereClause = `\`${primaryKeyColumn.name}\` = '${whereValue}'`;
+            assertIdent(primaryKeyColumn.name, 'column');
+            const whereClause = `\`${primaryKeyColumn.name}\` = ${escapeValue(oldRow[primaryKeyColumn.name])}`;
 
-            // Execute update
             const sql = `UPDATE \`${tableName}\` SET ${setClause} WHERE ${whereClause}`;
             this.db.exec(sql);
 
