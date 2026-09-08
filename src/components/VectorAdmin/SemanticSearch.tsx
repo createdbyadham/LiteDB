@@ -606,7 +606,9 @@ export const SemanticSearch = ({
               <Label className="text-xs">Distance Metric</Label>
               <Select 
                 value={distanceMetric} 
-                onValueChange={(v) => setDistanceMetric(v as any)}
+                onValueChange={(v) => {
+                  if (v === '<=>' || v === '<->' || v === '<#>') setDistanceMetric(v);
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />

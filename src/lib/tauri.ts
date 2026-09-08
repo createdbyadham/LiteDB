@@ -1,12 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { readFile, writeFile, mkdir } from '@tauri-apps/plugin-fs';
+import { readFile, writeFile } from '@tauri-apps/plugin-fs';
+import type { RowData } from '@/lib/types';
 
 // Define types matching the Rust backend
 export interface QueryResult {
   success: boolean;
   columns: string[];
-  rows: any[];
+  rows: RowData[];
   row_count: number;
   error?: string;
 }

@@ -21,7 +21,7 @@ const UploadView = () => {
 
   useEffect(() => {
     let isMounted = true;
-    let unlisteners: (() => void)[] = [];
+    const unlisteners: (() => void)[] = [];
 
     const setupListeners = async () => {
       // Listener for 'tauri://file-drop' (legacy/standard)
@@ -42,8 +42,8 @@ const UploadView = () => {
         if (!isMounted) return;
         setIsDragging(false);
         
-        const payload = event.payload as any;
-        const paths = payload?.paths || (Array.isArray(payload) ? payload : []);
+        const payload = event.payload as { paths?: string[] } | string[];
+        const paths = Array.isArray(payload) ? payload : (payload.paths ?? []);
         
         if (paths && Array.isArray(paths) && paths.length > 0) {
           await loadAndProcessDatabase(paths[0]);

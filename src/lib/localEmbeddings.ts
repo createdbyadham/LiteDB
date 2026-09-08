@@ -1,5 +1,15 @@
 import { pipeline, env } from '@xenova/transformers';
 
+type FeatureExtractor = {
+  (text: string, options?: { pooling?: string; normalize?: boolean }): Promise<{ data: Float32Array }>;
+};
+
+type PipelineProgress = {
+  status?: string;
+  progress?: number;
+  file?: string;
+};
+
 // Configure transformers.js to use local cache
 env.allowLocalModels = false;
 env.useBrowserCache = true;
@@ -43,7 +53,7 @@ export const AVAILABLE_MODELS: EmbeddingModel[] = [
 
 // Current loaded model state
 let currentModel: EmbeddingModel | null = null;
-let embedder: any = null;
+let embedder: FeatureExtractor | null = null;
 let isLoading = false;
 let loadError: string | null = null;
 
@@ -99,7 +109,7 @@ async function initializeEmbedder(modelId: string): Promise<boolean> {
 
   try {
     embedder = await pipeline('feature-extraction', model.huggingFaceId, {
-      progress_callback: (data: any) => {
+      progress_callback: (data: PipelineProgress) => {
         if (progressCallback) {
           progressCallback({
             status: data.status || 'loading',

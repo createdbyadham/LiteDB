@@ -21,7 +21,7 @@ function parseVector(value: unknown): number[] {
   if (Array.isArray(value)) return value.filter(v => typeof v === 'number');
   if (typeof value !== 'string') return [];
   
-  const cleaned = String(value).replace(/[\[\]]/g, '');
+  const cleaned = String(value).replace(/[[\]]/g, '');
   return cleaned.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
 }
 

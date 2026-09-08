@@ -225,7 +225,9 @@ export const SimilarRowsModal = ({
               </Select>
               <Select
                 value={distanceMetric}
-                onValueChange={(v) => setDistanceMetric(v as any)}
+                onValueChange={(v) => {
+                  if (v === '<=>' || v === '<->' || v === '<#>') setDistanceMetric(v);
+                }}
               >
                 <SelectTrigger className="w-[120px] h-8">
                   <SelectValue />
