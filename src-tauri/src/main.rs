@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -240,6 +241,32 @@ async fn proxy_request(
     })
 }
 
+#[tauri::command]
+fn store_secret(service: String, account: String, secret: String) -> Result<(), String> {
+    let entry = Entry::new(&service, &account).map_err(|e| e.to_string())?;
+    entry.set_password(&secret).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_secret(service: String, account: String) -> Result<Option<String>, String> {
+    let entry = Entry::new(&service, &account).map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(secret) => Ok(Some(secret)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn delete_secret(service: String, account: String) -> Result<(), String> {
+    let entry = Entry::new(&service, &account).map_err(|e| e.to_string())?;
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -254,7 +281,10 @@ fn main() {
             connect_postgres,
             execute_postgres_query,
             disconnect_postgres,
-            proxy_request
+            proxy_request,
+            store_secret,
+            get_secret,
+            delete_secret
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

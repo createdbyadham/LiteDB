@@ -3,6 +3,14 @@
   "private": true,
   "version": "2.1.0",
   "description": "LiteDB - A simple and lightweight database viewer/editor for your projects",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/createdbyadham/LiteDB.git"
+  },
+  "homepage": "https://github.com/createdbyadham/LiteDB#readme",
+  "bugs": {
+    "url": "https://github.com/createdbyadham/LiteDB/issues"
+  },
   "author": "Adham Ehab",
   "contributors": [
     {
@@ -13,7 +21,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.5",

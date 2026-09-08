@@ -13,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Settings2, Copy, Download } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useToast } from "./use-toast"
-import { AIProvider, AISettings, defaultSettings, loadAISettings } from "@/lib/aiService"
+import { AIProvider, AISettings, defaultSettings, loadAISettingsAsync, saveNonSecretSettings } from "@/lib/aiService"
+import { storeAllApiKeys } from "@/lib/secretStorage"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs"
 import { appLogDir } from '@tauri-apps/api/path'
 import { readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
@@ -25,16 +26,33 @@ export function SettingsDialog() {
   const { toast } = useToast();
 
   useEffect(() => {
-    setSettings(loadAISettings());
+    void loadAISettingsAsync().then(setSettings);
   }, []);
 
-  const handleSave = () => {
-    localStorage.setItem('aiSettings', JSON.stringify(settings));
-    window.dispatchEvent(new Event('aiSettingsChanged'));
-    toast({
-      title: "Settings saved",
-      description: "Your AI provider settings have been saved successfully.",
-    });
+  const handleSave = async () => {
+    try {
+      await storeAllApiKeys(
+        Object.fromEntries(
+          (Object.keys(settings.configs) as AIProvider[]).map((provider) => [
+            provider,
+            settings.configs[provider].apiKey,
+          ]),
+        ) as Record<AIProvider, string>,
+      );
+      saveNonSecretSettings(settings);
+      window.dispatchEvent(new Event('aiSettingsChanged'));
+      toast({
+        title: "Settings saved",
+        description: "Your AI provider settings have been saved successfully.",
+      });
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save settings. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const currentConfig = settings.configs[settings.activeProvider];

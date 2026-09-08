@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+import { loadAllApiKeys } from './secretStorage';
 
 export type AIProvider = 'github' | 'azure' | 'openai' | 'ollama';
 
@@ -39,35 +40,104 @@ export const defaultSettings: AISettings = {
   }
 };
 
-export function loadAISettings(): AISettings {
-  const savedSettings = localStorage.getItem('aiSettings');
-  if (!savedSettings) return defaultSettings;
+type StoredProviderConfig = {
+  endpoint?: string;
+  modelName?: string;
+};
 
-  const parsed = JSON.parse(savedSettings);
+type StoredAISettings = {
+  activeProvider: AIProvider;
+  configs: Record<AIProvider, StoredProviderConfig>;
+};
 
-  // Migrate legacy flat-shape settings (pre-v2 multi-provider) into the
-  // current configs-by-provider shape. Safe to delete once no users remain
-  // on the old format.
-  if (!parsed.configs) {
-    const oldSettings = parsed as { provider?: AIProvider; apiKey?: string; endpoint?: string; modelName?: string };
-    const newSettings: AISettings = { ...defaultSettings };
+const AI_PROVIDERS: AIProvider[] = ['github', 'azure', 'openai', 'ollama'];
 
-    if (oldSettings.provider && newSettings.configs[oldSettings.provider]) {
-      newSettings.activeProvider = oldSettings.provider;
-      newSettings.configs[oldSettings.provider] = {
-        apiKey: oldSettings.apiKey || '',
-        endpoint: oldSettings.endpoint,
-        modelName: oldSettings.modelName
-      };
-    }
-    return newSettings;
+function mergeWithDefaults(stored: Partial<StoredAISettings>): AISettings {
+  const settings: AISettings = {
+    activeProvider: stored.activeProvider ?? defaultSettings.activeProvider,
+    configs: { ...defaultSettings.configs },
+  };
+
+  for (const provider of AI_PROVIDERS) {
+    const storedConfig = stored.configs?.[provider];
+    if (!storedConfig) continue;
+
+    settings.configs[provider] = {
+      ...settings.configs[provider],
+      apiKey: '',
+      endpoint: storedConfig.endpoint ?? settings.configs[provider].endpoint,
+      modelName: storedConfig.modelName ?? settings.configs[provider].modelName,
+    };
   }
 
-  return parsed;
+  return settings;
+}
+
+function readStoredSettings(): StoredAISettings | null {
+  const savedSettings = localStorage.getItem('aiSettings');
+  if (!savedSettings) return null;
+
+  const parsed = JSON.parse(savedSettings);
+  if (!parsed.configs) return null;
+
+  const configs = Object.fromEntries(
+    AI_PROVIDERS.map((provider) => [
+      provider,
+      {
+        endpoint: parsed.configs[provider]?.endpoint,
+        modelName: parsed.configs[provider]?.modelName,
+      },
+    ]),
+  ) as Record<AIProvider, StoredProviderConfig>;
+
+  return {
+    activeProvider: parsed.activeProvider ?? defaultSettings.activeProvider,
+    configs,
+  };
+}
+
+export function saveNonSecretSettings(settings: AISettings): void {
+  const toStore: StoredAISettings = {
+    activeProvider: settings.activeProvider,
+    configs: Object.fromEntries(
+      AI_PROVIDERS.map((provider) => [
+        provider,
+        {
+          endpoint: settings.configs[provider].endpoint,
+          modelName: settings.configs[provider].modelName,
+        },
+      ]),
+    ) as Record<AIProvider, StoredProviderConfig>,
+  };
+
+  localStorage.setItem('aiSettings', JSON.stringify(toStore));
+}
+
+let cachedSettings: AISettings | null = null;
+
+export function loadAISettings(): AISettings {
+  const stored = readStoredSettings();
+  if (!stored) return defaultSettings;
+  return mergeWithDefaults(stored);
+}
+
+export async function loadAISettingsAsync(): Promise<AISettings> {
+  const settings = loadAISettings();
+
+  const apiKeys = await loadAllApiKeys();
+  for (const provider of AI_PROVIDERS) {
+    settings.configs[provider] = {
+      ...settings.configs[provider],
+      apiKey: apiKeys[provider] || settings.configs[provider].apiKey,
+    };
+  }
+
+  cachedSettings = settings;
+  return settings;
 }
 
 function getSettings(): AISettings {
-  return loadAISettings();
+  return cachedSettings ?? loadAISettings();
 }
 
 function createClient() {
@@ -129,6 +199,12 @@ function createClient() {
 
 // Re-create client when settings change
 window.addEventListener('aiSettingsChanged', () => {
+  void loadAISettingsAsync().then(() => {
+    client = createClient();
+  });
+});
+
+void loadAISettingsAsync().then(() => {
   client = createClient();
 });
 
