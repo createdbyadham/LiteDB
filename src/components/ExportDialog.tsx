@@ -86,7 +86,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         } else if (format === 'csv') {
           // CSV format
           const header = result.columns.join(',');
-          const rows = result.rows.map((row: any) =>
+          const rows = result.rows.map((row) =>
             result.columns.map(col => {
               const value = row[col];
               // Handle strings with commas by wrapping in quotes

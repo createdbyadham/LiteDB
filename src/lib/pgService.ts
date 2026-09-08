@@ -37,6 +37,11 @@ export interface SimilarityResult {
   similarity: number;
 }
 
+function cell(row: RowData, key: string): string {
+  const value = row[key];
+  return value == null ? '' : String(value);
+}
+
 class PgService {
   private currentTables: TableInfo[] = [];
   public currentConfig: PgConfig | null = null;
@@ -109,9 +114,9 @@ class PgService {
         throw new Error(result?.error || "Failed to retrieve tables");
       }
 
-      this.currentTables = result.rows.map((row: any) => ({
-        name: row.name,
-        sql: row.sql
+      this.currentTables = result.rows.map((row) => ({
+        name: cell(row, 'name'),
+        sql: cell(row, 'sql')
       }));
 
       return this.currentTables;
@@ -158,12 +163,12 @@ class PgService {
         throw new Error(result?.error || "Failed to retrieve columns");
       }
 
-      return result.rows.map((row: any) => ({
-        cid: parseInt(row.cid),
-        name: row.name,
-        type: row.type,
-        notnull: parseInt(row.notnull),
-        pk: parseInt(row.pk)
+      return result.rows.map((row) => ({
+        cid: parseInt(cell(row, 'cid')),
+        name: cell(row, 'name'),
+        type: cell(row, 'type'),
+        notnull: parseInt(cell(row, 'notnull')),
+        pk: parseInt(cell(row, 'pk'))
       }));
     } catch (error) {
       console.error(`Error fetching PostgreSQL columns for ${tableName}:`, error);
@@ -263,14 +268,14 @@ class PgService {
         return [];
       }
 
-      return result.rows.map((row: any, index: number) => ({
+      return result.rows.map((row, index) => ({
         id: index,
         seq: 0,
-        table: row.to_table,
-        from: row.from_column,
-        to: row.to_column,
-        on_update: row.update_rule || 'NO ACTION',
-        on_delete: row.delete_rule || 'NO ACTION',
+        table: cell(row, 'to_table'),
+        from: cell(row, 'from_column'),
+        to: cell(row, 'to_column'),
+        on_update: cell(row, 'update_rule') || 'NO ACTION',
+        on_delete: cell(row, 'delete_rule') || 'NO ACTION',
         match: 'NONE'
       }));
     } catch (error) {
@@ -309,10 +314,10 @@ class PgService {
         return [];
       }
 
-      return result.rows.map((row: any) => ({
-        name: row.index_name,
-        unique: row.is_unique,
-        columns: Array.isArray(row.columns) ? row.columns : [row.columns]
+      return result.rows.map((row) => ({
+        name: cell(row, 'index_name'),
+        unique: Boolean(row.is_unique),
+        columns: Array.isArray(row.columns) ? row.columns.map(String) : [cell(row, 'columns')]
       }));
     } catch (error) {
       console.error(`Error fetching indexes for ${tableName}:`, error);
@@ -506,7 +511,7 @@ class PgService {
   }
 
   // Helper function to safely format values for SQL queries
-  private formatValueForSQL(value: any): string {
+  private formatValueForSQL(value: unknown): string {
     if (value === null || value === undefined) {
       return 'NULL';
     }
@@ -604,10 +609,10 @@ class PgService {
 
       if (!result?.success) return [];
 
-      this.vectorColumns = result.rows.map((row: any) => ({
-        tableName: row.table_name,
-        columnName: row.column_name,
-        dimensions: parseInt(row.dimensions) || 0
+      this.vectorColumns = result.rows.map((row) => ({
+        tableName: cell(row, 'table_name'),
+        columnName: cell(row, 'column_name'),
+        dimensions: parseInt(cell(row, 'dimensions')) || 0
       }));
 
       return this.vectorColumns;
@@ -633,7 +638,7 @@ class PgService {
   parseVector(vectorStr: string): number[] {
     if (!vectorStr) return [];
     // Vector format is like "[0.1,0.2,0.3]" or just "0.1,0.2,0.3"
-    const cleaned = vectorStr.replace(/[\[\]]/g, '');
+    const cleaned = vectorStr.replace(/[[\]]/g, '');
     return cleaned.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
   }
 
@@ -657,8 +662,8 @@ class PgService {
 
       // Parse vectors and compute statistics
       const vectors = result.rows
-        .map((row: any) => this.parseVector(row.vector_text))
-        .filter((v: number[]) => v.length > 0);
+        .map((row) => this.parseVector(cell(row, 'vector_text')))
+        .filter((v) => v.length > 0);
 
       if (vectors.length === 0) return null;
 
@@ -758,10 +763,10 @@ class PgService {
 
       if (!result?.success) return [];
 
-      return result.rows.map((row: any) => ({
+      return result.rows.map((row) => ({
         row: { ...row },
-        distance: parseFloat(row.distance) || 0,
-        similarity: parseFloat(row.similarity) || 0
+        distance: parseFloat(cell(row, 'distance')) || 0,
+        similarity: parseFloat(cell(row, 'similarity')) || 0
       }));
     } catch (error) {
       console.error('Error finding similar rows:', error);
@@ -827,10 +832,10 @@ class PgService {
 
       if (!result?.success) return [];
 
-      return result.rows.map((row: any) => ({
+      return result.rows.map((row) => ({
         row: { ...row },
-        distance: parseFloat(row.distance) || 0,
-        similarity: parseFloat(row.similarity) || 0
+        distance: parseFloat(cell(row, 'distance')) || 0,
+        similarity: parseFloat(cell(row, 'similarity')) || 0
       }));
     } catch (error) {
       console.error('Error finding similar by vector:', error);

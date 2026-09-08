@@ -166,13 +166,11 @@ const DatabaseView = () => {
         return;
       }
 
-      if (true) {
-        const result = await tauriService.exportDatabase(dataUrl, format);
-        if (result.success) {
-          toast({ title: "Success", description: `Schema exported as ${format.toUpperCase()}` });
-        } else if (result.error !== 'Export cancelled') {
-          toast({ title: "Error", description: result.error || "Failed to export schema", variant: "destructive" });
-        }
+      const result = await tauriService.exportDatabase(dataUrl, format);
+      if (result.success) {
+        toast({ title: "Success", description: `Schema exported as ${format.toUpperCase()}` });
+      } else if (result.error !== 'Export cancelled') {
+        toast({ title: "Error", description: result.error || "Failed to export schema", variant: "destructive" });
       }
     } catch (error) {
       console.error(error);

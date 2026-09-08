@@ -18,7 +18,7 @@ function parseVector(value: unknown): number[] {
   if (typeof value !== 'string') return [];
   
   // Vector format is like "[0.1,0.2,0.3]" or just "0.1,0.2,0.3"
-  const cleaned = String(value).replace(/[\[\]]/g, '');
+  const cleaned = String(value).replace(/[[\]]/g, '');
   return cleaned.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
 }
 

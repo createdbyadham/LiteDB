@@ -552,7 +552,7 @@ class SqliteService {
 
         if (format === 'json') {
             // Export all tables to JSON
-            const result: Record<string, any> = {};
+            const result: Record<string, RowData[]> = {};
 
             for (const table of tables) {
                 const data = this.getTableData(table.name);
@@ -602,7 +602,7 @@ class SqliteService {
         if (format === 'xlsx') {
             // For Excel, we'll return a JSON representation that the frontend can convert
             // using a library like xlsx or exceljs
-            const result: Record<string, any> = {};
+            const result: Record<string, { columns: string[]; rows: RowData[] }> = {};
 
             for (const table of tables) {
                 const data = this.getTableData(table.name);
