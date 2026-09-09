@@ -48,7 +48,7 @@ function parseArgs(argv: string[]): Args {
         fixture: 'storefront',
         qualifyColumns: false,
         antiSubstitution: false,
-        fewShot: 0,
+        fewShot: 3,
         repairAttempts: 1,
         repeat: 1,
     };
@@ -74,6 +74,7 @@ function parseArgs(argv: string[]): Args {
             case '--repair': args.repairAttempts = Number(value); i++; break;
             case '--no-repair': args.repairAttempts = 0; break;
             case '--fewshot': args.fewShot = Number(value); i++; break;
+            case '--no-fewshot': args.fewShot = 0; break;
             case '--repeat': args.repeat = Number(value); i++; break;
             default:
                 if (flag.startsWith('--')) throw new Error(`Unknown flag: ${flag}`);

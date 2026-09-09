@@ -30,7 +30,7 @@ of one database.
 
 ```bash
 npm run eval:selftest   # verify the harness itself (no API calls)
-npm run eval -- --provider ollama --fewshot 3
+npm run eval -- --provider ollama
 ```
 
 Six experiments are documented in [`evals/README.md`](./evals/README.md),
