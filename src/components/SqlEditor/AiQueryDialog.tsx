@@ -10,9 +10,15 @@ interface AiQueryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onQueryGenerated: (query: string) => void;
+  /**
+   * Executes a generated read-only query and returns the engine's error, or
+   * null if it ran. Supplying this enables execution-guided repair: a query
+   * that fails to run is sent back to the model once with the real error.
+   */
+  dryRun?: (sql: string) => Promise<string | null>;
 }
 
-export function AiQueryDialog({ open, onOpenChange, onQueryGenerated }: AiQueryDialogProps) {
+export function AiQueryDialog({ open, onOpenChange, onQueryGenerated, dryRun }: AiQueryDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -22,7 +28,7 @@ export function AiQueryDialog({ open, onOpenChange, onQueryGenerated }: AiQueryD
     
     setIsLoading(true);
     try {
-      const query = await aiService.generateSqlQuery(prompt);
+      const query = await aiService.generateSqlQuery(prompt, dryRun);
       onQueryGenerated(query);
       onOpenChange(false);
       setPrompt('');

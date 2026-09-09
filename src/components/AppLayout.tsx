@@ -40,9 +40,6 @@ const AppLayout = ({
   children, 
   activeTab = 'browse',
   onTabChange,
-  isConnected = false,
-  connectionType = null,
-  databaseName = '',
   hasPgVector = false
 }: AppLayoutProps) => {
   const { navSidebarCollapsed: sidebarCollapsed, toggleNavSidebar } = useSidebar();

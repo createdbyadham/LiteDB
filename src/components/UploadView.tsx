@@ -96,7 +96,7 @@ const UploadView = () => {
         throw new Error(result.error || 'Failed to read database file');
       }
       
-      const loadResult = await loadDatabase(result.data.buffer, filePath);
+      const loadResult = await loadDatabase(result.data.buffer as ArrayBuffer, filePath);
       if (loadResult) {
         navigate('/database');
       }

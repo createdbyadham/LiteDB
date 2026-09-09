@@ -88,7 +88,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
           const header = result.columns.join(',');
           const rows = result.rows.map((row) =>
             result.columns.map(col => {
-              const value = row[col];
+              const value = (row as unknown as Record<string, unknown>)[col];
               // Handle strings with commas by wrapping in quotes
               return typeof value === 'string' && value.includes(',')
                 ? `"${value.replace(/"/g, '""')}"`
@@ -108,7 +108,10 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         }
       } else {
         // Get data in selected format for SQLite
-        const sqliteData = sqliteService.exportToFormat(format);
+        const sqliteData =
+          format === 'png' || format === 'svg'
+            ? null
+            : sqliteService.exportToFormat(format);
         if (!sqliteData) {
           toast({
             title: "Error",

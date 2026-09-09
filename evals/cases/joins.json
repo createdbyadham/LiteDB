@@ -1,0 +1,72 @@
+[
+  {
+    "id": "jn-01",
+    "slice": "joins",
+    "difficulty": "easy",
+    "question": "List each order id along with the name of the customer who placed it.",
+    "sql": "SELECT o.id, c.name FROM orders o JOIN customers c ON c.id = o.customer_id"
+  },
+  {
+    "id": "jn-02",
+    "slice": "joins",
+    "difficulty": "easy",
+    "question": "Show every product name together with the name of its category.",
+    "sql": "SELECT p.name, c.name FROM products p JOIN categories c ON c.id = p.category_id"
+  },
+  {
+    "id": "jn-03",
+    "slice": "joins",
+    "difficulty": "medium",
+    "question": "Which customer names have placed at least one cancelled order?",
+    "sql": "SELECT DISTINCT c.name FROM customers c JOIN orders o ON o.customer_id = c.id WHERE o.status = 'cancelled'"
+  },
+  {
+    "id": "jn-04",
+    "slice": "joins",
+    "difficulty": "hard",
+    "question": "List the names of products that have never appeared in any order.",
+    "sql": "SELECT p.name FROM products p LEFT JOIN order_items oi ON oi.product_id = p.id WHERE oi.id IS NULL"
+  },
+  {
+    "id": "jn-05",
+    "slice": "joins",
+    "difficulty": "medium",
+    "question": "Show the names of customers who reviewed the product called 'USB-C Hub'.",
+    "sql": "SELECT DISTINCT c.name FROM customers c JOIN reviews r ON r.customer_id = c.id JOIN products p ON p.id = r.product_id WHERE p.name = 'USB-C Hub'"
+  },
+  {
+    "id": "jn-06",
+    "slice": "joins",
+    "difficulty": "medium",
+    "question": "For every payment, show the payment method and the name of the customer it belongs to.",
+    "sql": "SELECT pay.method, c.name FROM payments pay JOIN orders o ON o.id = pay.order_id JOIN customers c ON c.id = o.customer_id"
+  },
+  {
+    "id": "jn-07",
+    "slice": "joins",
+    "difficulty": "hard",
+    "question": "Which category names contain no product priced above 100?",
+    "sql": "SELECT c.name FROM categories c WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.category_id = c.id AND p.price > 100)"
+  },
+  {
+    "id": "jn-08",
+    "slice": "joins",
+    "difficulty": "medium",
+    "question": "Show customer names alongside the product names they bought, for delivered orders only.",
+    "sql": "SELECT c.name, p.name FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items oi ON oi.order_id = o.id JOIN products p ON p.id = oi.product_id WHERE o.status = 'delivered'"
+  },
+  {
+    "id": "jn-09",
+    "slice": "joins",
+    "difficulty": "medium",
+    "question": "Which customer names from the UAE have made a payment by card?",
+    "sql": "SELECT DISTINCT c.name FROM customers c JOIN orders o ON o.customer_id = c.id JOIN payments pay ON pay.order_id = o.id WHERE c.country = 'AE' AND pay.method = 'card'"
+  },
+  {
+    "id": "jn-10",
+    "slice": "joins",
+    "difficulty": "hard",
+    "question": "List the names of customers who have never written a review.",
+    "sql": "SELECT c.name FROM customers c LEFT JOIN reviews r ON r.customer_id = c.id WHERE r.id IS NULL"
+  }
+]

@@ -1,0 +1,113 @@
+[
+  {
+    "id": "lb-01",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "split": "test",
+    "fixture": "library",
+    "question": "List the full names of members who joined during 2024.",
+    "sql": "SELECT full_name FROM members WHERE joined_on >= '2024-01-01' AND joined_on < '2025-01-01'"
+  },
+  {
+    "id": "lb-02",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "split": "test",
+    "fixture": "library",
+    "question": "How many copies are in worn condition?",
+    "sql": "SELECT COUNT(*) FROM copies WHERE condition_code = 'worn'"
+  },
+  {
+    "id": "lb-03",
+    "slice": "single-table",
+    "difficulty": "medium",
+    "split": "test",
+    "fixture": "library",
+    "question": "List the loan ids for loans that have not been returned yet.",
+    "sql": "SELECT loan_id FROM loans WHERE returned_on IS NULL",
+    "notes": "Nullable date as the 'still out' test. The storefront fixture has no equivalent."
+  },
+  {
+    "id": "lb-04",
+    "slice": "joins",
+    "difficulty": "medium",
+    "split": "test",
+    "fixture": "library",
+    "question": "For every loan, show the loan id and the title name of the book that was borrowed.",
+    "sql": "SELECT l.loan_id, t.title_name FROM loans l JOIN copies c ON c.copy_id = l.copy_id JOIN titles t ON t.title_id = c.title_id",
+    "notes": "Three-table join through copies; the relationship is not reachable in one hop."
+  },
+  {
+    "id": "lb-05",
+    "slice": "joins",
+    "difficulty": "hard",
+    "split": "test",
+    "fixture": "library",
+    "question": "List the distinct full names of members who have at least one unpaid fine.",
+    "sql": "SELECT DISTINCT m.full_name FROM members m JOIN loans l ON l.member_id = m.member_id JOIN fines f ON f.loan_id = l.loan_id WHERE f.paid = 0"
+  },
+  {
+    "id": "lb-06",
+    "slice": "joins",
+    "difficulty": "medium",
+    "split": "test",
+    "fixture": "library",
+    "question": "Which title names have more than one copy? Return each name once.",
+    "sql": "SELECT t.title_name FROM titles t JOIN copies c ON c.title_id = t.title_id GROUP BY t.title_name HAVING COUNT(*) > 1"
+  },
+  {
+    "id": "lb-07",
+    "slice": "aggregation",
+    "difficulty": "easy",
+    "split": "test",
+    "fixture": "library",
+    "question": "What is the total amount in cents across all unpaid fines?",
+    "sql": "SELECT SUM(amount_cents) FROM fines WHERE paid = 0",
+    "notes": "Money as an integer count of cents rather than a float."
+  },
+  {
+    "id": "lb-08",
+    "slice": "aggregation",
+    "difficulty": "easy",
+    "split": "test",
+    "fixture": "library",
+    "question": "For each branch code, how many members belong to it?",
+    "sql": "SELECT branch_code, COUNT(*) FROM members GROUP BY branch_code"
+  },
+  {
+    "id": "lb-09",
+    "slice": "aggregation",
+    "difficulty": "medium",
+    "split": "test",
+    "fixture": "library",
+    "question": "For each genre that has more than one title, show the genre and the number of titles in it.",
+    "sql": "SELECT genre, COUNT(*) FROM titles GROUP BY genre HAVING COUNT(*) > 1"
+  },
+  {
+    "id": "lb-10",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "split": "test",
+    "fixture": "library",
+    "question": "For each member, show the member id, the loan id, and the position of that loan in their borrowing history ordered by loan date.",
+    "sql": "SELECT l.member_id, l.loan_id, ROW_NUMBER() OVER (PARTITION BY l.member_id ORDER BY l.loaned_on, l.loan_id) FROM loans l"
+  },
+  {
+    "id": "lb-11",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "split": "test",
+    "fixture": "library",
+    "question": "Show each fine id, its amount in cents, and a running total of fine amounts ordered by fine id.",
+    "sql": "SELECT f.fine_id, f.amount_cents, SUM(f.amount_cents) OVER (ORDER BY f.fine_id) FROM fines f"
+  },
+  {
+    "id": "lb-12",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "fixture": "library",
+    "question": "For every copy, show the copy id and how many copies exist of the same title.",
+    "sql": "SELECT c.copy_id, COUNT(*) OVER (PARTITION BY c.title_id) FROM copies c"
+  }
+]

@@ -1,0 +1,135 @@
+[
+  {
+    "id": "sh-01",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "split": "test",
+    "question": "List the email addresses of customers who registered before 2024.",
+    "sql": "SELECT email FROM customers WHERE created_at < '2024-01-01'"
+  },
+  {
+    "id": "sh-02",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "split": "test",
+    "question": "How many products have a stock greater than 50?",
+    "sql": "SELECT COUNT(*) FROM products WHERE stock > 50"
+  },
+  {
+    "id": "sh-03",
+    "slice": "single-table",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "Show the name and price of the single cheapest product.",
+    "sql": "SELECT name, price FROM products ORDER BY price ASC LIMIT 1"
+  },
+  {
+    "id": "sh-04",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "split": "test",
+    "question": "List the distinct payment methods that have been used.",
+    "sql": "SELECT DISTINCT method FROM payments"
+  },
+  {
+    "id": "jh-01",
+    "slice": "joins",
+    "difficulty": "easy",
+    "split": "test",
+    "question": "For every payment, show the payment id and the status of the order it belongs to.",
+    "sql": "SELECT pay.id, o.status FROM payments pay JOIN orders o ON o.id = pay.order_id"
+  },
+  {
+    "id": "jh-02",
+    "slice": "joins",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "List the names of products that have received at least one review, without duplicates.",
+    "sql": "SELECT DISTINCT p.name FROM products p JOIN reviews r ON r.product_id = p.id"
+  },
+  {
+    "id": "jh-03",
+    "slice": "joins",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "Which category names contain at least one product with zero stock?",
+    "sql": "SELECT DISTINCT c.name FROM categories c JOIN products p ON p.category_id = c.id WHERE p.stock = 0"
+  },
+  {
+    "id": "jh-04",
+    "slice": "joins",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "List the names of customers who have no cancelled orders, including any customer who has placed no orders at all.",
+    "sql": "SELECT c.name FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id AND o.status = 'cancelled')",
+    "notes": "The trailing clause is deliberate: without it, an inner-join reading that silently drops order-less customers would be equally defensible."
+  },
+  {
+    "id": "ah-01",
+    "slice": "aggregation",
+    "difficulty": "easy",
+    "split": "test",
+    "question": "What is the total amount across all refunded payments?",
+    "sql": "SELECT SUM(amount) FROM payments WHERE status = 'refunded'"
+  },
+  {
+    "id": "ah-02",
+    "slice": "aggregation",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "How many distinct customers have placed at least one order?",
+    "sql": "SELECT COUNT(DISTINCT customer_id) FROM orders"
+  },
+  {
+    "id": "ah-03",
+    "slice": "aggregation",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "For each order status that has more than two orders, show the status and the average order total.",
+    "sql": "SELECT status, AVG(total) FROM orders GROUP BY status HAVING COUNT(*) > 2"
+  },
+  {
+    "id": "ah-04",
+    "slice": "aggregation",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show the category name and the total stock across its products, for categories whose total stock is above 50.",
+    "sql": "SELECT c.name, SUM(p.stock) FROM categories c JOIN products p ON p.category_id = c.id GROUP BY c.name HAVING SUM(p.stock) > 50"
+  },
+  {
+    "id": "mh-01",
+    "slice": "ambiguous-schema",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "Show the id and the status for every payment.",
+    "sql": "SELECT id, status FROM payments",
+    "notes": "'status' exists on both orders and payments. The question names payments."
+  },
+  {
+    "id": "mh-02",
+    "slice": "ambiguous-schema",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "For every order item, show the order id and the difference between the product's current price and the price actually paid for it.",
+    "sql": "SELECT oi.order_id, p.price - oi.unit_price FROM order_items oi JOIN products p ON p.id = oi.product_id",
+    "notes": "Requires distinguishing products.price (current) from order_items.unit_price (historical) in one expression."
+  },
+  {
+    "id": "mh-03",
+    "slice": "ambiguous-schema",
+    "difficulty": "easy",
+    "split": "test",
+    "question": "List the names of the categories.",
+    "sql": "SELECT name FROM categories",
+    "notes": "'name' exists on customers, products and categories; only one of them is asked for."
+  },
+  {
+    "id": "mh-04",
+    "slice": "ambiguous-schema",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "Show the id of every review that was created during 2024.",
+    "sql": "SELECT id FROM reviews WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01'",
+    "notes": "'created_at' exists on customers, products and reviews."
+  }
+]

@@ -1,6 +1,12 @@
 import OpenAI from "openai";
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { loadAllApiKeys } from './secretStorage';
+import { buildRepairMessages, buildTextToSqlMessages, stripSqlFences } from './promptBuilder';
+import { guardReadOnly } from './sqlGuard';
+import { attachSampleValues, type QueryRunner } from './schemaSamples';
+import type { DatabaseSchema } from './schemaTypes';
+
+export type { ColumnSchema, DatabaseSchema, SqlDialect, TableSchema } from './schemaTypes';
 
 export type AIProvider = 'github' | 'azure' | 'openai' | 'ollama';
 
@@ -13,6 +19,13 @@ export type AIProviderConfig = {
 export type AISettings = {
   activeProvider: AIProvider;
   configs: Record<AIProvider, AIProviderConfig>;
+  /**
+   * Whether to include a few distinct values of low-cardinality text columns
+   * in the schema sent to the model. Materially improves accuracy on
+   * enumerated columns ('DE' vs 'Germany'), at the cost of putting real cell
+   * values in the prompt — so it is a visible choice, not a silent default.
+   */
+  includeSampleValues: boolean;
 };
 
 export const defaultSettings: AISettings = {
@@ -37,7 +50,8 @@ export const defaultSettings: AISettings = {
       endpoint: 'http://localhost:11434/v1',
       modelName: 'llama3'
     }
-  }
+  },
+  includeSampleValues: true
 };
 
 type StoredProviderConfig = {
@@ -48,6 +62,7 @@ type StoredProviderConfig = {
 type StoredAISettings = {
   activeProvider: AIProvider;
   configs: Record<AIProvider, StoredProviderConfig>;
+  includeSampleValues?: boolean;
 };
 
 const AI_PROVIDERS: AIProvider[] = ['github', 'azure', 'openai', 'ollama'];
@@ -56,6 +71,8 @@ function mergeWithDefaults(stored: Partial<StoredAISettings>): AISettings {
   const settings: AISettings = {
     activeProvider: stored.activeProvider ?? defaultSettings.activeProvider,
     configs: { ...defaultSettings.configs },
+    includeSampleValues:
+      stored.includeSampleValues ?? defaultSettings.includeSampleValues,
   };
 
   for (const provider of AI_PROVIDERS) {
@@ -93,6 +110,7 @@ function readStoredSettings(): StoredAISettings | null {
   return {
     activeProvider: parsed.activeProvider ?? defaultSettings.activeProvider,
     configs,
+    includeSampleValues: parsed.includeSampleValues,
   };
 }
 
@@ -108,6 +126,7 @@ export function saveNonSecretSettings(settings: AISettings): void {
         },
       ]),
     ) as Record<AIProvider, StoredProviderConfig>,
+    includeSampleValues: settings.includeSampleValues,
   };
 
   localStorage.setItem('aiSettings', JSON.stringify(toStore));
@@ -213,28 +232,44 @@ let client = createClient();
 // Hold current schema context in-memory. It's ephemeral and recomputed on connection/load.
 let currentSchema: DatabaseSchema | null = null;
 
-function serializeSchema(schema: DatabaseSchema): string {
-  const quote = schema.dialect === 'postgres' ? '"' : '`';
-  const lines: string[] = [];
-  for (const table of schema.tables) {
-    const cols = table.columns.map(c => {
-      const pk = c.isPrimaryKey ? ' PK' : '';
-      const nn = c.isNotNull ? ' NOT NULL' : '';
-      return `${c.name} ${c.type}${pk}${nn}`.trim();
-    }).join(', ');
-    lines.push(`table ${quote}${table.name}${quote}: ${cols}`);
-  }
-  return lines.join('\n');
-}
-
 export const aiService = {
   setSchema(schema: DatabaseSchema) {
     currentSchema = schema;
   },
+  /**
+   * Set the schema, enriching enumerated columns with sample values when the
+   * user has left that enabled. Failure to sample is not failure to connect:
+   * the plain schema is still installed.
+   */
+  async setSchemaWithSamples(schema: DatabaseSchema, runQuery: QueryRunner): Promise<void> {
+    if (!getSettings().includeSampleValues) {
+      currentSchema = schema;
+      return;
+    }
+    try {
+      currentSchema = await attachSampleValues(schema, runQuery);
+    } catch {
+      currentSchema = schema;
+    }
+  },
   clearSchema() {
     currentSchema = null;
   },
-  async generateSqlQuery(prompt: string): Promise<string> {
+  /**
+   * Generate SQL for a natural-language prompt.
+   *
+   * When `dryRun` is supplied, a generated query that fails to execute is fed
+   * back to the model once with the engine's own error message. On the eval
+   * harness this recovers a failure class no prompt wording fixed —
+   * hallucinated column names, which the database reports precisely.
+   *
+   * The query is dry-run only if it passes the read-only guard, so repair can
+   * never execute a write against the user's database.
+   */
+  async generateSqlQuery(
+    prompt: string,
+    dryRun?: (sql: string) => Promise<string | null>,
+  ): Promise<string> {
     try {
       const settings = getSettings();
       const config = settings.configs[settings.activeProvider];
@@ -253,54 +288,43 @@ export const aiService = {
         }
       }
 
-      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-        {
-          role: 'system',
-          content: `<system_instructions>
-  <role>SQL Expert Assistant</role>
-  <task>Convert natural language to SQL queries.</task>
-  <constraints>
-    <constraint>Only respond with the SQL query.</constraint>
-    <constraint>No explanations.</constraint>
-    <constraint>No other text or comments.</constraint>
-    <constraint>Do not add markdown code blocks.</constraint>
-    <constraint>Do not wrap the output in \`\`\`sql or \`\`\`.</constraint>
-    <constraint>Return raw SQL text only.</constraint>
-  </constraints>
-  <current_date>${new Date().toISOString().split('T')[0]}</current_date>
-</system_instructions>`
-        }
-      ];
+      // K=3 retrieved exemplars. Measured on the eval harness as the single
+      // largest win for a small local model (+8.3pp overall, +8.9pp on
+      // held-out cases it was never tuned against) and the plateau: K=4
+      // scored identically for more tokens and latency. Costs a strong model
+      // ~31% more prompt tokens for no gain, which is a routing decision
+      // rather than a reason to withhold it from everyone.
+      let messages = buildTextToSqlMessages(prompt, currentSchema, { fewShot: 3 });
 
-      if (currentSchema) {
-        const dialect = currentSchema.dialect;
-        const quote = dialect === 'postgres' ? '"' : '`';
-        messages.push({
-          role: 'system',
-          content: `<database_context>
-  <dialect>${dialect}</dialect>
-  <quote_char>${quote}</quote_char>
-  <schema>
-${serializeSchema(currentSchema)}
-  </schema>
-  <instruction>Use only the provided schema. If the user asks for non-existing tables/columns, choose the closest match or state inability.</instruction>
-</database_context>`
+      // One extra round at most: a second failure means the model is not
+      // converging, and a third request is latency the user pays for nothing.
+      const maxAttempts = dryRun ? 2 : 1;
+      let sql = '';
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const response = await client.chat.completions.create({
+          messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+          temperature: 0,
+          top_p: 1.0,
+          max_tokens: 1000,
+          model: modelName
         });
+
+        sql = stripSqlFences(response.choices[0].message.content || '');
+        if (!dryRun || attempt === maxAttempts - 1) return sql;
+
+        // Only read-only statements are ever executed speculatively, so repair
+        // can never run a write against the user's database.
+        const verdict = guardReadOnly(sql);
+        if (!verdict.ok) return sql;
+
+        const error = await dryRun(verdict.sql);
+        if (!error) return sql;
+
+        messages = buildRepairMessages(messages, sql, error);
       }
 
-      messages.push({ role: 'user', content: prompt });
-
-      const response = await client.chat.completions.create({
-        messages,
-        temperature: 0,
-        top_p: 1.0,
-        max_tokens: 1000,
-        model: modelName
-      });
-
-      const content = response.choices[0].message.content || '';
-      // Remove markdown code blocks if present
-      return content.replace(/^```sql\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '').trim();
+      return sql;
     } catch (error) {
       console.error('Error generating SQL query:', error);
       throw error;

@@ -21,7 +21,7 @@ export function useSqlite(): UseSqliteReturn {
     const [isLoading, setIsLoading] = useState(false);
     const [tables, setTables] = useState<TableInfo[]>([]);
 
-    const pushSQLiteSchemaToAI = (tableList: TableInfo[]) => {
+    const pushSQLiteSchemaToAI = async (tableList: TableInfo[]) => {
         try {
             const tableSchemas: TableSchema[] = tableList.map((t) => {
                 const cols = sqliteService.getTableColumns(t.name);
@@ -36,7 +36,10 @@ export function useSqlite(): UseSqliteReturn {
                 };
             });
             const schema: DatabaseSchema = { dialect: 'sqlite', tables: tableSchemas };
-            aiService.setSchema(schema);
+            await aiService.setSchemaWithSamples(schema, async (sql) => {
+                const result = sqliteService.executeQuery(sql);
+                return result ? result.rows : null;
+            });
         } catch {
             // Best-effort; ignore schema push errors
         }
@@ -59,7 +62,7 @@ export function useSqlite(): UseSqliteReturn {
                     setTables(existingTables);
                     setIsLoaded(true);
                     // Push schema to AI
-                    pushSQLiteSchemaToAI(existingTables);
+                    void pushSQLiteSchemaToAI(existingTables);
                 }
             } catch {
                 if (mounted) {
@@ -86,7 +89,7 @@ export function useSqlite(): UseSqliteReturn {
             // Ensure sqliteService is initialized
             await sqliteService.init();
 
-            const success = await sqliteService.loadDbFromArrayBuffer(data, filePath);
+            const success = await sqliteService.loadDbFromArrayBuffer(data as ArrayBuffer, filePath);
 
             if (success) {
                 const tableList = sqliteService.getTables();
@@ -95,7 +98,7 @@ export function useSqlite(): UseSqliteReturn {
                     setTables(tableList);
                     setIsLoaded(true);
                     // Push schema to AI
-                    pushSQLiteSchemaToAI(tableList);
+                    void pushSQLiteSchemaToAI(tableList);
 
                     toast({
                         title: "Database loaded",
@@ -197,7 +200,7 @@ export function useSqlite(): UseSqliteReturn {
             setTables(tableList);
             // Update AI schema
             if (tableList.length > 0) {
-                pushSQLiteSchemaToAI(tableList);
+                void pushSQLiteSchemaToAI(tableList);
             } else {
                 aiService.clearSchema();
             }

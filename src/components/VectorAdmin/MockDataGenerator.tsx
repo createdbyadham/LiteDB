@@ -4,7 +4,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -20,7 +19,6 @@ import {
   Cpu,
   CheckCircle2,
   Download,
-  AlertCircle,
   Plus,
   Sparkles,
   Database
@@ -53,7 +51,7 @@ export const MockDataGenerator = ({
   const [selectedModelId, setSelectedModelId] = useState<string>('bge-base');
 
   // Get the selected model info
-  const selectedModel = useMemo(() => {
+  void useMemo(() => {
     return AVAILABLE_MODELS.find(m => m.id === selectedModelId);
   }, [selectedModelId]);
 
