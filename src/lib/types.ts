@@ -38,7 +38,7 @@ export interface RowData {
 // don't support parameterized identifiers, so the only safe option is to
 // allowlist the characters before quoting.
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-export function assertIdent(name: string, kind: 'table' | 'column' = 'identifier'): string {
+export function assertIdent(name: string, kind: 'table' | 'column' | 'identifier' = 'identifier'): string {
     if (!IDENT_RE.test(name)) {
         throw new Error(`Invalid ${kind} name: ${name}`);
     }
