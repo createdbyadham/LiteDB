@@ -48,10 +48,27 @@ date. It is not evidence that the two fixtures are equally hard.
 - **Retrieved few-shot is worth +8.3pp overall to the local model, +8.9pp on
   held-out cases.** It is worth nothing to the cloud model, which has no
   headroom left.
-- **Execution-guided repair fired zero times on every cloud run.** The whole
-  `invalid_sql` class is a small-model problem. Repair earns its keep locally
-  and is dead weight against a frontier model — an argument for routing, not
-  against repair.
+- **Execution-guided repair is worth +2.0pp alone, +1.1pp on top of few-shot.**
+  Measured by counting cases that failed on the first attempt and passed after
+  the retry:
+
+  | Arm | With repair | Without | Gain |
+  | --- | ---: | ---: | ---: |
+  | local, no few-shot | 77.3% | 75.3% | +2.0pp |
+  | local, `--fewshot 3` | 85.6% | 84.5% | +1.1pp |
+  | cloud, both arms | 99.0% | 99.0% | 0 |
+
+  It rescued `wf-03` and `wf-06`, both the `orders.order_id` hallucination —
+  exactly the class it was built for and nothing else. It fires more often than
+  it succeeds (6 retries, 2 recoveries), because a query that is wrong but
+  valid produces no error to feed back. The two interventions also overlap:
+  few-shot had already prevented one of those hallucinations, which is why
+  repair adds less on top of it.
+
+  **Repair only works where a correctness signal exists.** `invalid_sql` has
+  one — the engine says what is wrong. `wrong_result` does not, and no retry
+  loop can see it. It fired zero times across every cloud run, so it is free
+  insurance against a frontier model rather than a benefit.
 - Exemplars cost the cloud path 477 → 626 prompt tokens and 2.1s → 3.2s per
   query, for no gain. Do not enable them on a strong model.
 
