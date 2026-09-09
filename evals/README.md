@@ -18,6 +18,48 @@ npm run eval -- --provider openai --model gpt-4o-mini
 Requires Node 24+ (`node:sqlite` is unflagged from 24 onwards). SQLite needs no
 setup; Postgres needs `EVAL_POSTGRES_URL`.
 
+## Current results
+
+109 cases: 97 on the storefront fixture (63 dev, 34 held-out) and 12 on a
+second, unseen `library` schema. All arms run with `--repair 1`.
+
+### Storefront (97 cases)
+
+| Model | Overall | dev (63) | Held-out (34) |
+| --- | ---: | ---: | ---: |
+| `qwen2.5-coder:7b` local | 77.3% | 82.5% | 67.6% |
+| `qwen2.5-coder:7b` + `--fewshot 3` | **85.6%** | 90.5% | **76.5%** |
+| `gpt-5.6-luna` cloud | 99.0% | — | — |
+| `gpt-5.6-luna` + `--fewshot 3` | 99.0% | — | — |
+
+### Unseen schema (12 held-out `library` cases)
+
+| Model | Accuracy |
+| --- | ---: |
+| `qwen2.5-coder:7b` local, with or without exemplars | 91.7% |
+| `gpt-5.6-luna` cloud, with or without exemplars | **100%** |
+
+The library set is small and skews easier, so it shows the agent **transfers to
+an unfamiliar schema** — suffixed keys, `full_name`, integer cents, a nullable
+date. It is not evidence that the two fixtures are equally hard.
+
+### Reading these
+
+- **Retrieved few-shot is worth +8.3pp overall to the local model, +8.9pp on
+  held-out cases.** It is worth nothing to the cloud model, which has no
+  headroom left.
+- **Execution-guided repair fired zero times on every cloud run.** The whole
+  `invalid_sql` class is a small-model problem. Repair earns its keep locally
+  and is dead weight against a frontier model — an argument for routing, not
+  against repair.
+- Exemplars cost the cloud path 477 → 626 prompt tokens and 2.1s → 3.2s per
+  query, for no gain. Do not enable them on a strong model.
+
+The cloud figures were measured **before** `wf-22` was disambiguated (its
+wording invited multiplying `PERCENT_RANK` by 100). It was the single remaining
+cloud failure, so the next cloud run should land at or near 100% on the
+storefront set. That has not been re-measured and is not being claimed.
+
 ## What is measured
 
 **Execution accuracy.** The generated query and the reference query are both
@@ -284,7 +326,11 @@ The same 18 held-out cases, two models, with and without exemplars:
 | Model | `--repair 1` | `--repair 1 --fewshot 3` |
 | --- | ---: | ---: |
 | `qwen2.5-coder:7b` (local, 6 GB GPU) | 38.9% (7/18) | 55.6% (10/18) |
-| `gpt-5.6-luna` (cloud) | 88.9% (16/18) | **94.4% (17/18)** |
+| `gpt-5.6-luna` (cloud) | 88.9% (16/18) | 94.4% (17/18) |
+
+*(Measured on the 18-case window-only held-out set, before the ambiguous
+questions were fixed and the held-out split was widened. See **Current
+results** at the top for the figures that stand.)*
 
 Three things fall out of this.
 
