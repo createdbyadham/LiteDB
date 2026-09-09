@@ -103,8 +103,8 @@ npm run eval:verify                # verify the golden set (no API calls)
 npm run eval -- --provider ollama  # score a local model
 ```
 
-44 cases across five slices (`single-table`, `joins`, `aggregation`,
-`window-functions`, `ambiguous-schema`), runnable against SQLite or PostgreSQL
+109 cases across five slices (`single-table`, `joins`, `aggregation`,
+`window-functions`, `ambiguous-schema`), over two fixture schemas, runnable against SQLite or PostgreSQL
 and any of the four supported providers. Failures are typed — a query that
 answers the wrong question is reported separately from one that fails to parse,
 and provider outages are excluded from the score entirely.
