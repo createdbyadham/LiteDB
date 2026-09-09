@@ -1,0 +1,190 @@
+[
+  {
+    "id": "wf-01",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "For every product, show its name, its price, and its rank by price within its own category, with the most expensive ranked first.",
+    "sql": "SELECT p.name, p.price, RANK() OVER (PARTITION BY p.category_id ORDER BY p.price DESC) FROM products p",
+    "notes": "Third attempt at the wording. 'For each category, ...' invited a fourth category column; 'Show exactly three columns' was read as LIMIT 3. Naming the three outputs in order, with no leading clause, is what finally pins the projection without suggesting a row limit."
+  },
+  {
+    "id": "wf-02",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Show every order id and order total with a running total of order totals ordered by order date, oldest first.",
+    "sql": "SELECT o.id, o.total, SUM(o.total) OVER (ORDER BY o.order_date, o.id) FROM orders o ORDER BY o.order_date, o.id",
+    "ordered": true
+  },
+  {
+    "id": "wf-03",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "For each customer, number their orders by order date starting at 1. Show the customer id, order id and that number.",
+    "sql": "SELECT o.customer_id, o.id, ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.id) FROM orders o"
+  },
+  {
+    "id": "wf-04",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Show the two most expensive products in each category, with the product name and price.",
+    "sql": "SELECT name, price FROM (SELECT p.name AS name, p.price AS price, ROW_NUMBER() OVER (PARTITION BY p.category_id ORDER BY p.price DESC) AS rn FROM products p) ranked WHERE rn <= 2"
+  },
+  {
+    "id": "wf-05",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "For each product show its name, its price, and the average price of its own category alongside it.",
+    "sql": "SELECT p.name, p.price, AVG(p.price) OVER (PARTITION BY p.category_id) FROM products p"
+  },
+  {
+    "id": "wf-06",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Show each order id, its total, and the total of the previous order by order date.",
+    "sql": "SELECT o.id, o.total, LAG(o.total) OVER (ORDER BY o.order_date, o.id) FROM orders o"
+  },
+  {
+    "id": "wf-07",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "For each customer, show their customer id and the id of their earliest order by order date.",
+    "sql": "SELECT customer_id, id FROM (SELECT o.customer_id AS customer_id, o.id AS id, ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.id) AS rn FROM orders o) t WHERE rn = 1",
+    "notes": "Top-1 per group. The shortcut MIN(order_date) loses the order id."
+  },
+  {
+    "id": "wf-08",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "Show each review id, its rating, and the dense rank of that rating with the highest rating ranked 1.",
+    "sql": "SELECT id, rating, DENSE_RANK() OVER (ORDER BY rating DESC) FROM reviews",
+    "notes": "Ratings tie heavily, so DENSE_RANK and RANK diverge here. Paired with wf-09."
+  },
+  {
+    "id": "wf-09",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "Show each review id, its rating, and its rank by rating with the highest rating ranked 1, leaving gaps after ties.",
+    "sql": "SELECT id, rating, RANK() OVER (ORDER BY rating DESC) FROM reviews",
+    "notes": "'Leaving gaps' is the discriminator against DENSE_RANK."
+  },
+  {
+    "id": "wf-10",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "Show each order id, its order date, and the date of the next order placed after it.",
+    "sql": "SELECT o.id, o.order_date, LEAD(o.order_date) OVER (ORDER BY o.order_date, o.id) FROM orders o"
+  },
+  {
+    "id": "wf-11",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Show each order id and the total of the order placed two orders before it by date, using 0 when there is no such order.",
+    "sql": "SELECT o.id, LAG(o.total, 2, 0) OVER (ORDER BY o.order_date, o.id) FROM orders o",
+    "notes": "Exercises the three-argument LAG rather than COALESCE around a two-argument one; either is accepted since results are compared."
+  },
+  {
+    "id": "wf-12",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "Show each order id, its total, and that total as a percentage of the sum of all order totals.",
+    "sql": "SELECT o.id, o.total, 100.0 * o.total / SUM(o.total) OVER () FROM orders o",
+    "notes": "Empty OVER () as the whole-table denominator."
+  },
+  {
+    "id": "wf-13",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "For each product show its name, its price, and how much that price differs from the average price of its own category.",
+    "sql": "SELECT p.name, p.price, p.price - AVG(p.price) OVER (PARTITION BY p.category_id) FROM products p"
+  },
+  {
+    "id": "wf-14",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "Show each product name along with how many products are in its category.",
+    "sql": "SELECT p.name, COUNT(*) OVER (PARTITION BY p.category_id) FROM products p",
+    "notes": "A GROUP BY answer collapses the rows and loses the per-product listing."
+  },
+  {
+    "id": "wf-15",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Split the products into 4 groups of roughly equal size ordered by price ascending, showing the product name and its group number.",
+    "sql": "SELECT p.name, NTILE(4) OVER (ORDER BY p.price, p.id) FROM products p"
+  },
+  {
+    "id": "wf-16",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "For each product show its name and the name of the most expensive product in its category.",
+    "sql": "SELECT p.name, FIRST_VALUE(p.name) OVER (PARTITION BY p.category_id ORDER BY p.price DESC, p.id) FROM products p"
+  },
+  {
+    "id": "wf-17",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "For each product show its name and the name of the least expensive product in its category.",
+    "sql": "SELECT p.name, FIRST_VALUE(p.name) OVER (PARTITION BY p.category_id ORDER BY p.price ASC, p.id) FROM products p",
+    "notes": "The classic LAST_VALUE trap: reaching for LAST_VALUE without an explicit frame returns the current row, since the default frame ends at CURRENT ROW."
+  },
+  {
+    "id": "wf-18",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Show each order id, its total, and the average total of that order together with the two orders immediately before it by date.",
+    "sql": "SELECT o.id, o.total, AVG(o.total) OVER (ORDER BY o.order_date, o.id ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) FROM orders o",
+    "notes": "Requires an explicit ROWS frame; the default RANGE frame gives a running average instead."
+  },
+  {
+    "id": "wf-19",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "question": "For each customer, show the customer id, the order id, and a running count of how many orders they have placed up to and including that order by date.",
+    "sql": "SELECT o.customer_id, o.id, COUNT(*) OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.id) FROM orders o"
+  },
+  {
+    "id": "wf-20",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Show each category name, how many products it has, and the rank of that count with the largest first.",
+    "sql": "SELECT c.name, COUNT(p.id), RANK() OVER (ORDER BY COUNT(p.id) DESC) FROM categories c JOIN products p ON p.category_id = c.id GROUP BY c.name",
+    "notes": "A window function applied over an aggregate in the same SELECT."
+  },
+  {
+    "id": "wf-21",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "List one row per order giving the customer id and the order id, restricted to each customer's two most recent orders by order date.",
+    "sql": "SELECT customer_id, id FROM (SELECT o.customer_id AS customer_id, o.id AS id, ROW_NUMBER() OVER (PARTITION BY o.customer_id ORDER BY o.order_date DESC, o.id DESC) AS rn FROM orders o) t WHERE rn <= 2",
+    "notes": "'The ids of their two most recent orders' fairly reads as two columns on one row; the row shape is now explicit."
+  },
+  {
+    "id": "wf-22",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Show each product name and its percent rank by price ordered from cheapest to most expensive.",
+    "sql": "SELECT p.name, PERCENT_RANK() OVER (ORDER BY p.price ASC) FROM products p"
+  },
+  {
+    "id": "wf-23",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "Show each product name and the cumulative distribution of its price ordered from cheapest to most expensive.",
+    "sql": "SELECT p.name, CUME_DIST() OVER (ORDER BY p.price ASC) FROM products p"
+  },
+  {
+    "id": "wf-24",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "For each payment method, show the method, the payment id, its amount, and a running total of amounts for that method ordered by payment date.",
+    "sql": "SELECT pay.method, pay.id, pay.amount, SUM(pay.amount) OVER (PARTITION BY pay.method ORDER BY pay.paid_at, pay.id) FROM payments pay"
+  },
+  {
+    "id": "wf-25",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "question": "For each customer, show the customer id, the order id, and the difference between that order's total and their previous order's total by date.",
+    "sql": "SELECT o.customer_id, o.id, o.total - LAG(o.total) OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.id) FROM orders o",
+    "notes": "LAG inside a partition; the first order per customer must yield NULL rather than 0."
+  }
+]
