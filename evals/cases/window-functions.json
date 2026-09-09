@@ -162,8 +162,9 @@
     "id": "wf-22",
     "slice": "window-functions",
     "difficulty": "hard",
-    "question": "Show each product name and its percent rank by price ordered from cheapest to most expensive.",
-    "sql": "SELECT p.name, PERCENT_RANK() OVER (ORDER BY p.price ASC) FROM products p"
+    "question": "Show each product name and its percent rank by price, as a value between 0 and 1, ordered from cheapest to most expensive.",
+    "sql": "SELECT p.name, PERCENT_RANK() OVER (ORDER BY p.price ASC) FROM products p",
+    "notes": "Originally just \"percent rank\", which fairly invites multiplying by 100. PERCENT_RANK() returns 0-1, so the range is now stated. A dev case, so correcting it is free."
   },
   {
     "id": "wf-23",
