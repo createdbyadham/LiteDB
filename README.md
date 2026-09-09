@@ -11,6 +11,32 @@ A modern, fast, and user-friendly database viewer/editor built with React and Ta
 
 ![LiteDB](./docs/assets/Litedb.png)
 
+## Measured, not asserted
+
+LiteDB's Text-to-SQL agent ships with a public benchmark in [`evals/`](./evals)
+— 109 cases scored by **execution accuracy**, with a held-out split that was
+written after the prompt work and never tuned against.
+
+`qwen2.5-coder:7b` running locally on a 6 GB laptop GPU, SQLite:
+
+| | Overall | Held-out |
+| --- | ---: | ---: |
+| Schema context + execution-guided repair | 77.3% | 67.6% |
+| \+ retrieved few-shot exemplars | **85.6%** | **76.5%** |
+
+On a **second, unseen schema** — different naming conventions, integer cents,
+nullable dates — the same agent scores 91.7%, so the gains are not an artifact
+of one database.
+
+```bash
+npm run eval:selftest   # verify the harness itself (no API calls)
+npm run eval -- --provider ollama --fewshot 3
+```
+
+Six experiments are documented in [`evals/README.md`](./evals/README.md),
+including the two that were **rejected** and the case-design defects a stronger
+model exposed. Every number is reproducible with one command.
+
 ## Features
 
 - **Schema Visualization**: Visualize your database structure, relationships, and foreign keys in an interactive diagram.
