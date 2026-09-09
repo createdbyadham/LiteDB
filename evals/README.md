@@ -143,7 +143,14 @@ fixture, which are entirely held-out.** Held-out cases were written after the
 prompt and exemplar work and must never be tuned against. The harness does not
 change as cases are added, since a case is a JSON object.
 
-### Result: qwen2.5-coder:7b, SQLite, 63 cases
+### Historical: the 63-case set
+
+Everything from here to *Agreement with the reference* was measured on the
+earlier 63-case set, before the held-out split was widened and four ambiguous
+questions were fixed. It is kept because the experiments and their reasoning
+still stand — but for figures that are current, see **Current results** above.
+
+#### Result: qwen2.5-coder:7b, SQLite, 63 cases
 
 | Slice | Accuracy |
 | --- | ---: |
