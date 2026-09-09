@@ -12,10 +12,16 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseSchema, TableSchema } from '../../src/lib/schemaTypes';
 import { attachSampleValues } from '../../src/lib/schemaSamples';
-import type { Dialect, FixtureDb } from './types';
+import type { Dialect, FixtureDb, FixtureName } from './types';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, '..', 'fixtures');
+
+/** File stems per fixture. The storefront names are historical. */
+const FIXTURE_FILES: Record<FixtureName, { sqlite: string; postgres: string; seed: string }> = {
+    storefront: { sqlite: 'schema.sqlite.sql', postgres: 'schema.postgres.sql', seed: 'seed.sql' },
+    library: { sqlite: 'library.sqlite.sql', postgres: 'library.postgres.sql', seed: 'library.seed.sql' },
+};
 
 function readFixture(name: string): string {
     return readFileSync(join(FIXTURES, name), 'utf8');
@@ -79,6 +85,8 @@ function introspectSqlite(db: DatabaseSync): DatabaseSchema {
 }
 
 export interface FixtureOptions {
+    /** Which fixture database to build. Defaults to 'storefront'. */
+    name?: FixtureName;
     /**
      * Include sample values for enumerated columns. Off makes the run a
      * control for measuring what that context is actually worth.
@@ -87,15 +95,17 @@ export interface FixtureOptions {
 }
 
 export async function createSqliteFixture(options: FixtureOptions = {}): Promise<FixtureDb> {
+    const name = options.name ?? 'storefront';
+    const files = FIXTURE_FILES[name];
     const dir = mkdtempSync(join(tmpdir(), 'litedb-eval-'));
     const path = join(dir, 'fixture.sqlite');
 
     // Build with a writable connection...
     const writer = new DatabaseSync(path);
-    for (const statement of splitStatements(readFixture('schema.sqlite.sql'))) {
+    for (const statement of splitStatements(readFixture(files.sqlite))) {
         writer.exec(statement);
     }
-    for (const statement of splitStatements(readFixture('seed.sql'))) {
+    for (const statement of splitStatements(readFixture(files.seed))) {
         writer.exec(statement);
     }
     const baseSchema = introspectSqlite(writer);
@@ -124,6 +134,7 @@ export async function createSqliteFixture(options: FixtureOptions = {}): Promise
 
     return {
         dialect: 'sqlite',
+        name,
         schema,
         run,
         async close(): Promise<void> {
@@ -183,6 +194,8 @@ export async function createPostgresFixture(
     connectionString: string,
     options: FixtureOptions = {},
 ): Promise<FixtureDb> {
+    const name = options.name ?? 'storefront';
+    const files = FIXTURE_FILES[name];
     let pg: any;
     try {
         pg = await import('pg');
@@ -204,10 +217,10 @@ export async function createPostgresFixture(
     const client = new Client({ connectionString });
     await client.connect();
 
-    for (const statement of splitStatements(readFixture('schema.postgres.sql'))) {
+    for (const statement of splitStatements(readFixture(files.postgres))) {
         await client.query(statement);
     }
-    for (const statement of splitStatements(readFixture('seed.sql'))) {
+    for (const statement of splitStatements(readFixture(files.seed))) {
         await client.query(statement);
     }
 
@@ -230,6 +243,7 @@ export async function createPostgresFixture(
 
     return {
         dialect: 'postgres',
+        name,
         schema,
         run,
         async close(): Promise<void> {

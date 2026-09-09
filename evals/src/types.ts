@@ -2,6 +2,9 @@ import type { DatabaseSchema, SqlDialect } from '../../src/lib/schemaTypes';
 
 export type Dialect = SqlDialect;
 
+/** Which fixture database a case is written against. */
+export type FixtureName = 'storefront' | 'library';
+
 export type Slice =
     | 'single-table'
     | 'joins'
@@ -35,6 +38,13 @@ export interface EvalCase {
      * tuning. Defaults to 'dev'.
      */
     split?: 'dev' | 'test';
+    /**
+     * Fixture database this case targets. Defaults to 'storefront'.
+     * 'library' uses a deliberately different schema — suffixed primary keys,
+     * full_name rather than name, integer cents, a nullable date — to test
+     * generalisation to an unseen database rather than unseen questions.
+     */
+    fixture?: FixtureName;
     /** Restrict a case to specific dialects. Defaults to all. */
     dialects?: Dialect[];
     notes?: string;
@@ -102,6 +112,7 @@ export interface RunReport {
 
 export interface FixtureDb {
     dialect: Dialect;
+    name: FixtureName;
     schema: DatabaseSchema;
     /** Execute read-only. Returns rows as positional arrays. */
     run(sql: string): Promise<unknown[][]>;

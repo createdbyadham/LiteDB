@@ -6,7 +6,9 @@ import { createSqliteFixture } from './fixture';
 import { serializeSchema } from '../../src/lib/promptBuilder';
 
 async function main(): Promise<void> {
-    const fixture = await createSqliteFixture();
+    const i = process.argv.indexOf('--fixture');
+    const name = (i > -1 ? process.argv[i + 1] : 'storefront') as 'storefront' | 'library';
+    const fixture = await createSqliteFixture({ name });
     const qualified = process.argv.includes('--qualified');
     console.log(serializeSchema(fixture.schema, qualified));
     await fixture.close();

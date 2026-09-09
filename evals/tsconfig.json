@@ -24,6 +24,7 @@
     "../src/lib/promptBuilder.ts",
     "../src/lib/schemaTypes.ts",
     "../src/lib/schemaSamples.ts",
-    "../src/lib/fewShot.ts"
+    "../src/lib/fewShot.ts",
+    "../src/lib/sqlGuard.ts"
   ]
 }
