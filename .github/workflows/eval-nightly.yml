@@ -1,0 +1,96 @@
+name: Text-to-SQL eval (nightly)
+
+# Scored runs cost money and need credentials, so they are kept out of the PR
+# path. CI runs the free half (harness self-test + golden-set verification) on
+# every pull request; this job produces the accuracy numbers.
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'Provider to run'
+        required: false
+        default: 'github'
+      model:
+        description: 'Model override (blank uses the provider default)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  sqlite:
+    name: SQLite · ${{ github.event.inputs.provider || 'github' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm install
+
+      - name: Run eval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          npm run eval -- \
+            --provider "${{ github.event.inputs.provider || 'github' }}" \
+            ${{ github.event.inputs.model && format('--model "{0}"', github.event.inputs.model) || '' }} \
+            --dialect sqlite \
+            --tag "nightly-sqlite"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-sqlite
+          path: evals/results/
+
+  postgres:
+    name: PostgreSQL · ${{ github.event.inputs.provider || 'github' }}
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: litedb_eval
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm install
+
+      - name: Run eval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EVAL_POSTGRES_URL: postgres://postgres:postgres@localhost:5432/litedb_eval
+        run: |
+          npm run eval -- \
+            --provider "${{ github.event.inputs.provider || 'github' }}" \
+            ${{ github.event.inputs.model && format('--model "{0}"', github.event.inputs.model) || '' }} \
+            --dialect postgres \
+            --tag "nightly-postgres"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-postgres
+          path: evals/results/
