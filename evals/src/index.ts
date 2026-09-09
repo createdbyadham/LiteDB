@@ -16,7 +16,7 @@ import {
     writeReport,
 } from './report';
 import { applicableCases, precomputeExpected, runAll } from './runner';
-import type { Dialect, EvalCase, RunReport, Slice } from './types';
+import type { Dialect, EvalCase, FixtureName, RunReport, Slice } from './types';
 
 interface Args {
     provider: string;
@@ -25,6 +25,7 @@ interface Args {
     slice?: Slice;
     difficulty?: string;
     split?: 'dev' | 'test';
+    fixture: FixtureName;
     limit?: number;
     concurrency: number;
     tag?: string;
@@ -44,6 +45,7 @@ function parseArgs(argv: string[]): Args {
         concurrency: 4,
         verifyOnly: false,
         includeSamples: true,
+        fixture: 'storefront',
         qualifyColumns: false,
         antiSubstitution: false,
         fewShot: 0,
@@ -61,6 +63,7 @@ function parseArgs(argv: string[]): Args {
             case '--slice': args.slice = value as Slice; i++; break;
             case '--difficulty': args.difficulty = value; i++; break;
             case '--split': args.split = value as 'dev' | 'test'; i++; break;
+            case '--fixture': args.fixture = value as FixtureName; i++; break;
             case '--limit': args.limit = Number(value); i++; break;
             case '--concurrency': args.concurrency = Number(value); i++; break;
             case '--tag': args.tag = value; i++; break;
@@ -84,7 +87,10 @@ function parseArgs(argv: string[]): Args {
 }
 
 function selectCases(all: EvalCase[], args: Args, dialect: Dialect): EvalCase[] {
-    let selected = applicableCases(all, dialect);
+    // A run targets one fixture: cases are written against a specific schema.
+    let selected = applicableCases(all, dialect).filter(
+        (c) => (c.fixture ?? 'storefront') === args.fixture,
+    );
     if (args.slice) selected = selected.filter((c) => c.slice === args.slice);
     if (args.difficulty) selected = selected.filter((c) => c.difficulty === args.difficulty);
     if (args.split) selected = selected.filter((c) => (c.split ?? 'dev') === args.split);
@@ -134,7 +140,10 @@ async function main(): Promise<void> {
     // "this year" cannot start failing in January.
     const evalDate = new Date(process.env.EVAL_DATE || '2024-09-01T00:00:00Z');
 
-    const fixture = await createFixture(args.dialect, { includeSamples: args.includeSamples });
+    const fixture = await createFixture(args.dialect, {
+        includeSamples: args.includeSamples,
+        name: args.fixture,
+    });
 
     try {
         const allCases = loadCases();
