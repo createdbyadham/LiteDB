@@ -64,7 +64,10 @@ export function usePostgres(): UsePgReturn {
         });
       }
       const schema: DatabaseSchema = { dialect: 'postgres', tables: tableSchemas };
-      aiService.setSchema(schema);
+      await aiService.setSchemaWithSamples(schema, async (sql) => {
+        const result = await pgService.executeQuery(sql);
+        return result ? result.rows : null;
+      });
     } catch {
       // Best-effort; ignore schema push errors
     }

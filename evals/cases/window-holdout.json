@@ -1,0 +1,167 @@
+[
+  {
+    "id": "wh-01",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "Show each order id and the total of the order two positions later by order date.",
+    "sql": "SELECT o.id, LEAD(o.total, 2) OVER (ORDER BY o.order_date, o.id) FROM orders o",
+    "notes": "LEAD with an offset. Exemplars demonstrate LAG only."
+  },
+  {
+    "id": "wh-02",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Divide the reviews into 3 groups of roughly equal size ordered by rating descending, showing the review id and its group number.",
+    "sql": "SELECT r.id, NTILE(3) OVER (ORDER BY r.rating DESC, r.id) FROM reviews r",
+    "notes": "NTILE is not demonstrated by any exemplar."
+  },
+  {
+    "id": "wh-03",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show each order id and the percent rank of its total ordered from smallest to largest.",
+    "sql": "SELECT o.id, PERCENT_RANK() OVER (ORDER BY o.total ASC, o.id) FROM orders o",
+    "notes": "PERCENT_RANK is not demonstrated."
+  },
+  {
+    "id": "wh-04",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show each payment id and the cumulative distribution of its amount ordered from smallest to largest.",
+    "sql": "SELECT p.id, CUME_DIST() OVER (ORDER BY p.amount ASC, p.id) FROM payments p",
+    "notes": "CUME_DIST is not demonstrated."
+  },
+  {
+    "id": "wh-05",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show each payment id, its amount, and the sum of that payment together with the one immediately before it by payment date.",
+    "sql": "SELECT p.id, p.amount, SUM(p.amount) OVER (ORDER BY p.paid_at, p.id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM payments p",
+    "notes": "Explicit ROWS frame. The running-total exemplar uses the default frame, which would give the wrong answer here."
+  },
+  {
+    "id": "wh-06",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "Show each product name, its stock, and its dense rank by stock from lowest to highest.",
+    "sql": "SELECT p.name, p.stock, DENSE_RANK() OVER (ORDER BY p.stock ASC) FROM products p",
+    "notes": "Two products share a stock of 0, so DENSE_RANK and RANK diverge. Neither is demonstrated."
+  },
+  {
+    "id": "wh-07",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show each category name, how many products it has, and that count as a percentage of all products.",
+    "sql": "SELECT c.name, COUNT(p.id), 100.0 * COUNT(p.id) / SUM(COUNT(p.id)) OVER () FROM categories c JOIN products p ON p.category_id = c.id GROUP BY c.name",
+    "notes": "A window over an aggregate, with an empty OVER () denominator."
+  },
+  {
+    "id": "wh-08",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "For each order item show the order id, the product id, and the line value as a percentage of that order's total line value.",
+    "sql": "SELECT oi.order_id, oi.product_id, 100.0 * (oi.quantity * oi.unit_price) / SUM(oi.quantity * oi.unit_price) OVER (PARTITION BY oi.order_id) FROM order_items oi",
+    "notes": "Percent of a partition total rather than of the whole table."
+  },
+  {
+    "id": "wh-09",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show each product name, its rank by price across all products, and its rank by price within its own category, most expensive first in both.",
+    "sql": "SELECT p.name, RANK() OVER (ORDER BY p.price DESC), RANK() OVER (PARTITION BY p.category_id ORDER BY p.price DESC) FROM products p",
+    "notes": "Two different window specifications in one projection."
+  },
+  {
+    "id": "wh-10",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "For each order show the order id and how many of that customer's orders up to and including this one by date had a status of delivered.",
+    "sql": "SELECT o.id, SUM(CASE WHEN o.status = 'delivered' THEN 1 ELSE 0 END) OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.id) FROM orders o",
+    "notes": "Conditional aggregation inside a window frame."
+  },
+  {
+    "id": "wh-11",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "List the ids of orders whose total is greater than the average order total for that same customer.",
+    "sql": "SELECT id FROM (SELECT o.id AS id, o.total AS total, AVG(o.total) OVER (PARTITION BY o.customer_id) AS avg_total FROM orders o) t WHERE total > avg_total",
+    "notes": "A window result used as a filter, which requires wrapping it in a subquery."
+  },
+  {
+    "id": "wh-12",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "Show each product name, its price, and the highest price found in its category.",
+    "sql": "SELECT p.name, p.price, MAX(p.price) OVER (PARTITION BY p.category_id) FROM products p",
+    "notes": "MAX as a window aggregate. The related exemplar returns a name via FIRST_VALUE, not a value via MAX."
+  },
+  {
+    "id": "wh-13",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "For each payment status show the status, the payment id, and a running count of payments in that status ordered by payment date.",
+    "sql": "SELECT p.status, p.id, COUNT(*) OVER (PARTITION BY p.status ORDER BY p.paid_at, p.id) FROM payments p",
+    "notes": "Partitioned running count."
+  },
+  {
+    "id": "wh-14",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "For each review show the review id, the name of the product reviewed, and the average rating that product received.",
+    "sql": "SELECT r.id, p.name, AVG(r.rating) OVER (PARTITION BY r.product_id) FROM reviews r JOIN products p ON p.id = r.product_id",
+    "notes": "A window applied on top of a join."
+  },
+  {
+    "id": "wh-15",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show each order id and the number of days between it and that customer's previous order, by order date.",
+    "sql": {
+      "sqlite": "SELECT o.id, julianday(o.order_date) - julianday(LAG(o.order_date) OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.id)) FROM orders o",
+      "postgres": "SELECT o.id, o.order_date - LAG(o.order_date) OVER (PARTITION BY o.customer_id ORDER BY o.order_date, o.id) FROM orders o"
+    },
+    "notes": "Date arithmetic on a LAG result, and the one case where the dialects genuinely diverge."
+  },
+  {
+    "id": "wh-16",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show one row per country giving the country and the id of the customer from it who registered earliest.",
+    "sql": "SELECT country, id FROM (SELECT c.country AS country, c.id AS id, ROW_NUMBER() OVER (PARTITION BY c.country ORDER BY c.created_at, c.id) AS rn FROM customers c) t WHERE rn = 1",
+    "notes": "Deduplication to one row per group."
+  },
+  {
+    "id": "wh-17",
+    "slice": "window-functions",
+    "difficulty": "medium",
+    "split": "test",
+    "question": "For every order, show the customer id, that order id, and the total of the most recent order that customer placed.",
+    "sql": "SELECT o.customer_id, o.id, FIRST_VALUE(o.total) OVER (PARTITION BY o.customer_id ORDER BY o.order_date DESC, o.id DESC) FROM orders o",
+    "notes": "Originally read naturally as one row per customer. Reworded to make the per-order row shape explicit. This corrects a defective question rather than tuning the method, but it is a held-out case that has now been looked at."
+  },
+  {
+    "id": "wh-18",
+    "slice": "window-functions",
+    "difficulty": "hard",
+    "split": "test",
+    "question": "Show each order id, its total, and the average total across the order before it, itself, and the order after it by date.",
+    "sql": "SELECT o.id, o.total, AVG(o.total) OVER (ORDER BY o.order_date, o.id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM orders o",
+    "notes": "A centred frame. Nothing in the exemplar library demonstrates a FOLLOWING bound."
+  }
+]

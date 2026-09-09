@@ -11,6 +11,32 @@ A modern, fast, and user-friendly database viewer/editor built with React and Ta
 
 ![LiteDB](./docs/assets/Litedb.png)
 
+## Measured, not asserted
+
+LiteDB's Text-to-SQL agent ships with a public benchmark in [`evals/`](./evals)
+— 109 cases scored by **execution accuracy**, with a held-out split that was
+written after the prompt work and never tuned against.
+
+`qwen2.5-coder:7b` running locally on a 6 GB laptop GPU, SQLite:
+
+| | Overall | Held-out |
+| --- | ---: | ---: |
+| Schema context + execution-guided repair | 77.3% | 67.6% |
+| \+ retrieved few-shot exemplars | **85.6%** | **76.5%** |
+
+On a **second, unseen schema** — different naming conventions, integer cents,
+nullable dates — the same agent scores 91.7%, so the gains are not an artifact
+of one database.
+
+```bash
+npm run eval:selftest   # verify the harness itself (no API calls)
+npm run eval -- --provider ollama
+```
+
+Six experiments are documented in [`evals/README.md`](./evals/README.md),
+including the two that were **rejected** and the case-design defects a stronger
+model exposed. Every number is reproducible with one command.
+
 ## Features
 
 - **Schema Visualization**: Visualize your database structure, relationships, and foreign keys in an interactive diagram.
@@ -62,6 +88,33 @@ Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline**
 1.  **Schema Extraction**: On connection, the app actively introspects the database to extract table definitions, foreign keys, and data types.
 2.  **Dynamic Context Injection**: This metadata is formatted and injected into the LLM's system prompt (System Message), giving the model "awareness" of the specific database structure.
 3.  **Driver-Specific Validation**: The system prompts are tailored to the active driver (e.g., enforcing PostgreSQL specific syntax vs. SQLite), reducing syntax errors in generated queries.
+
+### Measured accuracy
+
+Accuracy claims about the Text-to-SQL agent are backed by a public, runnable
+benchmark in [`evals/`](./evals) rather than asserted. It scores **execution
+accuracy** — the generated query and a reference query are both executed
+against a seeded fixture database and their result sets compared — so any
+correct formulation counts, not just one that matches a string.
+
+```bash
+npm run eval:selftest              # verify the harness itself (no API calls)
+npm run eval:verify                # verify the golden set (no API calls)
+npm run eval -- --provider ollama  # score a local model
+```
+
+109 cases across five slices (`single-table`, `joins`, `aggregation`,
+`window-functions`, `ambiguous-schema`), over two fixture schemas, runnable against SQLite or PostgreSQL
+and any of the four supported providers. Failures are typed — a query that
+answers the wrong question is reported separately from one that fails to parse,
+and provider outages are excluded from the score entirely.
+
+The harness executes model-generated SQL, so it treats that SQL as hostile:
+a static read-only guard, plus an engine that physically cannot write
+(read-only SQLite connection; `BEGIN READ ONLY` in Postgres).
+
+See [`evals/README.md`](./evals/README.md) for the methodology, the comparison
+rules and their tradeoffs, and how to add cases.
 
 ## Tech Stack
 

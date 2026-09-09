@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { sqliteService } from '@/lib/sqliteService';
 import { pgService } from '@/lib/pgService';
 import { toast } from '@/hooks/use-toast';
-import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Code2, Sparkles, Download } from 'lucide-react';
+import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Sparkles, Download } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { AiQueryDialog } from './AiQueryDialog';
@@ -84,8 +84,6 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
         } | null;
       };
 
-      // Determine if any statement mutates data/schema
-      const isMutating = statements.some(stmt => /^(\s*)(INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE|REPLACE)\b/i.test(stmt));
 
       if (isPostgres) {
         // For PostgreSQL, execute each statement sequentially

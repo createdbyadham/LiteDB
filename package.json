@@ -23,7 +23,14 @@
     "build": "tsc && vite build",
     "tauri": "tauri",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "npm run typecheck:app && npm run typecheck:evals",
+    "typecheck:app": "tsc --noEmit -p tsconfig.app.json",
+    "typecheck:evals": "tsc --noEmit -p evals/tsconfig.json",
+    "eval": "tsx evals/src/index.ts",
+    "eval:verify": "tsx evals/src/index.ts --verify-references",
+    "eval:selftest": "tsx evals/src/selftest.ts",
+    "eval:schema": "tsx evals/src/dump-schema.ts",
+    "eval:models": "tsx evals/src/index.ts --list-models"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.5",
@@ -68,6 +75,7 @@
     "@tailwindcss/typography": "^0.5.15",
     "@tauri-apps/cli": "^2.10.0",
     "@types/node": "^22.13.10",
+    "@types/pg": "^8.11.10",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react-swc": "^3.5.0",
@@ -76,10 +84,15 @@
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.9",
     "globals": "^15.9.0",
+    "pg": "^8.13.1",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.11",
+    "tsx": "^4.19.2",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.0.1",
     "vite": "^5.4.1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
   }
 }

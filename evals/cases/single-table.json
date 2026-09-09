@@ -1,0 +1,74 @@
+[
+  {
+    "id": "st-01",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "question": "List the names of all customers in Germany.",
+    "sql": "SELECT name FROM customers WHERE country = 'DE'"
+  },
+  {
+    "id": "st-02",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "question": "How many products are out of stock?",
+    "sql": "SELECT COUNT(*) FROM products WHERE stock = 0"
+  },
+  {
+    "id": "st-03",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "question": "Show all columns for every order with a status of cancelled.",
+    "sql": "SELECT * FROM orders WHERE status = 'cancelled'"
+  },
+  {
+    "id": "st-04",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "question": "Which product names cost more than 200?",
+    "sql": "SELECT name FROM products WHERE price > 200"
+  },
+  {
+    "id": "st-05",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "question": "List every customer email sorted alphabetically.",
+    "sql": "SELECT email FROM customers ORDER BY email",
+    "ordered": true
+  },
+  {
+    "id": "st-06",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "question": "What is the average product price?",
+    "sql": "SELECT AVG(price) FROM products"
+  },
+  {
+    "id": "st-07",
+    "slice": "single-table",
+    "difficulty": "medium",
+    "question": "Show the 3 most expensive products with their prices, most expensive first.",
+    "sql": "SELECT name, price FROM products ORDER BY price DESC LIMIT 3",
+    "ordered": true
+  },
+  {
+    "id": "st-08",
+    "slice": "single-table",
+    "difficulty": "medium",
+    "question": "How many customers signed up in 2024?",
+    "sql": "SELECT COUNT(*) FROM customers WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01'"
+  },
+  {
+    "id": "st-09",
+    "slice": "single-table",
+    "difficulty": "easy",
+    "question": "List the distinct countries that customers come from.",
+    "sql": "SELECT DISTINCT country FROM customers"
+  },
+  {
+    "id": "st-10",
+    "slice": "single-table",
+    "difficulty": "medium",
+    "question": "Which review ids have no comment recorded?",
+    "sql": "SELECT id FROM reviews WHERE comment IS NULL"
+  }
+]

@@ -57,3 +57,6 @@ bun.lockb
 *.db-trace
 
 .env
+# Eval run artifacts (regenerate with `npm run eval`)
+evals/results/*
+!evals/results/.gitkeep

@@ -1,0 +1,66 @@
+[
+  {
+    "id": "am-01",
+    "slice": "ambiguous-schema",
+    "difficulty": "medium",
+    "question": "Show the name and the total for every order.",
+    "sql": "SELECT c.name, o.total FROM orders o JOIN customers c ON c.id = o.customer_id",
+    "notes": "'name' exists on customers, products and categories. Only customers.name is reachable from an order without inventing a relationship."
+  },
+  {
+    "id": "am-02",
+    "slice": "ambiguous-schema",
+    "difficulty": "medium",
+    "question": "List the ids of orders that are pending.",
+    "sql": "SELECT id FROM orders WHERE status = 'pending'",
+    "notes": "'status' exists on both orders and payments with overlapping values. The question says orders."
+  },
+  {
+    "id": "am-03",
+    "slice": "ambiguous-schema",
+    "difficulty": "hard",
+    "question": "For each order id, what did the order actually cost based on its line items?",
+    "sql": "SELECT oi.order_id, SUM(oi.quantity * oi.unit_price) FROM order_items oi GROUP BY oi.order_id",
+    "notes": "orders.total is denormalised and is the tempting shortcut. 'based on its line items' rules it out."
+  },
+  {
+    "id": "am-04",
+    "slice": "ambiguous-schema",
+    "difficulty": "medium",
+    "question": "Show the names of products created in 2024.",
+    "sql": "SELECT name FROM products WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01'",
+    "notes": "created_at exists on customers, products and reviews."
+  },
+  {
+    "id": "am-05",
+    "slice": "ambiguous-schema",
+    "difficulty": "medium",
+    "question": "Which payment ids are still pending?",
+    "sql": "SELECT id FROM payments WHERE status = 'pending'",
+    "notes": "Mirror of am-02: same word, other table."
+  },
+  {
+    "id": "am-06",
+    "slice": "ambiguous-schema",
+    "difficulty": "hard",
+    "question": "For order 1, show each product name and the price actually paid for it.",
+    "sql": "SELECT p.name, oi.unit_price FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE oi.order_id = 1",
+    "notes": "products.price is current; order_items.unit_price is historical. 'actually paid' means the historical one, and they differ in the seed data."
+  },
+  {
+    "id": "am-07",
+    "slice": "ambiguous-schema",
+    "difficulty": "hard",
+    "question": "List the ids of orders where the recorded order total does not match the sum of its line items.",
+    "sql": "SELECT o.id FROM orders o JOIN order_items oi ON oi.order_id = o.id GROUP BY o.id, o.total HAVING o.total <> SUM(oi.quantity * oi.unit_price)",
+    "notes": "Requires using both the denormalised column and the computed value in one query. Exactly one order in the fixture disagrees."
+  },
+  {
+    "id": "am-08",
+    "slice": "ambiguous-schema",
+    "difficulty": "medium",
+    "question": "Show the category name and the product name for every product in the Accessories category.",
+    "sql": "SELECT c.name, p.name FROM products p JOIN categories c ON c.id = p.category_id WHERE c.name = 'Accessories'",
+    "notes": "Two columns literally called 'name' in one projection; column order is part of correctness."
+  }
+]

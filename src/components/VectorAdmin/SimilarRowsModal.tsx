@@ -126,7 +126,7 @@ export const SimilarRowsModal = ({
           tableName,
           selectedVectorColumn,
           primaryKeyColumn,
-          rowId,
+          rowId as string | number,
           10,
           distanceMetric
         );

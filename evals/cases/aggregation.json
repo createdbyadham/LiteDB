@@ -1,0 +1,76 @@
+[
+  {
+    "id": "ag-01",
+    "slice": "aggregation",
+    "difficulty": "medium",
+    "question": "How many orders has each customer placed? Show the customer name and the count.",
+    "sql": "SELECT c.name, COUNT(o.id) FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.name"
+  },
+  {
+    "id": "ag-02",
+    "slice": "aggregation",
+    "difficulty": "easy",
+    "question": "What is the total revenue from captured payments?",
+    "sql": "SELECT SUM(amount) FROM payments WHERE status = 'captured'"
+  },
+  {
+    "id": "ag-03",
+    "slice": "aggregation",
+    "difficulty": "medium",
+    "question": "Show the average review rating for each product name, including only products that have at least one review.",
+    "sql": "SELECT p.name, AVG(r.rating) FROM products p JOIN reviews r ON r.product_id = p.id GROUP BY p.name",
+    "notes": "Originally ambiguous: a LEFT JOIN reading returning all 12 products is equally defensible. A stronger model chose that reading and was scored wrong, which was a defect in the question, not the answer."
+  },
+  {
+    "id": "ag-04",
+    "slice": "aggregation",
+    "difficulty": "medium",
+    "question": "List each category name with its number of products, sorted by count descending then by name ascending.",
+    "sql": "SELECT c.name, COUNT(p.id) AS product_count FROM categories c JOIN products p ON p.category_id = c.id GROUP BY c.name ORDER BY product_count DESC, c.name ASC",
+    "ordered": true
+  },
+  {
+    "id": "ag-05",
+    "slice": "aggregation",
+    "difficulty": "medium",
+    "question": "What is the total quantity sold for each product name, counting only products that have actually been ordered?",
+    "sql": "SELECT p.name, SUM(oi.quantity) FROM products p JOIN order_items oi ON oi.product_id = p.id GROUP BY p.name",
+    "notes": "Same ambiguity as ag-03: without this the LEFT JOIN reading including never-sold products at 0 is equally correct."
+  },
+  {
+    "id": "ag-06",
+    "slice": "aggregation",
+    "difficulty": "medium",
+    "question": "Which order ids have more than one line item?",
+    "sql": "SELECT order_id FROM order_items GROUP BY order_id HAVING COUNT(*) > 1"
+  },
+  {
+    "id": "ag-07",
+    "slice": "aggregation",
+    "difficulty": "easy",
+    "question": "How many orders are there in each order status?",
+    "sql": "SELECT status, COUNT(*) FROM orders GROUP BY status"
+  },
+  {
+    "id": "ag-08",
+    "slice": "aggregation",
+    "difficulty": "hard",
+    "question": "For each country, what is the highest order total placed by a customer from that country?",
+    "sql": "SELECT c.country, MAX(o.total) FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.country"
+  },
+  {
+    "id": "ag-09",
+    "slice": "aggregation",
+    "difficulty": "hard",
+    "question": "Which product names have an average review rating below 3?",
+    "sql": "SELECT p.name FROM products p JOIN reviews r ON r.product_id = p.id GROUP BY p.name HAVING AVG(r.rating) < 3"
+  },
+  {
+    "id": "ag-10",
+    "slice": "aggregation",
+    "difficulty": "easy",
+    "question": "Count how many reviews exist for each rating value, sorted by rating ascending.",
+    "sql": "SELECT rating, COUNT(*) FROM reviews GROUP BY rating ORDER BY rating ASC",
+    "ordered": true
+  }
+]

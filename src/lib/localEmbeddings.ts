@@ -108,7 +108,7 @@ async function initializeEmbedder(modelId: string): Promise<boolean> {
   loadError = null;
 
   try {
-    embedder = await pipeline('feature-extraction', model.huggingFaceId, {
+    embedder = (await pipeline('feature-extraction', model.huggingFaceId, {
       progress_callback: (data: PipelineProgress) => {
         if (progressCallback) {
           progressCallback({
@@ -118,7 +118,7 @@ async function initializeEmbedder(modelId: string): Promise<boolean> {
           });
         }
       }
-    });
+    })) as unknown as FeatureExtractor;
 
     currentModel = model;
     isLoading = false;

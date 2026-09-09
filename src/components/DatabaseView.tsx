@@ -34,7 +34,7 @@ const DatabaseView = () => {
   const [tableData, setTableData] = useState<{ columns: string[], rows: RowData[] }>({ columns: [], rows: [] });
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('browse');
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [lastSaved] = useState<Date | null>(null);
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
 
   // SQLite hooks

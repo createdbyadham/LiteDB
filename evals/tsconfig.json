@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2023"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [
+      "node"
+    ],
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src",
+    "../src/lib/promptBuilder.ts",
+    "../src/lib/schemaTypes.ts",
+    "../src/lib/schemaSamples.ts",
+    "../src/lib/fewShot.ts",
+    "../src/lib/sqlGuard.ts"
+  ]
+}
