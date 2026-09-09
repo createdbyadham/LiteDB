@@ -8,7 +8,7 @@ import {
     type PromptOptions,
 } from '../../src/lib/promptBuilder';
 import { compareResultSets } from './compare';
-import { guardReadOnly } from './guard';
+import { guardReadOnly } from '../../src/lib/sqlGuard';
 import { generate, type ProviderConfig } from './provider';
 import type { CaseResult, Dialect, EvalCase, FixtureDb, Outcome, RunReport } from './types';
 

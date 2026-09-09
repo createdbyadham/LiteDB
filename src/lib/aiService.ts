@@ -1,7 +1,8 @@
 import OpenAI from "openai";
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { loadAllApiKeys } from './secretStorage';
-import { buildTextToSqlMessages, stripSqlFences } from './promptBuilder';
+import { buildRepairMessages, buildTextToSqlMessages, stripSqlFences } from './promptBuilder';
+import { guardReadOnly } from './sqlGuard';
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
 import type { DatabaseSchema } from './schemaTypes';
 
@@ -254,7 +255,21 @@ export const aiService = {
   clearSchema() {
     currentSchema = null;
   },
-  async generateSqlQuery(prompt: string): Promise<string> {
+  /**
+   * Generate SQL for a natural-language prompt.
+   *
+   * When `dryRun` is supplied, a generated query that fails to execute is fed
+   * back to the model once with the engine's own error message. On the eval
+   * harness this recovers a failure class no prompt wording fixed —
+   * hallucinated column names, which the database reports precisely.
+   *
+   * The query is dry-run only if it passes the read-only guard, so repair can
+   * never execute a write against the user's database.
+   */
+  async generateSqlQuery(
+    prompt: string,
+    dryRun?: (sql: string) => Promise<string | null>,
+  ): Promise<string> {
     try {
       const settings = getSettings();
       const config = settings.configs[settings.activeProvider];
@@ -273,20 +288,37 @@ export const aiService = {
         }
       }
 
-      const messages = buildTextToSqlMessages(prompt, currentSchema) as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+      let messages = buildTextToSqlMessages(prompt, currentSchema);
 
+      // One extra round at most: a second failure means the model is not
+      // converging, and a third request is latency the user pays for nothing.
+      const maxAttempts = dryRun ? 2 : 1;
+      let sql = '';
 
-      const response = await client.chat.completions.create({
-        messages,
-        temperature: 0,
-        top_p: 1.0,
-        max_tokens: 1000,
-        model: modelName
-      });
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const response = await client.chat.completions.create({
+          messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+          temperature: 0,
+          top_p: 1.0,
+          max_tokens: 1000,
+          model: modelName
+        });
 
-      const content = response.choices[0].message.content || '';
-      // Remove markdown code blocks if present
-      return content.replace(/^```sql\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '').trim();
+        sql = stripSqlFences(response.choices[0].message.content || '');
+        if (!dryRun || attempt === maxAttempts - 1) return sql;
+
+        // Only read-only statements are ever executed speculatively, so repair
+        // can never run a write against the user's database.
+        const verdict = guardReadOnly(sql);
+        if (!verdict.ok) return sql;
+
+        const error = await dryRun(verdict.sql);
+        if (!error) return sql;
+
+        messages = buildRepairMessages(messages, sql, error);
+      }
+
+      return sql;
     } catch (error) {
       console.error('Error generating SQL query:', error);
       throw error;
