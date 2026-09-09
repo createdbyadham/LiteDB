@@ -288,7 +288,13 @@ export const aiService = {
         }
       }
 
-      let messages = buildTextToSqlMessages(prompt, currentSchema);
+      // K=3 retrieved exemplars. Measured on the eval harness as the single
+      // largest win for a small local model (+8.3pp overall, +8.9pp on
+      // held-out cases it was never tuned against) and the plateau: K=4
+      // scored identically for more tokens and latency. Costs a strong model
+      // ~31% more prompt tokens for no gain, which is a routing decision
+      // rather than a reason to withhold it from everyone.
+      let messages = buildTextToSqlMessages(prompt, currentSchema, { fewShot: 3 });
 
       // One extra round at most: a second failure means the model is not
       // converging, and a third request is latency the user pays for nothing.

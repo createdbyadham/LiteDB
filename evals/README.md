@@ -399,7 +399,12 @@ What the number does support: these failures are reachable by demonstration
 rather than being a hard capability ceiling. What it does not yet support: a
 claim about unseen questions. Closing that needs held-out window cases written
 without reference to the exemplars — the natural next use of the remaining
-budget toward 120 cases, and the reason `--fewshot` is not on by default.
+budget toward 120 cases.
+
+**Update:** that held-out set now exists. On 34 storefront cases written after
+the exemplars, and 12 more on an entirely unseen schema, retrieved few-shot is
+worth +8.9pp — so it is now the default in both the harness and the app. The
+dev-set figure remains optimistic; the held-out one is the claim.
 
 ### Agreement with the reference is not the same as correctness
 
@@ -567,7 +572,8 @@ any query producing the same rows.
 | `--directive` | off | Add anti-substitution guidance (A/B; see *Factorial test*) |
 | `--repair` | `1` | Extra attempts after an engine error (execution-guided repair) |
 | `--no-repair` | off | Disable repair (A/B control) |
-| `--fewshot` | `0` | Retrieve K worked exemplars into the prompt (see *Retrieved few-shot*) |
+| `--fewshot` | `3` | Retrieve K worked exemplars into the prompt (see *Retrieved few-shot*) |
+| `--no-fewshot` | off | Disable exemplars (A/B control) |
 | `--split` | all | `dev` or `test`. Never tune against `test` |
 | `--verify-references` | off | Check the golden set and exit |
 
