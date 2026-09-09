@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
-import { ColumnInfo, RowData, sqliteService } from '@/lib/sqliteService';
+import { ColumnInfo, RowData } from '@/lib/sqliteService';
 import { VectorColumnInfo } from '@/lib/pgService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
@@ -210,7 +210,7 @@ const TableEditor = ({
       }
 
       const rowIds = Array.from(selectedRows);
-      const success = await onUpdateRow?.(null, { type: 'delete', rowIds, primaryKeyColumn });
+      const success = await onUpdateRow?.(null as unknown as RowData, { type: 'delete', rowIds, primaryKeyColumn });
 
       if (success) {
         // Update the UI state

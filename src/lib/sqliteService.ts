@@ -46,7 +46,7 @@ class SqliteService {
             return this;
         }
 
-        this.initPromise = new Promise((resolve, reject) => {
+        this.initPromise = new Promise<SqliteService>((resolve, reject) => {
             const initializeAsync = async () => {
                 try {
                     // Load SQL.js script if not already loaded
@@ -73,7 +73,7 @@ class SqliteService {
                         }
                     });
 
-                    resolve();
+                    resolve(this);
                 } catch (error) {
                     console.error("Failed to initialize SQL.js:", error);
                     toast({

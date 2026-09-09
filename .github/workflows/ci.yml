@@ -26,13 +26,8 @@ jobs:
       - name: Typecheck (evals)
         run: npm run typecheck:evals
 
-      # The app currently has pre-existing type errors that went unnoticed
-      # because the root tsconfig has `files: []`, so a bare `tsc --noEmit`
-      # checked nothing at all. This step reports them without blocking; flip
-      # continue-on-error off once the backlog is cleared.
-      - name: Typecheck (app) — known failing, non-blocking
+      - name: Typecheck (app)
         run: npm run typecheck:app
-        continue-on-error: true
 
   evals:
     name: Eval harness (no API calls)

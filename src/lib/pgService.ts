@@ -367,7 +367,7 @@ class PgService {
 
       return {
         columns: result.columns || [],
-        rows: result.rows || []
+        rows: (result.rows || []) as unknown as unknown[][]
       };
     } catch (error) {
       console.error("Query execution error:", error);

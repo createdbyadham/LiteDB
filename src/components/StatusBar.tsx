@@ -1,5 +1,4 @@
-import { Server, HardDrive, Database, CheckCircle2, XCircle, Clock } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Server, HardDrive, Database, CheckCircle2, Clock } from 'lucide-react';
 
 interface StatusBarProps {
   isConnected: boolean;

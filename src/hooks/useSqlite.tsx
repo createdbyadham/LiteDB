@@ -89,7 +89,7 @@ export function useSqlite(): UseSqliteReturn {
             // Ensure sqliteService is initialized
             await sqliteService.init();
 
-            const success = await sqliteService.loadDbFromArrayBuffer(data, filePath);
+            const success = await sqliteService.loadDbFromArrayBuffer(data as ArrayBuffer, filePath);
 
             if (success) {
                 const tableList = sqliteService.getTables();
