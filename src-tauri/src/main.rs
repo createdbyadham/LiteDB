@@ -4,12 +4,12 @@
 )]
 
 use keyring::Entry;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Column, Row};
 use std::collections::HashMap;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tauri::State;
 use tokio::sync::Mutex;
 
@@ -174,11 +174,7 @@ fn is_proxy_host_allowed(host: &str) -> bool {
     let host = host.to_ascii_lowercase();
     matches!(
         host.as_str(),
-        "localhost"
-            | "127.0.0.1"
-            | "::1"
-            | "models.github.ai"
-            | "api.openai.com"
+        "localhost" | "127.0.0.1" | "::1" | "models.github.ai" | "api.openai.com"
     ) || host.ends_with(".openai.azure.com")
 }
 
@@ -203,7 +199,10 @@ async fn proxy_request(
 
     let mut header_map = HeaderMap::new();
     for (key, value) in headers {
-        if let (Ok(k), Ok(v)) = (HeaderName::from_bytes(key.as_bytes()), HeaderValue::from_str(&value)) {
+        if let (Ok(k), Ok(v)) = (
+            HeaderName::from_bytes(key.as_bytes()),
+            HeaderValue::from_str(&value),
+        ) {
             header_map.insert(k, v);
         }
     }
@@ -216,14 +215,15 @@ async fn proxy_request(
         request_builder = request_builder.body(b);
     }
 
-    let response = request_builder
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = request_builder.send().await.map_err(|e| e.to_string())?;
 
     let status = response.status().as_u16();
-    let status_text = response.status().canonical_reason().unwrap_or("").to_string();
-    
+    let status_text = response
+        .status()
+        .canonical_reason()
+        .unwrap_or("")
+        .to_string();
+
     let mut response_headers = HashMap::new();
     for (key, value) in response.headers() {
         if let Ok(v) = value.to_str() {
