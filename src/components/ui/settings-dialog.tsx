@@ -10,6 +10,7 @@ import {
 import { Input } from "./input"
 import { Label } from "./label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select"
+import { Switch } from "./switch"
 import { Settings2, Copy, Download } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useToast } from "./use-toast"
@@ -214,6 +215,27 @@ export function SettingsDialog() {
                   className="col-span-3"
                   placeholder={settings.activeProvider === 'ollama' ? 'llama3' : 'gpt-4'}
                 />
+              </div>
+              <div className="grid grid-cols-4 items-start gap-4">
+                <Label htmlFor="sampleValues" className="text-right pt-1">
+                  Sample Values
+                </Label>
+                <div className="col-span-3 flex items-start gap-3">
+                  <Switch
+                    id="sampleValues"
+                    checked={settings.includeSampleValues}
+                    onCheckedChange={(checked) =>
+                      setSettings((prev) => ({ ...prev, includeSampleValues: checked }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Send a few example values from short, low-cardinality text columns
+                    (e.g. status, country) so the AI can match &quot;Germany&quot; to a
+                    stored &quot;DE&quot;. Columns that look like emails, keys or personal
+                    data are never sampled. Turn this off to send column names and types
+                    only. Reconnect for the change to take effect.
+                  </p>
+                </div>
               </div>
               <div className="flex justify-end pt-2">
                 <Button onClick={handleSave}>Save changes</Button>
