@@ -130,17 +130,18 @@ slice that separates models most sharply.
 
 ## Slices
 
-| Slice | Cases | Probes |
-| --- | ---: | --- |
-| `single-table` | 10 | Filters, projections, ordering, simple aggregates |
-| `joins` | 10 | Inner/outer joins, anti-joins, `NOT EXISTS` |
-| `aggregation` | 10 | `GROUP BY`, `HAVING`, multi-table aggregates |
-| `window-functions` (dev) | 25 | Ranking and tie behaviour, `LAG`/`LEAD`, explicit `ROWS` frames, `NTILE`, `FIRST_VALUE`, percentiles, running totals, per-partition top-N |
-| `ambiguous-schema` | 8 | Whether the right column was chosen at all |
-| `window-functions` (**test**) | 18 | Held-out; `--split test`. Written after the exemplars, covering function surface rather than observed failures |
+| Slice | dev | held-out | Probes |
+| --- | ---: | ---: | --- |
+| `single-table` | 10 | 4 | Filters, projections, ordering, simple aggregates |
+| `joins` | 10 | 4 | Inner/outer joins, anti-joins, `NOT EXISTS` |
+| `aggregation` | 10 | 4 | `GROUP BY`, `HAVING`, multi-table aggregates |
+| `window-functions` | 25 | 18 | Ranking and ties, `LAG`/`LEAD`, explicit `ROWS` frames, `NTILE`, `FIRST_VALUE`, percentiles, running totals, per-partition top-N |
+| `ambiguous-schema` | 8 | 4 | Whether the right column was chosen at all |
 
-**81 cases today — 63 dev, 18 held-out test.** The target is 120; the harness does not change as cases are
-added, since a case is a JSON object.
+**109 cases: 97 storefront (63 dev, 34 held-out) plus 12 on the `library`
+fixture, which are entirely held-out.** Held-out cases were written after the
+prompt and exemplar work and must never be tuned against. The harness does not
+change as cases are added, since a case is a JSON object.
 
 ### Result: qwen2.5-coder:7b, SQLite, 63 cases
 
