@@ -63,6 +63,33 @@ Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline**
 2.  **Dynamic Context Injection**: This metadata is formatted and injected into the LLM's system prompt (System Message), giving the model "awareness" of the specific database structure.
 3.  **Driver-Specific Validation**: The system prompts are tailored to the active driver (e.g., enforcing PostgreSQL specific syntax vs. SQLite), reducing syntax errors in generated queries.
 
+### Measured accuracy
+
+Accuracy claims about the Text-to-SQL agent are backed by a public, runnable
+benchmark in [`evals/`](./evals) rather than asserted. It scores **execution
+accuracy** — the generated query and a reference query are both executed
+against a seeded fixture database and their result sets compared — so any
+correct formulation counts, not just one that matches a string.
+
+```bash
+npm run eval:selftest              # verify the harness itself (no API calls)
+npm run eval:verify                # verify the golden set (no API calls)
+npm run eval -- --provider ollama  # score a local model
+```
+
+44 cases across five slices (`single-table`, `joins`, `aggregation`,
+`window-functions`, `ambiguous-schema`), runnable against SQLite or PostgreSQL
+and any of the four supported providers. Failures are typed — a query that
+answers the wrong question is reported separately from one that fails to parse,
+and provider outages are excluded from the score entirely.
+
+The harness executes model-generated SQL, so it treats that SQL as hostile:
+a static read-only guard, plus an engine that physically cannot write
+(read-only SQLite connection; `BEGIN READ ONLY` in Postgres).
+
+See [`evals/README.md`](./evals/README.md) for the methodology, the comparison
+rules and their tradeoffs, and how to add cases.
+
 ## Tech Stack
 
 - React
