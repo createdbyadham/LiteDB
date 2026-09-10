@@ -9,7 +9,14 @@ import { useToast } from '@/components/ui/use-toast';
 interface AiQueryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onQueryGenerated: (query: string) => void;
+  /**
+   * Receives the generated SQL and the request it came from. The prompt is
+   * passed through so the audit log can record what was asked for, not just
+   * what was produced — an entry saying the model removed rows from `orders`
+   * is far less useful than one that also says the user asked to "clear out
+   * the old orders".
+   */
+  onQueryGenerated: (query: string, prompt: string) => void;
   /**
    * Executes a generated read-only query and returns the engine's error, or
    * null if it ran. Supplying this enables execution-guided repair: a query
@@ -29,7 +36,7 @@ export function AiQueryDialog({ open, onOpenChange, onQueryGenerated, dryRun }: 
     setIsLoading(true);
     try {
       const query = await aiService.generateSqlQuery(prompt, dryRun);
-      onQueryGenerated(query);
+      onQueryGenerated(query, prompt);
       onOpenChange(false);
       setPrompt('');
     } catch (error) {

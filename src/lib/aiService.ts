@@ -237,6 +237,18 @@ export const aiService = {
     currentSchema = schema;
   },
   /**
+   * The model currently configured to generate SQL.
+   *
+   * Recorded in the audit log so an entry says which model wrote the
+   * statement. "A model deleted these rows" is a much weaker record than
+   * "qwen2.5-coder:7b deleted these rows", especially after switching
+   * providers.
+   */
+  activeModelName(): string | null {
+    const settings = getSettings();
+    return settings.configs[settings.activeProvider].modelName ?? null;
+  },
+  /**
    * Set the schema, enriching enumerated columns with sample values when the
    * user has left that enabled. Failure to sample is not failure to connect:
    * the plain schema is still installed.

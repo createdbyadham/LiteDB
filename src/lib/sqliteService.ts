@@ -2,6 +2,8 @@
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
 import { assertIdent } from '@/lib/types';
+import { assertWritable } from '@/lib/queryGate';
+import { classifyStatement } from '@/lib/sqlClassifier';
 import type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData } from '@/lib/types';
 
 export type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData };
@@ -374,6 +376,16 @@ class SqliteService {
             return null;
         }
 
+        // Second layer. The SQL editor already asks the gate before it gets
+        // here, but a read-only connection has to hold for every caller —
+        // including the table editor and anything added later that forgets to
+        // ask. Enforcing it at the point of execution is what makes the mode a
+        // property of the connection rather than of one screen.
+        const classification = classifyStatement(sql);
+        if (classification.kind !== 'read') {
+            assertWritable(`the ${classification.verb || 'statement'}`);
+        }
+
         try {
             const result = this.db.exec(sql);
             
@@ -407,6 +419,16 @@ class SqliteService {
     executeBatchOperations(sqlStatements: string[], useTransaction = true): { success: boolean; affectedTables: string[]; errors: string[] } {
         if (!this.db) {
             return { success: false, affectedTables: [], errors: ["No database loaded"] };
+        }
+
+        // Checked before the loop, not inside it: a batch that refuses halfway
+        // through leaves the database in a state nobody asked for.
+        for (const statement of sqlStatements) {
+            const classification = classifyStatement(statement);
+            if (classification.kind !== 'read') {
+                assertWritable(`the ${classification.verb || 'statement'}`);
+                break;
+            }
         }
 
         // Track tables that might be affected by the operations
@@ -488,6 +510,7 @@ class SqliteService {
         if (!this.db) return false;
 
         try {
+            assertWritable(`the edit to ${tableName}`);
             assertIdent(tableName, 'table');
             // Get primary key column
             const primaryKeyColumn = this.getTableColumns(tableName).find(col => col.pk === 1);
