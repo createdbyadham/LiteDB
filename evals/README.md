@@ -486,10 +486,10 @@ cases before any of these differences should be treated as settled.
 The harness executes text produced by a language model, so it assumes that text
 is hostile. Two independent layers:
 
-1. **Static guard** (`src/guard.ts`) — the statement must be a single statement
-   beginning with `SELECT` or `WITH`, with no write keyword anywhere in it after
-   comments and quoted spans are blanked out. Whole-statement matching is
-   required because Postgres permits data-modifying CTEs.
+1. **Static guard** (`../src/lib/sqlGuard.ts`) — the statement must be a single
+   statement beginning with `SELECT` or `WITH`, with no write keyword anywhere
+   in it after comments and quoted spans are blanked out. Whole-statement
+   matching is required because Postgres permits data-modifying CTEs.
 2. **Engine enforcement** (`src/fixture.ts`) — SQLite runs on a read-only
    connection to a throwaway temp file; Postgres runs every query inside a
    `BEGIN READ ONLY` transaction that is always rolled back.
@@ -498,6 +498,29 @@ Either layer alone is insufficient, and the self-test asserts both. The guard's
 keyword scan was silently dead when first written — a `\b` in a template literal
 is a backspace character, not a word boundary — and the self-test is what caught
 it. That is the argument for testing your measuring equipment.
+
+### The app's write-safety layer is tested here too
+
+The harness needs to refuse generated writes; the app needs to *classify* them
+and ask. Both use the same modules, so the self-test covers both — a benchmark
+and a guardrail that disagree about what `DELETE` means would be worse than
+either alone.
+
+`npm run eval:selftest` runs **98 assertions**, 42 of them for the write-safety
+layer described in the [main README](../README.md#write-safety): the tokenizer,
+the statement classifier, the policy table, and the impact preview. Six of those
+run the preview against the real fixture database and check that the row count
+it reports equals the count the predicate actually matches — a number shown to
+a user about to destroy data has to be right, not merely well-formed.
+
+Three assertions exist because the case fails *open*, making a dangerous
+statement look safe:
+
+| Statement | Naive reading | What it does |
+| --- | --- | --- |
+| `EXPLAIN ANALYZE DELETE FROM t` | a read | deletes |
+| `WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x` | a read | deletes |
+| `UPDATE t SET x = (SELECT y FROM z WHERE q)` | bounded by a `WHERE` | rewrites every row |
 
 ## Reproducibility
 

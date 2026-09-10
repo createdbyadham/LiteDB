@@ -37,6 +37,11 @@ Six experiments are documented in [`evals/README.md`](./evals/README.md),
 including the two that were **rejected** and the case-design defects a stronger
 model exposed. Every number is reproducible with one command.
 
+That score is also the argument for the [write-safety layer](#write-safety):
+85.6% is good for a 7B model on read-only queries, and read-only queries are
+the easy case. Generated SQL is classified before it runs, and never executes
+unattended — even on a connection you have set to unrestricted.
+
 ## Features
 
 - **Schema Visualization**: Visualize your database structure, relationships, and foreign keys in an interactive diagram.
@@ -54,6 +59,11 @@ model exposed. Every number is reproducible with one command.
   - **Privacy-First AI**: 100% Local Text-to-SQL support with Ollama.
   - Supports OpenAI, GitHub, and Azure providers.
   - Schema is injected into the LLM upon initialization and refresh.
+- **Write Safety**: Generated SQL is classified before it runs.
+  - Read-only / guarded / unrestricted modes, remembered per connection.
+  - Unqualified `DELETE`/`UPDATE`, `DROP` and `TRUNCATE` intercepted.
+  - Approval shows the **exact affected-row count**, not just a warning.
+  - Append-only audit log of every statement that ran, and who authorised it.
 - **Autosave & Export**: Automatically save changes and export query results to **CSV, Excel, or JSON**.
 - **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
 
@@ -115,6 +125,100 @@ a static read-only guard, plus an engine that physically cannot write
 
 See [`evals/README.md`](./evals/README.md) for the methodology, the comparison
 rules and their tradeoffs, and how to add cases.
+
+## Write safety
+
+The benchmark above measures how often the model is right. This layer decides
+what happens when it isn't.
+
+Every statement — typed or generated — passes through one gate before it
+reaches the database, and read-only mode is enforced in the services rather
+than in the query box, so it covers the table editor's inline edits too.
+
+### Statements are classified by what they do
+
+Not by their leading keyword:
+
+| Kind | Meaning |
+| --- | --- |
+| `read` | returns rows, changes nothing |
+| `session` | transaction control, `SET`, `PRAGMA` writes |
+| `ddl` | creates or alters a schema object without destroying data |
+| `write` | changes rows, bounded by a predicate |
+| `destructive` | unbounded row change, or removal of an object |
+| `unknown` | unrecognised — **gated as destructive** |
+
+Three cases drive most of the implementation, because all three fail *open* —
+each makes a dangerous statement look safe:
+
+- **`EXPLAIN ANALYZE DELETE FROM t` deletes.** In Postgres, `ANALYZE` executes
+  the statement it claims to be explaining. Treating every `EXPLAIN` as a read
+  is a data-loss bug.
+- **`WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x` deletes**, while
+  leading with a harmless-looking `WITH`.
+- **`UPDATE t SET x = (SELECT y FROM z WHERE q)` has no `WHERE` of its own.**
+  The only `WHERE` belongs to the subquery, so it rewrites every row. A
+  substring search for `where` calls this bounded; it is not.
+
+Each is covered by an assertion in `npm run eval:selftest`, alongside a
+tokenizer that knows the difference between a `;` and a `;` inside a string
+literal, and between the keyword `DELETE` and a column named `"delete"`.
+
+### Three modes, remembered per connection
+
+| Mode | Reads | Your writes | Generated writes |
+| --- | --- | --- | --- |
+| **Read-only** | run | refused | refused |
+| **Guarded** *(default)* | run | ask first | ask first |
+| **Unrestricted** | run | run | **still ask** |
+
+That last cell is the point. `unrestricted` is a promise you make about your
+own typing, and it does not extend to SQL a model wrote — that is floored at
+`guarded` whatever the connection is set to. A `DELETE` you typed and a
+`DELETE` a model inferred from a sentence are the same SQL and not the same
+event, and the benchmark above is the reason: 85.6% is a good score for a 7B
+model on *read-only* queries, which is the easy case.
+
+Provenance is sticky. Editing generated SQL does not make you its author —
+someone who tweaks one clause has not read the rest — and `ai` only ever
+tightens the gate. Clearing the editor resets it.
+
+> **Deviation from the original plan, stated plainly:** this was specified as
+> "read-only by default". Read-only by default would make the table editor —
+> the app's primary function — appear broken on first launch, and a safety
+> default users switch off within a minute protects nobody. `guarded` keeps
+> reads instant, makes every mutation an explicit act, and leaves read-only as
+> a real mode one click away in the status bar for the case it is meant for:
+> pointing the app at production.
+
+### Approval shows impact, not a shrug
+
+"Are you sure?" is a question nobody can answer well. The dialog answers a
+better one — how many rows, out of how many:
+
+- **Bounded writes get an exact count.** The predicate that limits the write is
+  the same predicate that counts what it will hit, so `DELETE FROM t WHERE p`
+  is previewed with `SELECT COUNT(*) FROM t WHERE p`. That is a measurement,
+  not an estimate, and the self-test checks it against a real database.
+- **Everything else gets the planner's estimate**, via `EXPLAIN` — never
+  `EXPLAIN ANALYZE`, for the reason above.
+- **Typed confirmation is rationed** to statements that destroy data with no
+  predicate bounding them. Requiring it for every write would train the habit
+  of typing the word without reading the sentence above it.
+
+### Audit log
+
+Every generated statement and every hand-made change is appended to
+`<app data>/audit/sql-audit.jsonl`, one JSON object per line, readable in the
+editor's **Audit** tab. Entries record the SQL, the natural-language prompt it
+came from, the model that wrote it, the policy in force, whether it was
+allowed, approved, blocked or declined, and what actually happened.
+
+Two limits, stated because a safety feature that overclaims is worse than none:
+append-only is a property of the API, not of the file — the file is yours and
+you can edit it; and entries hold SQL verbatim, including literal values, which
+is why it never leaves the machine and is never attached to a diagnostics
+bundle.
 
 ## Tech Stack
 
@@ -187,7 +291,13 @@ The batch operations feature allows you to execute multiple SQL statements at on
    - When enabled (default): All statements succeed or none do (atomic operations)
    - When disabled: Each statement is executed independently
 4. Click "Execute Script" to run your SQL commands
+   - Reads run immediately. Anything that changes the database opens an
+     approval dialog first, showing how many rows each statement will affect —
+     see [Write safety](#write-safety). Switch the connection to
+     **Unrestricted** in the status bar to skip the prompt for statements you
+     typed yourself.
 5. View the results including execution time, affected tables, and any errors
+6. The **Audit** tab records every statement that ran, and who authorised it
 
 #### Saving and Reusing Scripts
 
@@ -249,6 +359,24 @@ src/
   ├── lib/           # Utilities and services
   ├── styles/        # Global styles
   └── types/         # TypeScript type definitions
+```
+
+The Text-to-SQL and write-safety modules are deliberately free of browser,
+Tauri and network imports, so the eval harness in [`evals/`](./evals) exercises
+the code the app actually ships rather than a copy of it:
+
+```
+src/lib/
+  ├── promptBuilder.ts   # the prompt, including retrieved few-shot exemplars
+  ├── fewShot.ts         # exemplar bank and lexical retrieval
+  ├── schemaSamples.ts   # sample values for enumerated columns, with guards
+  ├── sqlTokenizer.ts    # strings, comments, identifiers, paren depth
+  ├── sqlClassifier.ts   # read / write / destructive / ddl / session / unknown
+  ├── sqlPolicy.ts       # policy + provenance -> allow / confirm / block
+  ├── sqlGuard.ts        # read-only guard, shared with the harness
+  ├── impactPreview.ts   # exact row counts and EXPLAIN
+  ├── auditLog.ts        # append-only JSONL
+  └── queryGate.ts       # per-connection policy, the audit write path
 ```
 
 ### Contributing
