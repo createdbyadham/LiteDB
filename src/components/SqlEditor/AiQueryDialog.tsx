@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { aiService } from '@/lib/aiService';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Zap } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 
 interface AiQueryDialogProps {
   open: boolean;
@@ -39,6 +40,11 @@ export function AiQueryDialog({
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  // In YOLO the generated SQL runs the moment it arrives, so the button has to
+  // say so. "Generate SQL" on a control that also executes it is the kind of
+  // small lie that makes the rest of the safety layer harder to believe.
+  const { policy } = useSafetyPolicy();
+  const runsImmediately = policy === 'yolo';
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
@@ -69,7 +75,9 @@ export function AiQueryDialog({
         <DialogHeader>
           <DialogTitle>AI SQL Assistant</DialogTitle>
           <DialogDescription>
-            Describe what you want to do in natural language, and I'll convert it to SQL.
+            {runsImmediately
+              ? "Describe what you want. In YOLO mode the generated SQL runs straight away — you won't see it first."
+              : "Describe what you want to do in natural language, and I'll convert it to SQL."}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
@@ -79,9 +87,19 @@ export function AiQueryDialog({
             onChange={(e) => setPrompt(e.target.value)}
             className="min-h-[100px] text-sm resize-none"
           />
-          <Button onClick={handleGenerate} disabled={isLoading || !prompt.trim()} size="sm" className="w-full">
-            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Generate SQL
+          <Button
+            onClick={handleGenerate}
+            disabled={isLoading || !prompt.trim()}
+            size="sm"
+            className="w-full"
+            variant={runsImmediately ? 'destructive' : 'default'}
+          >
+            {isLoading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : runsImmediately ? (
+              <Zap className="mr-2 h-4 w-4" />
+            ) : null}
+            {runsImmediately ? 'Generate & Run' : 'Generate SQL'}
           </Button>
         </div>
       </DialogContent>
