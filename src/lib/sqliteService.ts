@@ -2,7 +2,7 @@
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
 import { assertIdent } from '@/lib/types';
-import { assertWritable } from '@/lib/queryGate';
+import { assertWritable, ReadOnlyConnectionError } from '@/lib/queryGate';
 import { classifyStatement } from '@/lib/sqlClassifier';
 import type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData } from '@/lib/types';
 
@@ -554,6 +554,16 @@ class SqliteService {
             return true;
         } catch (error) {
             console.error('Error updating row:', error);
+            // A refusal is not a malfunction, and silently returning false
+            // leaves the user watching their edit revert with no explanation.
+            // Say which rule stopped it.
+            if (error instanceof ReadOnlyConnectionError) {
+                toast({
+                    title: "Read-only connection",
+                    description: error.message,
+                    variant: "destructive"
+                });
+            }
             return false;
         }
     }
