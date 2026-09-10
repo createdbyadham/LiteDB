@@ -61,15 +61,29 @@ function formatCount(value: number): string {
  * differently. Collapsing them into one number would make a guess look like a
  * measurement at exactly the moment that distinction matters.
  */
+function formatTableRows(tableRows: number, capped: boolean): string {
+    return capped ? `${formatCount(tableRows)}+` : formatCount(tableRows);
+}
+
 function ImpactLine({ preview }: { preview: ImpactEstimate }) {
-    const { exactRows, estimatedRows, tableRows, error } = preview;
+    const { exactRows, estimatedRows, tableRows, tableRowsCapped, error, statement } = preview;
+    const proportion =
+        tableRows !== null && tableRows > 0
+            ? ` of ${formatTableRows(tableRows, tableRowsCapped)} row${tableRows === 1 && !tableRowsCapped ? '' : 's'}`
+            : '';
+
+    if (statement.unbounded && exactRows === null && tableRows !== null && tableRowsCapped) {
+        return (
+            <span className="text-destructive font-medium">
+                Affects every row{proportion}
+            </span>
+        );
+    }
 
     if (exactRows !== null) {
-        const proportion =
-            tableRows !== null && tableRows > 0
-                ? ` of ${formatCount(tableRows)} row${tableRows === 1 ? '' : 's'}`
-                : '';
-        const all = tableRows !== null && tableRows > 0 && exactRows >= tableRows;
+        const all =
+            statement.unbounded ||
+            (tableRows !== null && !tableRowsCapped && tableRows > 0 && exactRows >= tableRows);
         return (
             <span className={all ? 'text-destructive font-medium' : ''}>
                 Affects {formatCount(exactRows)}
@@ -234,7 +248,7 @@ export function ApprovalDialog({
                     <Button
                         size="sm"
                         variant={destructive ? 'destructive' : 'default'}
-                        disabled={!confirmed || isRunning}
+                        disabled={!confirmed || isRunning || isPreviewing}
                         onClick={onApprove}
                     >
                         {isRunning && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}

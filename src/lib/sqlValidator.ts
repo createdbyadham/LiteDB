@@ -35,28 +35,46 @@ export interface ValidationFailure {
 }
 
 /**
+ * Verbs Postgres accepts after EXPLAIN.
+ *
+ * An allowlist rather than a denylist, because Postgres rejects everything
+ * else at the *grammar*, with a message indistinguishable from a real defect.
+ * Measured against Postgres 16 rather than assumed:
+ *
+ *   EXPLAIN TRUNCATE orders     ->  syntax error at or near "TRUNCATE"
+ *   EXPLAIN COPY orders TO ...  ->  syntax error at or near "COPY"
+ *   EXPLAIN DROP TABLE orders   ->  syntax error at or near "DROP"
+ *
+ * There is no "cannot explain this" wording to key off. So a kind-based
+ * denylist got this wrong in both directions: TRUNCATE classifies as
+ * destructive and COPY as write, both of which it let through — meaning a
+ * valid TRUNCATE was reported to the model as a syntax error and sent back to
+ * be "fixed".
+ */
+const POSTGRES_EXPLAINABLE = new Set([
+    'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE', 'VALUES', 'WITH', 'TABLE',
+    'EXECUTE', 'DECLARE',
+]);
+
+/**
  * Whether a statement can be compiled by EXPLAIN on this dialect.
  *
- * SQLite explains anything, including DDL. Postgres refuses utility statements
- * — `EXPLAIN CREATE TABLE ...` is itself an error — so those are reported as
- * unvalidated rather than invalid. Calling a valid `CREATE TABLE` broken
- * because the checker cannot read it would send the model into a repair loop
- * fixing nothing.
+ * SQLite explains anything, including DDL, so everything is checked there.
  *
- * `unknown` statements are deliberately *included*. The first version excluded
- * them, which silently skipped the most basic failure there is: `SELEC * FROM
- * orders` has no recognisable verb, so it classified as unknown and sailed
- * through unchecked. Unknown is exactly where the classifier has no opinion
- * and the engine has a good one — ask the engine.
+ * `unknown` statements are deliberately included on both dialects. The first
+ * version excluded them, which silently skipped the most basic failure there
+ * is: `SELEC * FROM orders` has no recognisable verb, so it classified as
+ * unknown and sailed through unchecked. A verb the classifier cannot read is
+ * far more likely to be a typo than a valid utility statement it has never
+ * heard of — and when it is wrong, the cost is one wasted repair attempt, not
+ * a wrong answer.
  */
 export function canValidate(statement: StatementClassification, dialect: SqlDialect): boolean {
     if (!statement.sql.trim()) return false;
     // Already a plan request; wrapping it again explains the EXPLAIN.
     if (statement.verb === 'EXPLAIN') return false;
     if (dialect === 'sqlite') return true;
-    // Postgres cannot explain utility statements. Everything else, including
-    // what the classifier could not read, is worth asking about.
-    return statement.kind !== 'ddl' && statement.kind !== 'session';
+    return POSTGRES_EXPLAINABLE.has(statement.verb) || statement.kind === 'unknown';
 }
 
 /**
@@ -89,12 +107,15 @@ export async function validateScript(
         try {
             await run(buildValidateQuery(statement.sql));
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            // A refusal to explain is the checker's limitation, not the
-            // statement's defect. Treating it as a defect would have the model
-            // "fix" working SQL.
-            if (/cannot|not supported|utility statement/i.test(message)) continue;
-            return { statement, error: message };
+            // No message-based escape hatch here, deliberately. An earlier
+            // version skipped errors matching /cannot|not supported/, on the
+            // assumption that Postgres says something like "cannot EXPLAIN this
+            // statement". It does not — it reports `syntax error at or near
+            // "TRUNCATE"`, which is exactly what a genuine defect looks like.
+            // The pattern could never fire, and widening it to catch "syntax
+            // error" would swallow the errors this exists to find. Knowing
+            // which statements are explainable is `canValidate`'s job.
+            return { statement, error: error instanceof Error ? error.message : String(error) };
         }
     }
 

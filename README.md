@@ -213,6 +213,11 @@ better one — how many rows, out of how many:
   the same predicate that counts what it will hit, so `DELETE FROM t WHERE p`
   is previewed with `SELECT COUNT(*) FROM t WHERE p`. That is a measurement,
   not an estimate, and the self-test checks it against a real database.
+- **The total it is measured against is probed, not counted.** `12 of 200+ rows`
+  means the table holds at least 200 — the probe stops there, because a plain
+  `COUNT(*)` on a large table is a full scan and the dialog would sit waiting on
+  it. A capped total is never promoted to an exact one: an unbounded `DELETE`
+  reports "affects every row", not a number the probe never reached.
 - **Everything else gets the planner's estimate**, via `EXPLAIN` — never
   `EXPLAIN ANALYZE`, for the reason above.
 - **Typed confirmation is rationed** to statements that destroy data with no
