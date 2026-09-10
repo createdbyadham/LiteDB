@@ -18,14 +18,24 @@ interface AiQueryDialogProps {
    */
   onQueryGenerated: (query: string, prompt: string) => void;
   /**
-   * Executes a generated read-only query and returns the engine's error, or
-   * null if it ran. Supplying this enables execution-guided repair: a query
-   * that fails to run is sent back to the model once with the real error.
+   * Compiles a generated statement and returns the engine's error, or null if
+   * it is valid. Supplying this enables self-correction: SQL that does not
+   * compile is sent back to the model once with the real error, before it
+   * reaches the editor.
+   *
+   * It compiles rather than executes, so it checks writes as well as reads —
+   * catching an unknown column in an UPDATE is the whole point, and that is
+   * exactly what a read-only dry run could never do.
    */
-  dryRun?: (sql: string) => Promise<string | null>;
+  validate?: (sql: string) => Promise<string | null>;
 }
 
-export function AiQueryDialog({ open, onOpenChange, onQueryGenerated, dryRun }: AiQueryDialogProps) {
+export function AiQueryDialog({
+  open,
+  onOpenChange,
+  onQueryGenerated,
+  validate,
+}: AiQueryDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -35,7 +45,7 @@ export function AiQueryDialog({ open, onOpenChange, onQueryGenerated, dryRun }: 
     
     setIsLoading(true);
     try {
-      const query = await aiService.generateSqlQuery(prompt, dryRun);
+      const query = await aiService.generateSqlQuery(prompt, validate);
       onQueryGenerated(query, prompt);
       onOpenChange(false);
       setPrompt('');

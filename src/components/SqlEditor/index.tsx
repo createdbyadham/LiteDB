@@ -20,13 +20,26 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { tauriService } from '@/lib/tauri';
 import { evaluateScript, type GateDecision, type Provenance } from '@/lib/sqlPolicy';
 import { previewImpact, type ImpactEstimate, type PreviewRunner } from '@/lib/impactPreview';
-import { activePolicy, auditableStatements, recordDecision } from '@/lib/queryGate';
+import { activePolicy, auditableStatements, isYolo, recordDecision } from '@/lib/queryGate';
+import { validateScript } from '@/lib/sqlValidator';
 import type { AuditDecision, AuditOutcome } from '@/lib/auditLog';
 import { aiService } from '@/lib/aiService';
 
 interface SqlEditorProps {
   isPostgres?: boolean;
   refreshTables?: () => Promise<void> | void;
+}
+
+/**
+ * Who wrote the script being run, and what they asked for.
+ *
+ * Carried alongside the script rather than read from component state, because
+ * YOLO mode runs a generated script in the same tick it arrives — before
+ * React has flushed the corresponding `setProvenance` call.
+ */
+interface ScriptOrigin {
+  provenance: Provenance;
+  prompt: string | null;
 }
 
 const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
@@ -52,6 +65,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
   // SQL differently from typed SQL, so it is tracked on the editor rather than
   // inferred later: once the text is in the box, nothing can tell them apart.
   const [pendingDecision, setPendingDecision] = useState<GateDecision | null>(null);
+  const [pendingOrigin, setPendingOrigin] = useState<ScriptOrigin | null>(null);
   const [previews, setPreviews] = useState<ImpactEstimate[]>([]);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [provenance, setProvenance] = useState<Provenance>('user');
@@ -73,6 +87,28 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
       return (result.rows ?? []) as unknown as unknown[][];
     }
     return sqliteService.executeQuery(sql)?.rows ?? null;
+  };
+
+  /**
+   * Compile generated SQL against the live database and report the first
+   * error, so the model can fix it before the SQL reaches the editor.
+   *
+   * This is the answer to the failure that used to reach the user: the model
+   * writes an UPDATE naming a column that does not exist, it lands in the box
+   * looking plausible, and the error only appears after Execute. Compiling it
+   * here turns that into a retry the user never sees.
+   */
+  const validateGeneratedSql = async (sql: string): Promise<string | null> => {
+    try {
+      const failure = await validateScript(sql, dialect, previewRunner);
+      return failure ? failure.error : null;
+    } catch (error) {
+      // The checker itself failed — no connection, a driver problem. Report
+      // no error rather than a false one: a spurious message would send the
+      // model rewriting SQL that was fine.
+      console.error('SQL validation failed:', error);
+      return null;
+    }
   };
 
   // Function to execute the SQL script
@@ -235,16 +271,24 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
    * The audit entry is written after execution rather than before, so it can
    * carry the real outcome. A log of intentions is not a log of events.
    */
-  const runApproved = async (decision: GateDecision, auditDecision: AuditDecision) => {
+  const runApproved = async (
+    decision: GateDecision,
+    auditDecision: AuditDecision,
+    origin: ScriptOrigin,
+  ) => {
     const started = performance.now();
     const outcomeResult = await executeScript(decision.statements.map((s) => s.sql));
     const outcome: AuditOutcome = outcomeResult.success ? 'ok' : 'error';
 
     void recordDecision({
-      statements: auditableStatements(decision.statements, provenance),
+      statements: auditableStatements(
+        decision.statements,
+        origin.provenance,
+        decision.appliedPolicy,
+      ),
       decision: auditDecision,
       outcome,
-      provenance,
+      provenance: origin.provenance,
       policy: decision.appliedPolicy,
       error: outcomeResult.errors.join('; ') || null,
       estimatedRows: previews.reduce<number | null>(
@@ -253,8 +297,8 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
         null,
       ),
       durationMs: Math.round(performance.now() - started),
-      prompt: aiPrompt,
-      model: provenance === 'ai' ? aiService.activeModelName() : null,
+      prompt: origin.prompt,
+      model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
     });
   };
 
@@ -264,8 +308,8 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
    * Every path that runs SQL from this editor goes through here, so the policy
    * cannot be bypassed by a code path added later that forgets to ask.
    */
-  const handleRun = async () => {
-    if (!sqlScript.trim()) {
+  const runScript = async (script: string, origin: ScriptOrigin) => {
+    if (!script.trim()) {
       toast({
         title: "Empty Script",
         description: "Please enter SQL statements to execute",
@@ -275,7 +319,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
     }
 
     const policy = activePolicy();
-    const decision = evaluateScript(sqlScript, policy, provenance);
+    const decision = evaluateScript(script, policy, origin.provenance);
 
     if (decision.statements.length === 0) {
       toast({
@@ -294,20 +338,24 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
         variant: "destructive"
       });
       void recordDecision({
-        statements: auditableStatements(decision.statements, provenance),
+        statements: auditableStatements(
+          decision.statements,
+          origin.provenance,
+          decision.appliedPolicy,
+        ),
         decision: 'blocked',
         outcome: 'not-run',
-        provenance,
+        provenance: origin.provenance,
         policy: decision.appliedPolicy,
         error: decision.reason,
-        prompt: aiPrompt,
-        model: provenance === 'ai' ? aiService.activeModelName() : null,
+        prompt: origin.prompt,
+        model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
       });
       return;
     }
 
     if (decision.action === 'allow') {
-      await runApproved(decision, 'allowed');
+      await runApproved(decision, 'allowed', origin);
       return;
     }
 
@@ -315,6 +363,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
     // preview issues real queries, and a dialog that appears only once they
     // return reads as a frozen app.
     setPendingDecision(decision);
+    setPendingOrigin(origin);
     setPreviews([]);
     setIsPreviewing(true);
     try {
@@ -326,25 +375,44 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
     }
   };
 
+  /**
+   * The one entry point to execution.
+   *
+   * Every path that runs SQL from this editor goes through here, so the policy
+   * cannot be bypassed by a code path added later that forgets to ask. The
+   * script and its origin are passed explicitly rather than read from state,
+   * because YOLO mode executes a generated script in the same tick it arrives
+   * — before React has flushed it into `sqlScript`.
+   */
+  const handleRun = () => runScript(sqlScript, { provenance, prompt: aiPrompt });
+
   const handleApprove = async () => {
     const decision = pendingDecision;
-    if (!decision) return;
+    const origin = pendingOrigin;
+    if (!decision || !origin) return;
     setPendingDecision(null);
-    await runApproved(decision, 'approved');
+    setPendingOrigin(null);
+    await runApproved(decision, 'approved', origin);
   };
 
   const handleDecline = () => {
     const decision = pendingDecision;
+    const origin = pendingOrigin;
     setPendingDecision(null);
-    if (!decision) return;
+    setPendingOrigin(null);
+    if (!decision || !origin) return;
     void recordDecision({
-      statements: auditableStatements(decision.statements, provenance),
+      statements: auditableStatements(
+        decision.statements,
+        origin.provenance,
+        decision.appliedPolicy,
+      ),
       decision: 'declined',
       outcome: 'not-run',
-      provenance,
+      provenance: origin.provenance,
       policy: decision.appliedPolicy,
-      prompt: aiPrompt,
-      model: provenance === 'ai' ? aiService.activeModelName() : null,
+      prompt: origin.prompt,
+      model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
     });
   };
 
@@ -509,10 +577,15 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
       <AiQueryDialog
         open={isAiDialogOpen}
         onOpenChange={setIsAiDialogOpen}
+        validate={validateGeneratedSql}
         onQueryGenerated={(query, prompt) => {
           setSqlScript(query);
           setProvenance('ai');
           setAiPrompt(prompt);
+          // YOLO runs it here rather than waiting for Execute. The script is
+          // passed explicitly because `sqlScript` still holds the previous
+          // value at this point.
+          if (isYolo()) void runScript(query, { provenance: 'ai', prompt });
         }}
       />
       <ApprovalDialog

@@ -60,9 +60,11 @@ unattended — even on a connection you have set to unrestricted.
   - Supports OpenAI, GitHub, and Azure providers.
   - Schema is injected into the LLM upon initialization and refresh.
 - **Write Safety**: Generated SQL is classified before it runs.
-  - Read-only / guarded / unrestricted modes, remembered per connection.
+  - Read-only / guarded / unrestricted / YOLO modes, remembered per connection.
   - Unqualified `DELETE`/`UPDATE`, `DROP` and `TRUNCATE` intercepted.
   - Approval shows the **exact affected-row count**, not just a warning.
+  - Generated SQL is **compiled before you see it**, so the model fixes its own
+    unknown columns and syntax errors — writes included.
   - Append-only audit log of every statement that ran, and who authorised it.
 - **Autosave & Export**: Automatically save changes and export query results to **CSV, Excel, or JSON**.
 - **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
@@ -171,13 +173,24 @@ literal, and between the keyword `DELETE` and a column named `"delete"`.
 | **Read-only** | run | refused | refused |
 | **Guarded** *(default)* | run | ask first | ask first |
 | **Unrestricted** | run | run | **still ask** |
+| **YOLO** | run | run | run, unreviewed |
 
-That last cell is the point. `unrestricted` is a promise you make about your
-own typing, and it does not extend to SQL a model wrote — that is floored at
-`guarded` whatever the connection is set to. A `DELETE` you typed and a
+The `unrestricted` row is the interesting one. It is a promise you make about
+your own typing, and it does not extend to SQL a model wrote — that is floored
+at `guarded` whatever the connection is set to. A `DELETE` you typed and a
 `DELETE` a model inferred from a sentence are the same SQL and not the same
 event, and the benchmark above is the reason: 85.6% is a good score for a 7B
 model on *read-only* queries, which is the easy case.
+
+**YOLO** is the deliberate escape hatch, and the only mode that waives that
+floor. In it the model executes its own SQL the moment it writes it — no
+editor, no Execute click, no row count, nothing refused. It exists because the
+alternative to an escape hatch is people working around the tool, and because
+on a scratch database the prompts are pure friction. It is opt-in per
+connection behind a one-time confirmation, shown in red for as long as it is
+on, and it is the one mode where the audit log stops being a convenience and
+becomes the only record that anything happened — which is why, in YOLO, the
+log records your reads too.
 
 Provenance is sticky. Editing generated SQL does not make you its author —
 someone who tweaks one clause has not read the rest — and `ai` only ever
@@ -205,6 +218,33 @@ better one — how many rows, out of how many:
 - **Typed confirmation is rationed** to statements that destroy data with no
   predicate bounding them. Requiring it for every write would train the habit
   of typing the word without reading the sentence above it.
+
+### The model checks its own SQL before you see it
+
+A generated statement is compiled against the live database before it reaches
+the editor. If it does not compile, the engine's own error goes back to the
+model, which gets one attempt to fix it.
+
+The important word is **compiled**, not executed. `EXPLAIN <statement>` parses
+and resolves names without performing the statement, so this checks writes as
+well as reads:
+
+| Generated SQL | Caught as |
+| --- | --- |
+| `UPDATE orders SET nonexistent_col = 1 WHERE id = 1` | `no such column: nonexistent_col` |
+| `SELECT nope FROM orders` | `no such column: nope` |
+| `SELEC * FROM orders` | `near "SELEC": syntax error` |
+
+An earlier version dry-*ran* the query instead, which meant the read-only guard
+had to refuse anything but a `SELECT` — so the failure people actually hit went
+uncaught: the model writes an `UPDATE`, it looks plausible in the box, and the
+missing column only surfaces after you press Execute.
+
+The rule that keeps this safe is that the checker never emits `EXPLAIN
+ANALYZE`, which would execute the statement it claims to be checking. The
+self-test asserts it, and demonstrates the property directly: on a physically
+read-only connection, `EXPLAIN DROP TABLE orders` compiles cleanly and the
+table is still there afterwards.
 
 ### Audit log
 
@@ -374,6 +414,7 @@ src/lib/
   ├── sqlClassifier.ts   # read / write / destructive / ddl / session / unknown
   ├── sqlPolicy.ts       # policy + provenance -> allow / confirm / block
   ├── sqlGuard.ts        # read-only guard, shared with the harness
+  ├── sqlValidator.ts    # compiles generated SQL without running it
   ├── impactPreview.ts   # exact row counts and EXPLAIN
   ├── auditLog.ts        # append-only JSONL
   └── queryGate.ts       # per-connection policy, the audit write path

@@ -2,7 +2,6 @@ import OpenAI from "openai";
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { loadAllApiKeys } from './secretStorage';
 import { buildRepairMessages, buildTextToSqlMessages, stripSqlFences } from './promptBuilder';
-import { guardReadOnly } from './sqlGuard';
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
 import type { DatabaseSchema } from './schemaTypes';
 
@@ -270,17 +269,20 @@ export const aiService = {
   /**
    * Generate SQL for a natural-language prompt.
    *
-   * When `dryRun` is supplied, a generated query that fails to execute is fed
-   * back to the model once with the engine's own error message. On the eval
-   * harness this recovers a failure class no prompt wording fixed —
-   * hallucinated column names, which the database reports precisely.
+   * When `validate` is supplied, a statement that fails to compile is fed back
+   * to the model once with the engine's own error message. This recovers a
+   * failure class no prompt wording fixed — hallucinated column names, which
+   * the database reports precisely.
    *
-   * The query is dry-run only if it passes the read-only guard, so repair can
-   * never execute a write against the user's database.
+   * `validate` compiles rather than executes (see sqlValidator.ts), which is
+   * what lets the loop cover writes. The previous version dry-ran the query
+   * and was gated behind the read-only guard, so it could only ever check
+   * SELECTs — and a SELECT that fails to run is the case the user was least
+   * likely to be hurt by.
    */
   async generateSqlQuery(
     prompt: string,
-    dryRun?: (sql: string) => Promise<string | null>,
+    validate?: (sql: string) => Promise<string | null>,
   ): Promise<string> {
     try {
       const settings = getSettings();
@@ -310,7 +312,7 @@ export const aiService = {
 
       // One extra round at most: a second failure means the model is not
       // converging, and a third request is latency the user pays for nothing.
-      const maxAttempts = dryRun ? 2 : 1;
+      const maxAttempts = validate ? 2 : 1;
       let sql = '';
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -323,14 +325,13 @@ export const aiService = {
         });
 
         sql = stripSqlFences(response.choices[0].message.content || '');
-        if (!dryRun || attempt === maxAttempts - 1) return sql;
+        if (!validate || attempt === maxAttempts - 1) return sql;
 
-        // Only read-only statements are ever executed speculatively, so repair
-        // can never run a write against the user's database.
-        const verdict = guardReadOnly(sql);
-        if (!verdict.ok) return sql;
-
-        const error = await dryRun(verdict.sql);
+        // No read-only gate here, deliberately. `validate` compiles the
+        // statement instead of running it, so a write is as safe to check as
+        // a read — and gating on read-only is precisely what stopped the old
+        // loop from catching the errors that mattered.
+        const error = await validate(sql);
         if (!error) return sql;
 
         messages = buildRepairMessages(messages, sql, error);

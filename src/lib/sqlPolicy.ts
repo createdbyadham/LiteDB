@@ -13,6 +13,12 @@
 // what the connection is set to. That floor is the reason to run a model
 // through LiteDB rather than pointing it at a raw connection string.
 //
+// `yolo` is the deliberate exception, and the only policy that waives the
+// floor. It is a separate mode rather than the removal of the floor from
+// `unrestricted` precisely so that "my writes run free" and "the model's
+// writes run free" stay separate decisions — the first is a reasonable
+// everyday setting, the second is not.
+//
 // Kept free of browser, Tauri and network imports: the eval harness and the
 // desktop app must apply identical rules, and persistence lives in
 // queryGate.ts.
@@ -30,8 +36,20 @@ export type SafetyPolicy =
     | 'read-only'
     /** Reads run; everything else needs explicit approval. The default. */
     | 'guarded'
-    /** Everything runs unattended. Never applies to generated SQL. */
-    | 'unrestricted';
+    /** Your statements run unattended. Generated SQL still asks. */
+    | 'unrestricted'
+    /**
+     * Nothing asks, nothing is refused, and the model executes its own SQL
+     * the moment it writes it — no review, no row count, no undo.
+     *
+     * This exists because the alternative to an escape hatch is people
+     * working around the tool, and because on a scratch database the prompts
+     * are pure friction. It is opt-in per connection behind a confirmation,
+     * flagged in the status bar for as long as it is on, and every statement
+     * is still written to the audit log. That log is the only safeguard left
+     * in this mode, which is exactly why it stays.
+     */
+    | 'yolo';
 
 export type Provenance =
     /** The user typed or pasted it. */
@@ -52,6 +70,7 @@ const POLICY_RANK: Record<SafetyPolicy, number> = {
     'read-only': 0,
     guarded: 1,
     unrestricted: 2,
+    yolo: 3,
 };
 
 /** The stricter of two policies. */
@@ -107,8 +126,13 @@ export function evaluateScript(
     provenance: Provenance,
 ): GateDecision {
     const { statements, kind, worst } = classifyScript(script);
+    // YOLO opts out of the floor. Every other policy applies it to generated
+    // SQL: raising a connection to `unrestricted` speeds up your own work
+    // without handing that latitude to the model.
     const appliedPolicy =
-        provenance === 'ai' ? strictest(connectionPolicy, AI_POLICY_FLOOR) : connectionPolicy;
+        provenance === 'ai' && connectionPolicy !== 'yolo'
+            ? strictest(connectionPolicy, AI_POLICY_FLOOR)
+            : connectionPolicy;
 
     const shared = { kind, worst, statements, appliedPolicy };
     const authored = provenance === 'ai' ? 'Generated SQL' : 'This script';
@@ -118,6 +142,18 @@ export function evaluateScript(
             ...shared,
             action: 'block',
             reason: 'No executable statement found.',
+            requireTypedConfirmation: false,
+        };
+    }
+
+    // Deliberately below the empty-statement check and above everything
+    // else: YOLO waives every rule about what a statement may do, but there
+    // still has to be a statement.
+    if (appliedPolicy === 'yolo') {
+        return {
+            ...shared,
+            action: 'allow',
+            reason: 'YOLO mode: every statement runs unreviewed.',
             requireTypedConfirmation: false,
         };
     }
