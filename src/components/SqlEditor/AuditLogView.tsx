@@ -132,9 +132,26 @@ export function AuditLogView() {
 
                                 <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
                                     <span>{entry.connection}</span>
-                                    {entry.estimatedRows !== null && (
-                                        <span>{entry.estimatedRows.toLocaleString()} rows</span>
-                                    )}
+                                    {entry.actualRows != null ? (
+                                        <span
+                                            className={
+                                                entry.estimatedRows != null &&
+                                                entry.estimatedRows !== entry.actualRows
+                                                    ? 'text-amber-600 dark:text-amber-400'
+                                                    : ''
+                                            }
+                                        >
+                                            {entry.actualRows.toLocaleString()} row
+                                            {entry.actualRows === 1 ? '' : 's'} changed
+                                            {/* Shown only when the two disagree — the case
+                                                where the approval dialog was wrong. */}
+                                            {entry.estimatedRows != null &&
+                                                entry.estimatedRows !== entry.actualRows &&
+                                                ` (predicted ${entry.estimatedRows.toLocaleString()})`}
+                                        </span>
+                                    ) : entry.estimatedRows != null ? (
+                                        <span>~{entry.estimatedRows.toLocaleString()} rows predicted</span>
+                                    ) : null}
                                     {entry.durationMs !== null && <span>{entry.durationMs} ms</span>}
                                     {entry.outcome === 'error' && (
                                         <span className="text-destructive flex items-center gap-1">
