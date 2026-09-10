@@ -12,7 +12,7 @@ import { guardReadOnly } from '../../src/lib/sqlGuard';
 import { splitStatements, tokenize } from '../../src/lib/sqlTokenizer';
 import { classifyScript, classifyStatement } from '../../src/lib/sqlClassifier';
 import { evaluateScript } from '../../src/lib/sqlPolicy';
-import { buildCountQuery, buildExplainQuery } from '../../src/lib/impactPreview';
+import { buildCountQuery, buildExplainQuery, previewStatement } from '../../src/lib/impactPreview';
 import { createSqliteFixture } from './fixture';
 import { loadCases } from './loadCases';
 import { selectExemplars } from '../../src/lib/fewShot';
@@ -326,6 +326,49 @@ async function main(): Promise<void> {
             'read-only connection physically rejects a write',
             blocked,
             'the engine is the second safety layer and must not depend on the guard',
+        );
+
+        // ---------------------------------------------- impact against a real db ---
+        // The builders are asserted above in isolation. This runs them against
+        // a real engine, because the number the approval dialog shows has to be
+        // right, not merely well-formed.
+        const voidedStatement = classifyStatement(
+            `${writeVerb} FROM orders WHERE status = 'cancelled'`,
+        );
+        const impact = await previewStatement(voidedStatement, 'sqlite', (sql) => fixture.run(sql));
+
+        const [[actual]] = await fixture.run(
+            "SELECT COUNT(*) FROM orders WHERE status = 'cancelled'",
+        );
+        const [[total]] = await fixture.run('SELECT COUNT(*) FROM orders');
+
+        check(
+            'the previewed count matches what the predicate really matches',
+            impact.exactRows === Number(actual),
+            `preview said ${impact.exactRows}, the database says ${String(actual)}`,
+        );
+        check(
+            'the preview reports the table total as the denominator',
+            impact.tableRows === Number(total),
+            `preview said ${impact.tableRows}, the database says ${String(total)}`,
+        );
+        check(
+            'a bounded write does not report affecting the whole table',
+            impact.exactRows !== null && impact.tableRows !== null && impact.exactRows < impact.tableRows,
+            'if these were equal the dialog would warn about the wrong thing',
+        );
+        check('the preview returns a query plan', (impact.plan ?? '').length > 0);
+        check('the preview reports no error', impact.error === null, impact.error ?? '');
+
+        const unboundedImpact = await previewStatement(
+            classifyStatement(`${writeVerb} FROM orders`),
+            'sqlite',
+            (sql) => fixture.run(sql),
+        );
+        check(
+            'an unbounded write reports the whole table as its impact',
+            unboundedImpact.exactRows === Number(total),
+            'there is no predicate to count, so the answer is every row',
         );
 
         // ------------------------------------------------------- golden set ---

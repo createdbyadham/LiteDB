@@ -204,12 +204,12 @@ export function classifyStatement(sql: string, recursionDepth = 0): StatementCla
     const hasTopLevelWhere = topLevelWhereIndex(tokens) !== -1;
 
     switch (verb) {
+        // `TABLE t` is the Postgres shorthand for `SELECT * FROM t`.
         case 'SELECT':
         case 'VALUES':
         case 'SHOW':
         case 'DESCRIBE':
         case 'DESC':
-        // Postgres shorthand: `TABLE t` is `SELECT * FROM t`.
         case 'TABLE':
             return { ...base, kind: 'read', verb, predicate, reason: 'reads rows, changes nothing' };
 

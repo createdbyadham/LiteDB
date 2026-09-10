@@ -14,8 +14,15 @@ import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Sparkles, Dow
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { AiQueryDialog } from './AiQueryDialog';
+import { ApprovalDialog } from './ApprovalDialog';
+import { AuditLogView } from './AuditLogView';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { tauriService } from '@/lib/tauri';
+import { evaluateScript, type GateDecision, type Provenance } from '@/lib/sqlPolicy';
+import { previewImpact, type ImpactEstimate, type PreviewRunner } from '@/lib/impactPreview';
+import { activePolicy, auditableStatements, recordDecision } from '@/lib/queryGate';
+import type { AuditDecision, AuditOutcome } from '@/lib/auditLog';
+import { aiService } from '@/lib/aiService';
 
 interface SqlEditorProps {
   isPostgres?: boolean;
@@ -41,37 +48,39 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
 
-  // Function to execute the SQL script
-  const executeScript = async () => {
-    if (!sqlScript.trim()) {
-      toast({
-        title: "Empty Script",
-        description: "Please enter SQL statements to execute",
-        variant: "destructive"
-      });
-      return;
-    }
+  // Write-safety state. `provenance` is what makes the gate treat generated
+  // SQL differently from typed SQL, so it is tracked on the editor rather than
+  // inferred later: once the text is in the box, nothing can tell them apart.
+  const [pendingDecision, setPendingDecision] = useState<GateDecision | null>(null);
+  const [previews, setPreviews] = useState<ImpactEstimate[]>([]);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [provenance, setProvenance] = useState<Provenance>('user');
+  const [aiPrompt, setAiPrompt] = useState<string | null>(null);
 
+  const dialect = isPostgres ? 'postgres' : 'sqlite';
+
+  /**
+   * Read-only runner for the impact preview.
+   *
+   * Postgres goes through tauriService rather than pgService because
+   * pgService raises a toast on failure — and a failed EXPLAIN is an expected
+   * outcome here, not something to interrupt the user with.
+   */
+  const previewRunner: PreviewRunner = async (sql) => {
+    if (isPostgres) {
+      const result = await tauriService.executePostgresQuery({ query: sql });
+      if (!result || !result.success) throw new Error(result?.error || 'preview query failed');
+      return (result.rows ?? []) as unknown as unknown[][];
+    }
+    return sqliteService.executeQuery(sql)?.rows ?? null;
+  };
+
+  // Function to execute the SQL script
+  const executeScript = async (statements: string[]) => {
     setIsRunning(true);
     setResults(null);
 
     try {
-      // Split script into statements by semicolons
-      const statements = sqlScript
-        .split(';')
-        .map(stmt => stmt.trim())
-        .filter(stmt => stmt.length > 0);
-
-      if (statements.length === 0) {
-        toast({
-          title: "Invalid Script",
-          description: "No valid SQL statements found",
-          variant: "destructive"
-        });
-        setIsRunning(false);
-        return;
-      }
-
       const startTime = performance.now();
 
       let result: {
@@ -198,21 +207,145 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
           variant: "destructive"
         });
       }
+
+      return { success: result.success, errors: result.errors };
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error occurred";
       setResults({
         success: false,
         affectedTables: [],
-        errors: [error instanceof Error ? error.message : "Unknown error occurred"]
+        errors: [message]
       });
 
       toast({
         title: "Execution Failed",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
+        description: message,
         variant: "destructive"
       });
+
+      return { success: false, errors: [message] };
     } finally {
       setIsRunning(false);
     }
+  };
+
+  /**
+   * Run a script the gate has cleared, and record what happened.
+   *
+   * The audit entry is written after execution rather than before, so it can
+   * carry the real outcome. A log of intentions is not a log of events.
+   */
+  const runApproved = async (decision: GateDecision, auditDecision: AuditDecision) => {
+    const started = performance.now();
+    const outcomeResult = await executeScript(decision.statements.map((s) => s.sql));
+    const outcome: AuditOutcome = outcomeResult.success ? 'ok' : 'error';
+
+    void recordDecision({
+      statements: auditableStatements(decision.statements, provenance),
+      decision: auditDecision,
+      outcome,
+      provenance,
+      policy: decision.appliedPolicy,
+      error: outcomeResult.errors.join('; ') || null,
+      estimatedRows: previews.reduce<number | null>(
+        (total, preview) =>
+          preview.exactRows === null ? total : (total ?? 0) + preview.exactRows,
+        null,
+      ),
+      durationMs: Math.round(performance.now() - started),
+      prompt: aiPrompt,
+      model: provenance === 'ai' ? aiService.activeModelName() : null,
+    });
+  };
+
+  /**
+   * The one entry point to execution.
+   *
+   * Every path that runs SQL from this editor goes through here, so the policy
+   * cannot be bypassed by a code path added later that forgets to ask.
+   */
+  const handleRun = async () => {
+    if (!sqlScript.trim()) {
+      toast({
+        title: "Empty Script",
+        description: "Please enter SQL statements to execute",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const policy = activePolicy();
+    const decision = evaluateScript(sqlScript, policy, provenance);
+
+    if (decision.statements.length === 0) {
+      toast({
+        title: "Invalid Script",
+        description: "No valid SQL statements found",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (decision.action === 'block') {
+      setResults({ success: false, affectedTables: [], errors: [decision.reason] });
+      toast({
+        title: "Blocked by connection policy",
+        description: decision.reason,
+        variant: "destructive"
+      });
+      void recordDecision({
+        statements: auditableStatements(decision.statements, provenance),
+        decision: 'blocked',
+        outcome: 'not-run',
+        provenance,
+        policy: decision.appliedPolicy,
+        error: decision.reason,
+        prompt: aiPrompt,
+        model: provenance === 'ai' ? aiService.activeModelName() : null,
+      });
+      return;
+    }
+
+    if (decision.action === 'allow') {
+      await runApproved(decision, 'allowed');
+      return;
+    }
+
+    // Open the dialog first and fill the numbers in as they arrive: the impact
+    // preview issues real queries, and a dialog that appears only once they
+    // return reads as a frozen app.
+    setPendingDecision(decision);
+    setPreviews([]);
+    setIsPreviewing(true);
+    try {
+      setPreviews(await previewImpact(decision.statements, dialect, previewRunner));
+    } catch (error) {
+      console.error('Impact preview failed:', error);
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    const decision = pendingDecision;
+    if (!decision) return;
+    setPendingDecision(null);
+    await runApproved(decision, 'approved');
+  };
+
+  const handleDecline = () => {
+    const decision = pendingDecision;
+    setPendingDecision(null);
+    if (!decision) return;
+    void recordDecision({
+      statements: auditableStatements(decision.statements, provenance),
+      decision: 'declined',
+      outcome: 'not-run',
+      provenance,
+      policy: decision.appliedPolicy,
+      prompt: aiPrompt,
+      model: provenance === 'ai' ? aiService.activeModelName() : null,
+    });
   };
 
   const saveScript = () => {
@@ -260,6 +393,11 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
 
   const loadScript = (script: { name: string; sql: string }) => {
     setSqlScript(script.sql);
+    // Replacing the buffer with a script the user saved themselves also
+    // replaces its provenance. Editing generated SQL does not — see the
+    // Textarea handler.
+    setProvenance('user');
+    setAiPrompt(null);
     toast({
       title: "Script Loaded",
       description: `"${script.name}" is ready to edit or execute`
@@ -371,7 +509,20 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
       <AiQueryDialog
         open={isAiDialogOpen}
         onOpenChange={setIsAiDialogOpen}
-        onQueryGenerated={(query) => setSqlScript(query)}
+        onQueryGenerated={(query, prompt) => {
+          setSqlScript(query);
+          setProvenance('ai');
+          setAiPrompt(prompt);
+        }}
+      />
+      <ApprovalDialog
+        open={pendingDecision !== null}
+        decision={pendingDecision}
+        previews={previews}
+        isPreviewing={isPreviewing}
+        isRunning={isRunning}
+        onApprove={handleApprove}
+        onCancel={handleDecline}
       />
       <Tabs defaultValue="editor" className="flex-1 flex flex-col">
         <div className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -379,6 +530,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
             <TabsList className="ml-4 h-8">
               <TabsTrigger value="editor" className="text-xs h-7">Editor</TabsTrigger>
               <TabsTrigger value="savedScripts" className="text-xs h-7">Saved Scripts</TabsTrigger>
+              <TabsTrigger value="audit" className="text-xs h-7">Audit</TabsTrigger>
             </TabsList>
           </div>
         </div>
@@ -418,7 +570,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
                     Save Script
                   </Button>
                 </div>
-                <Button onClick={executeScript} disabled={isRunning} size="sm" className="h-8 text-xs">
+                <Button onClick={handleRun} disabled={isRunning} size="sm" className="h-8 text-xs">
                   <PlayCircle className="mr-1.5 h-3.5 w-3.5" />
                   {isRunning ? 'Running...' : 'Execute Script'}
                 </Button>
@@ -434,7 +586,18 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
                 }
                 className="flex-1 font-mono text-sm min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 value={sqlScript}
-                onChange={(e) => setSqlScript(e.target.value)}
+                onChange={(e) => {
+                  setSqlScript(e.target.value);
+                  // Provenance is sticky: editing generated SQL does not make
+                  // the user its author. Someone who tweaks one clause has not
+                  // reviewed the rest, and 'ai' only ever tightens the gate,
+                  // so staying on it is the safe direction to be wrong in.
+                  // Emptying the box is the one edit that clears it.
+                  if (!e.target.value.trim()) {
+                    setProvenance('user');
+                    setAiPrompt(null);
+                  }
+                }}
               />
 
               {results && (
@@ -622,6 +785,10 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
               </div>
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="audit" className="flex-1 overflow-hidden p-4 pt-2">
+          <AuditLogView />
         </TabsContent>
       </Tabs>
     </div>

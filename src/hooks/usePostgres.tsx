@@ -3,6 +3,7 @@ import { pgService, PgConfig, VectorColumnInfo, VectorStats, SimilarityResult } 
 import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
+import { clearActiveConnection, postgresConnectionId, setActiveConnection } from '@/lib/queryGate';
 
 export interface UsePgReturn {
   isConnected: boolean;
@@ -134,6 +135,16 @@ export function usePostgres(): UsePgReturn {
       const success = await pgService.connect(config);
 
       if (success) {
+        // Registered before any query runs, so the very first statement is
+        // already covered by this connection's policy rather than the default.
+        // The id is built from host/port/database only — credentials never
+        // reach the policy store or the audit log.
+        setActiveConnection({
+          id: postgresConnectionId(config.host, config.port, config.database),
+          label: `postgres:${config.host}/${config.database}`,
+          dialect: 'postgres',
+        });
+
         const tableList = await pgService.getTables();
 
         // Check for pgvector extension
@@ -275,6 +286,7 @@ export function usePostgres(): UsePgReturn {
     setHasPgVector(false);
     setVectorColumns([]);
     aiService.clearSchema();
+    clearActiveConnection();
 
     toast({
       title: "Disconnected",
