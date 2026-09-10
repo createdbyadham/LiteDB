@@ -19,6 +19,7 @@ import type { StatementClassification } from './sqlClassifier';
 import { canPreviewExactly } from './sqlPolicy';
 import { guardReadOnly } from './sqlGuard';
 import type { SqlDialect } from './schemaTypes';
+import { ROW_PROBE_LIMIT } from './schemaSamples';
 
 /** Rows come back as arrays from SQLite and as objects from Postgres. */
 export type PreviewRunner = (
@@ -33,6 +34,12 @@ export interface ImpactEstimate {
     estimatedRows: number | null;
     /** Total rows in the target table, so a count reads as a proportion. */
     tableRows: number | null;
+    /**
+     * True when `tableRows` is a probe, not a census: the table has at least
+     * that many rows. The dialog must say "200+" rather than treat the
+     * number as exact, and must not conclude "every row" from it.
+     */
+    tableRowsCapped: boolean;
     /** Plan text for the dialog's detail view. */
     plan: string | null;
     /** Why no preview is available. Null when one is. */
@@ -55,10 +62,18 @@ export function buildCountQuery(statement: StatementClassification): string | nu
     return `SELECT COUNT(*) FROM ${statement.table} WHERE ${statement.predicate}`;
 }
 
-/** `SELECT COUNT(*) FROM <table>`, for the denominator. */
+/**
+ * Bounded table-size probe for the denominator.
+ *
+ * A bare `COUNT(*)` seq-scans the table. On a 50M-row relation that hangs the
+ * approval dialog for as long as the scan takes — for a number that only
+ * needs to tell the user "of 4,812" vs "of 200+". Same trick as
+ * `buildRowProbeQuery`: count a `LIMIT` subquery, and treat hitting the
+ * limit as "at least this many".
+ */
 export function buildTableCountQuery(statement: StatementClassification): string | null {
     if (!statement.table) return null;
-    return `SELECT COUNT(*) FROM ${statement.table}`;
+    return `SELECT COUNT(*) FROM (SELECT 1 FROM ${statement.table} LIMIT ${ROW_PROBE_LIMIT}) sub`;
 }
 
 /**
@@ -182,6 +197,7 @@ export async function previewStatement(
         exactRows: null,
         estimatedRows: null,
         tableRows: null,
+        tableRowsCapped: false,
         plan: null,
         error: null,
     };
@@ -203,15 +219,27 @@ export async function previewStatement(
 
         const tableSql = buildTableCountQuery(statement);
         if (tableSql && (countSql || statement.unbounded)) {
-            estimate.tableRows = toCount(firstCell(await safeRun(tableSql)));
+            const probed = toCount(firstCell(await safeRun(tableSql)));
+            if (probed !== null && probed >= ROW_PROBE_LIMIT) {
+                estimate.tableRows = ROW_PROBE_LIMIT - 1;
+                estimate.tableRowsCapped = true;
+            } else {
+                estimate.tableRows = probed;
+            }
         }
     } catch (error) {
         estimate.error = error instanceof Error ? error.message : String(error);
     }
 
     // An unbounded statement hits everything, so the table count *is* the
-    // impact. Stating that outright beats leaving the field blank.
-    if (statement.unbounded && estimate.exactRows === null && estimate.tableRows !== null) {
+    // impact — but only when the probe actually finished the table. Copying
+    // a capped 200 would invent an exact number we never measured.
+    if (
+        statement.unbounded &&
+        estimate.exactRows === null &&
+        estimate.tableRows !== null &&
+        !estimate.tableRowsCapped
+    ) {
         estimate.exactRows = estimate.tableRows;
     }
 

@@ -12,7 +12,8 @@ import { guardReadOnly } from '../../src/lib/sqlGuard';
 import { splitStatements, tokenize } from '../../src/lib/sqlTokenizer';
 import { classifyScript, classifyStatement } from '../../src/lib/sqlClassifier';
 import { evaluateScript } from '../../src/lib/sqlPolicy';
-import { buildCountQuery, buildExplainQuery, previewStatement } from '../../src/lib/impactPreview';
+import { buildCountQuery, buildExplainQuery, buildTableCountQuery, previewStatement } from '../../src/lib/impactPreview';
+import { ROW_PROBE_LIMIT } from '../../src/lib/schemaSamples';
 import { buildValidateQuery, canValidate, validateScript } from '../../src/lib/sqlValidator';
 import { createSqliteFixture } from './fixture';
 import { loadCases } from './loadCases';
@@ -266,6 +267,29 @@ async function main(): Promise<void> {
         !canValidate(classifyStatement('CREATE TABLE t (a int)'), 'postgres'),
         'reporting an unexplainable statement as invalid would have the model fix working SQL',
     );
+    // Measured against Postgres 16: it rejects these at the grammar, with
+    // `syntax error at or near "TRUNCATE"` — indistinguishable from a real
+    // defect. A kind-based check let them through (TRUNCATE is destructive,
+    // COPY is a write), so a valid statement was reported to the model as
+    // broken.
+    check(
+        'Postgres skips TRUNCATE, which it cannot explain despite it being a write',
+        !canValidate(classifyStatement('TRUNCATE orders'), 'postgres'),
+    );
+    check(
+        'Postgres skips COPY, which it cannot explain despite it being a write',
+        !canValidate(classifyStatement('COPY orders TO stdout'), 'postgres'),
+    );
+    check(
+        'SQLite still checks TRUNCATE-shaped statements, because it can explain anything',
+        canValidate(classifyStatement(`${del} FROM orders`), 'sqlite'),
+    );
+    check(
+        'the verbs Postgres can explain are all allowed',
+        ['SELECT id FROM t', 'INSERT INTO t (a) VALUES (1)', 'UPDATE t SET a=1',
+         `${del} FROM t`, 'VALUES (1)', 'WITH x AS (SELECT 1 AS a) SELECT a FROM x',
+         'TABLE t'].every((sql) => canValidate(classifyStatement(sql), 'postgres')),
+    );
     check(
         'SQLite validates DDL, which it can explain',
         canValidate(classifyStatement('CREATE TABLE t (a int)'), 'sqlite'),
@@ -304,6 +328,16 @@ async function main(): Promise<void> {
         !/ANALYZE/i.test(buildExplainQuery(`${del} FROM orders`, 'postgres')) &&
             !/ANALYZE/i.test(buildExplainQuery(`${del} FROM orders`, 'sqlite')),
         'EXPLAIN ANALYZE would execute the statement the dialog is asking permission for',
+    );
+    check(
+        'the table-size probe is bounded',
+        buildTableCountQuery(classifyStatement(`${del} FROM orders`)) ===
+            `SELECT COUNT(*) FROM (SELECT 1 FROM orders LIMIT ${ROW_PROBE_LIMIT}) sub`,
+        'an unbounded COUNT(*) hangs the dialog on a large table',
+    );
+    check(
+        'the table-size probe is itself read-only',
+        guardReadOnly(buildTableCountQuery(classifyStatement(`${del} FROM orders`)) ?? '').ok,
     );
 
     // --------------------------------------------------------------- compare ---
@@ -424,6 +458,23 @@ async function main(): Promise<void> {
             'an unbounded write reports the whole table as its impact',
             unboundedImpact.exactRows === Number(total),
             'there is no predicate to count, so the answer is every row',
+        );
+        check(
+            'a small table is not reported as capped',
+            impact.tableRowsCapped === false && unboundedImpact.tableRowsCapped === false,
+        );
+
+        const cappedImpact = await previewStatement(
+            classifyStatement(`${writeVerb} FROM orders`),
+            'sqlite',
+            async (sql) => (sql.includes(`LIMIT ${ROW_PROBE_LIMIT}`) ? [[ROW_PROBE_LIMIT]] : []),
+        );
+        check(
+            'hitting the probe limit is marked capped, not exact',
+            cappedImpact.tableRowsCapped &&
+                cappedImpact.tableRows === ROW_PROBE_LIMIT - 1 &&
+                cappedImpact.exactRows === null,
+            'copying 201 into exactRows would invent a census the probe never finished',
         );
 
         // ------------------------------------- validating writes without running them ---

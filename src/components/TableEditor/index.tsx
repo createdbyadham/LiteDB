@@ -229,7 +229,7 @@ const TableEditor = ({
       console.error('Delete error:', error);
       toast({
         title: "Error",
-        description: "Failed to delete rows",
+        description: error instanceof Error ? error.message : "Failed to delete rows",
         variant: "destructive"
       });
     } finally {
