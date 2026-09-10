@@ -3,12 +3,13 @@
     windows_subsystem = "windows"
 )]
 
+use futures_util::TryStreamExt;
 use keyring::Entry;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use sqlx::postgres::{PgPool, PgPoolOptions};
-use sqlx::{Column, Row};
+use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
+use sqlx::{Column, Either, Row, ValueRef};
 use std::collections::HashMap;
 use tauri::State;
 use tokio::sync::Mutex;
@@ -32,7 +33,15 @@ struct QueryResult {
     success: bool,
     columns: Vec<String>,
     rows: Vec<Value>,
+    /// Rows returned by the statement. Zero for an UPDATE or DELETE.
     row_count: u64,
+    /// Rows the statement changed, as reported by the server.
+    ///
+    /// Distinct from `row_count`, and the only honest answer to "did my write
+    /// do anything?". An UPDATE whose WHERE matches nothing succeeds and
+    /// returns no rows, which is indistinguishable from one that changed
+    /// thousands unless the server is asked.
+    rows_affected: u64,
     error: Option<String>,
 }
 
@@ -65,6 +74,7 @@ async fn connect_postgres(
         columns: vec![],
         rows: vec![],
         row_count: 0,
+        rows_affected: 0,
         error: None,
     })
 }
@@ -82,10 +92,26 @@ async fn execute_postgres_query(
             .clone()
     };
 
-    let rows = sqlx::query(&query)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    // Streaming the results rather than fetch_all: this yields the server's
+    // own rows_affected alongside any returned rows, from a single execution.
+    // The alternative — choosing between execute() and fetch_all() by
+    // inspecting the statement — would mean re-deriving in Rust what the
+    // classifier already knows, and getting it wrong for anything unusual.
+    //
+    // raw_sql rather than query: these are complete statements with no bind
+    // parameters, which is exactly what raw_sql is for. It is also what
+    // sqlx 0.7.4 points to now that query().fetch_many() is deprecated.
+    let mut rows: Vec<PgRow> = Vec::new();
+    let mut rows_affected: u64 = 0;
+    {
+        let mut stream = sqlx::raw_sql(&query).fetch_many(&pool);
+        while let Some(item) = stream.try_next().await.map_err(|e| e.to_string())? {
+            match item {
+                Either::Left(result) => rows_affected += result.rows_affected(),
+                Either::Right(row) => rows.push(row),
+            }
+        }
+    }
 
     let mut columns = Vec::new();
     let mut json_rows = Vec::new();
@@ -98,38 +124,7 @@ async fn execute_postgres_query(
             .collect();
 
         for row in rows {
-            let mut json_row = Map::new();
-            for (i, col) in row.columns().iter().enumerate() {
-                let col_name = col.name();
-
-                // Try to get as various types
-                if let Ok(v) = row.try_get::<String, _>(i) {
-                    json_row.insert(col_name.to_string(), Value::String(v));
-                } else if let Ok(v) = row.try_get::<i64, _>(i) {
-                    json_row.insert(col_name.to_string(), Value::Number(v.into()));
-                } else if let Ok(v) = row.try_get::<i32, _>(i) {
-                    json_row.insert(col_name.to_string(), Value::Number(v.into()));
-                } else if let Ok(v) = row.try_get::<i16, _>(i) {
-                    json_row.insert(col_name.to_string(), Value::Number(v.into()));
-                } else if let Ok(v) = row.try_get::<f64, _>(i) {
-                    if let Some(n) = serde_json::Number::from_f64(v) {
-                        json_row.insert(col_name.to_string(), Value::Number(n));
-                    } else {
-                        json_row.insert(col_name.to_string(), Value::Null);
-                    }
-                } else if let Ok(v) = row.try_get::<f32, _>(i) {
-                    if let Some(n) = serde_json::Number::from_f64(v as f64) {
-                        json_row.insert(col_name.to_string(), Value::Number(n));
-                    } else {
-                        json_row.insert(col_name.to_string(), Value::Null);
-                    }
-                } else if let Ok(v) = row.try_get::<bool, _>(i) {
-                    json_row.insert(col_name.to_string(), Value::Bool(v));
-                } else {
-                    json_row.insert(col_name.to_string(), Value::Null);
-                }
-            }
-            json_rows.push(Value::Object(json_row));
+            json_rows.push(Value::Object(pg_row_to_json(&row)));
         }
     }
 
@@ -139,8 +134,71 @@ async fn execute_postgres_query(
         columns,
         rows: json_rows,
         row_count,
+        rows_affected,
         error: None,
     })
+}
+
+/// Convert one Postgres row to JSON for the frontend.
+///
+/// Extracted from the command so it can be tested against a real server —
+/// which is the only way to know whether a `numeric` or `date` column comes
+/// back as a value or as null. See the tests at the bottom of this file.
+fn pg_row_to_json(row: &PgRow) -> Map<String, Value> {
+    let mut json_row = Map::new();
+    for (i, col) in row.columns().iter().enumerate() {
+        let col_name = col.name();
+
+        // Try to get as various types
+        if let Ok(v) = row.try_get::<String, _>(i) {
+            json_row.insert(col_name.to_string(), Value::String(v));
+        } else if let Ok(v) = row.try_get::<i64, _>(i) {
+            json_row.insert(col_name.to_string(), Value::Number(v.into()));
+        } else if let Ok(v) = row.try_get::<i32, _>(i) {
+            json_row.insert(col_name.to_string(), Value::Number(v.into()));
+        } else if let Ok(v) = row.try_get::<i16, _>(i) {
+            json_row.insert(col_name.to_string(), Value::Number(v.into()));
+        } else if let Ok(v) = row.try_get::<f64, _>(i) {
+            if let Some(n) = serde_json::Number::from_f64(v) {
+                json_row.insert(col_name.to_string(), Value::Number(n));
+            } else {
+                json_row.insert(col_name.to_string(), Value::Null);
+            }
+        } else if let Ok(v) = row.try_get::<f32, _>(i) {
+            if let Some(n) = serde_json::Number::from_f64(v as f64) {
+                json_row.insert(col_name.to_string(), Value::Number(n));
+            } else {
+                json_row.insert(col_name.to_string(), Value::Null);
+            }
+        } else if let Ok(v) = row.try_get::<bool, _>(i) {
+            json_row.insert(col_name.to_string(), Value::Bool(v));
+        } else {
+            // Everything the typed paths above do not recognise —
+            // date, timestamp, numeric, uuid, json, arrays, enums —
+            // used to land here as Null. A `numeric` column therefore
+            // displayed as NULL whatever it held, which makes a
+            // successful write look like it did nothing.
+            //
+            // The simple query protocol returns every value in text
+            // form, so the raw bytes are the server's own rendering of
+            // the value. Showing that beats inventing a null, and for
+            // numeric it is exact where f64 would not be.
+            let text = row
+                .try_get_raw(i)
+                .ok()
+                .filter(|raw| !raw.is_null())
+                .and_then(|raw| raw.as_str().ok().map(|s| s.to_string()));
+
+            json_row.insert(
+                col_name.to_string(),
+                match text {
+                    Some(s) => Value::String(s),
+                    None => Value::Null,
+                },
+            );
+        }
+    }
+    json_row
 }
 
 #[tauri::command]
@@ -154,6 +212,7 @@ async fn disconnect_postgres(state: State<'_, PostgresState>) -> Result<QueryRes
         columns: vec![],
         rows: vec![],
         row_count: 0,
+        rows_affected: 0,
         error: None,
     })
 }
@@ -288,4 +347,95 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Executor;
+
+    /// Skipped unless EVAL_POSTGRES_URL points at a throwaway database.
+    ///
+    /// This is the only way to answer the question that matters here: whether
+    /// a `numeric` or `date` column reaches the frontend as its value or as
+    /// null. Both used to come back null — the type chain handled neither —
+    /// so a numeric column displayed as NULL whatever it held, and a
+    /// successful write looked like it had done nothing.
+    #[tokio::test]
+    async fn non_primitive_columns_are_not_reported_as_null() {
+        let Ok(url) = std::env::var("EVAL_POSTGRES_URL") else {
+            eprintln!("skipping: EVAL_POSTGRES_URL not set");
+            return;
+        };
+
+        let pool = PgPoolOptions::new().connect(&url).await.unwrap();
+        pool.execute(
+            "DROP TABLE IF EXISTS row_json_probe;
+             CREATE TABLE row_json_probe (
+                 id          serial PRIMARY KEY,
+                 label       text,
+                 amount      numeric(10,2),
+                 happened_on date,
+                 at          timestamptz,
+                 flag        boolean,
+                 payload     jsonb,
+                 absent      text
+             );
+             INSERT INTO row_json_probe (label, amount, happened_on, at, flag, payload, absent)
+             VALUES ('hello', 200.00, '2026-09-01', '2026-09-01T10:30:00Z', true,
+                     '{\"a\":1}'::jsonb, NULL);",
+        )
+        .await
+        .unwrap();
+
+        let mut rows: Vec<PgRow> = Vec::new();
+        {
+            let mut stream = sqlx::raw_sql("SELECT * FROM row_json_probe").fetch_many(&pool);
+            while let Some(item) = stream.try_next().await.unwrap() {
+                if let Either::Right(row) = item {
+                    rows.push(row);
+                }
+            }
+        }
+        assert_eq!(rows.len(), 1, "probe row was not returned");
+
+        let json = pg_row_to_json(&rows[0]);
+        let text = |k: &str| json.get(k).map(|v| v.to_string()).unwrap_or_default();
+
+        // The two that regressed to null in the reported bug.
+        assert_eq!(
+            json["amount"],
+            Value::String("200.00".into()),
+            "numeric came back as {} — the text fallback is not working",
+            text("amount")
+        );
+        assert_eq!(
+            json["happened_on"],
+            Value::String("2026-09-01".into()),
+            "date came back as {}",
+            text("happened_on")
+        );
+
+        // Everything else must keep working.
+        assert_eq!(json["label"], Value::String("hello".into()));
+        assert!(
+            json["at"].is_string(),
+            "timestamptz came back as {}",
+            text("at")
+        );
+        assert!(
+            json["payload"].is_string(),
+            "jsonb came back as {}",
+            text("payload")
+        );
+        assert_eq!(json["absent"], Value::Null, "a real NULL must stay null");
+        assert!(
+            !json["id"].is_null() && !json["flag"].is_null(),
+            "primitives regressed: id={} flag={}",
+            text("id"),
+            text("flag")
+        );
+
+        pool.execute("DROP TABLE row_json_probe").await.unwrap();
+    }
 }
