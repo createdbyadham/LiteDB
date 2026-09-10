@@ -57,6 +57,14 @@ export interface AuditEntry {
     error: string | null;
     /** What the impact preview predicted, for comparison against reality. */
     estimatedRows: number | null;
+    /**
+     * What the engine reported actually changed.
+     *
+     * Kept alongside the prediction rather than replacing it: the two
+     * disagreeing is the interesting case, and a log holding only the estimate
+     * cannot tell you the approval dialog was wrong.
+     */
+    actualRows: number | null;
     durationMs: number | null;
     /** Model that produced the SQL. Null for user-authored statements. */
     model: string | null;

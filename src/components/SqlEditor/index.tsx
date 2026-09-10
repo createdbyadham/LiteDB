@@ -68,6 +68,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
   const [pendingOrigin, setPendingOrigin] = useState<ScriptOrigin | null>(null);
   const [previews, setPreviews] = useState<ImpactEstimate[]>([]);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const previewGen = useRef(0);
   const [provenance, setProvenance] = useState<Provenance>('user');
   const [aiPrompt, setAiPrompt] = useState<string | null>(null);
 
@@ -112,7 +113,13 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
   };
 
   // Function to execute the SQL script
-  const executeScript = async (statements: string[]) => {
+  /**
+   * @param reportsRowCount Whether the script changes rows, so a count is
+   *   meaningful. Reads are excluded because neither engine gives a clean
+   *   answer for them: SQLite's counter still holds the previous write's
+   *   value, and Postgres reports rows *returned* in the same field.
+   */
+  const executeScript = async (statements: string[], reportsRowCount: boolean) => {
     setIsRunning(true);
     setResults(null);
 
@@ -123,6 +130,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
         success: boolean;
         affectedTables: string[];
         errors: string[];
+        rowsAffected: number;
         queryResults?: {
           columns: string[];
           rows: (string | number | boolean | null)[][];
@@ -132,16 +140,16 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
 
       if (isPostgres) {
         // For PostgreSQL, execute each statement sequentially
-        result = { success: true, affectedTables: [], errors: [], queryResults: null };
+        result = { success: true, affectedTables: [], errors: [], rowsAffected: 0, queryResults: null };
 
         for (const statement of statements) {
           try {
             // Check if this is a SELECT or similar query that returns data
             const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statement);
-            const isDDLQuery = /^\s*(CREATE|DROP|ALTER|TRUNCATE)/i.test(statement);
 
             const queryResult = await pgService.executeQuery(statement);
             if (queryResult) {
+              result.rowsAffected += queryResult.rowsAffected;
               // For SELECT queries, we want to display the results
               if (isSelectQuery) {
                 // Normalize Postgres object rows to array-of-arrays based on columns (type-safe)
@@ -170,10 +178,8 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
                 };
               }
 
-              // If this was a DDL query, refresh the table list
-              if (isDDLQuery && refreshTables) {
-                await Promise.resolve(refreshTables());
-              }
+              // Refreshing is handled once in runApproved, for every kind of
+              // change rather than only DDL.
 
               // Try to extract table names from the SQL
               const tableMatches = statement.match(/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE)\s+(?:"|')?(\w+)(?:"|')?/i);
@@ -192,7 +198,6 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
       } else {
         // For SQLite, check if we have a SELECT query and handle it specially
         const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statements[0]);
-        const isDDLQuery = /^\s*(CREATE|DROP|ALTER|TRUNCATE)/i.test(statements[0]);
 
         if (isSelectQuery && statements.length === 1) {
           try {
@@ -201,6 +206,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
               success: true,
               affectedTables: [],
               errors: [],
+              rowsAffected: queryResult?.rowsAffected ?? 0,
               queryResults: queryResult as {
                 columns: string[];
                 rows: (string | number | boolean | null)[][];
@@ -210,17 +216,13 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
             result = {
               success: false,
               affectedTables: [],
-              errors: [error instanceof Error ? error.message : "Unknown error"]
+              errors: [error instanceof Error ? error.message : "Unknown error"],
+              rowsAffected: 0
             };
           }
         } else {
           // For other SQL statements, use the existing batch operation
           result = sqliteService.executeBatchOperations(statements, useTransaction);
-
-          // If this was a DDL query and it was successful, refresh the table list
-          if (isDDLQuery && result.success && refreshTables) {
-            Promise.resolve(refreshTables());
-          }
         }
       }
 
@@ -232,10 +234,22 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
       });
 
       if (result.success) {
-        toast({
-          title: "Success",
-          description: `Executed ${statements.length} statement${statements.length > 1 ? 's' : ''} successfully`
-        });
+        // Row count, not just "success". An UPDATE whose WHERE matches nothing
+        // succeeds; without this it reported exactly the same as one that
+        // changed thousands, and the user had no way to tell them apart.
+        const changed = result.rowsAffected;
+        const ran = `Executed ${statements.length} statement${statements.length > 1 ? 's' : ''}`;
+        if (!reportsRowCount) {
+          toast({ title: "Success", description: `${ran} successfully` });
+        } else {
+          toast({
+            title: changed === 0 ? "No rows changed" : "Success",
+            description:
+              changed === 0
+                ? `${ran}, but nothing matched — 0 rows changed.`
+                : `${ran}. ${changed.toLocaleString()} row${changed === 1 ? '' : 's'} changed.`,
+          });
+        }
       } else {
         toast({
           title: "Execution Error",
@@ -244,7 +258,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
         });
       }
 
-      return { success: result.success, errors: result.errors };
+      return { success: result.success, errors: result.errors, rowsAffected: result.rowsAffected };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error occurred";
       setResults({
@@ -259,7 +273,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
         variant: "destructive"
       });
 
-      return { success: false, errors: [message] };
+      return { success: false, errors: [message], rowsAffected: 0 };
     } finally {
       setIsRunning(false);
     }
@@ -275,10 +289,23 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
     decision: GateDecision,
     auditDecision: AuditDecision,
     origin: ScriptOrigin,
+    impact: ImpactEstimate[],
   ) => {
     const started = performance.now();
-    const outcomeResult = await executeScript(decision.statements.map((s) => s.sql));
+    const changesRows = decision.kind !== 'read';
+    const outcomeResult = await executeScript(
+      decision.statements.map((s) => s.sql),
+      changesRows,
+    );
     const outcome: AuditOutcome = outcomeResult.success ? 'ok' : 'error';
+
+    // Anything that changed the database invalidates what the rest of the app
+    // is showing. This used to fire only for DDL, matched with a regex, so a
+    // successful UPDATE left the table editor displaying pre-write rows and
+    // looked to the user like it had silently failed.
+    if (outcomeResult.success && decision.kind !== 'read' && refreshTables) {
+      await Promise.resolve(refreshTables());
+    }
 
     void recordDecision({
       statements: auditableStatements(
@@ -291,11 +318,12 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
       provenance: origin.provenance,
       policy: decision.appliedPolicy,
       error: outcomeResult.errors.join('; ') || null,
-      estimatedRows: previews.reduce<number | null>(
+      estimatedRows: impact.reduce<number | null>(
         (total, preview) =>
           preview.exactRows === null ? total : (total ?? 0) + preview.exactRows,
         null,
       ),
+      actualRows: outcomeResult.success && changesRows ? outcomeResult.rowsAffected : null,
       durationMs: Math.round(performance.now() - started),
       prompt: origin.prompt,
       model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
@@ -309,6 +337,16 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
    * cannot be bypassed by a code path added later that forgets to ask.
    */
   const runScript = async (script: string, origin: ScriptOrigin) => {
+    // Drop any previous preview so a later allow-path audit entry cannot
+    // inherit a row count from an unrelated statement. Passing impact
+    // explicitly into `runApproved` is the real fix; this keeps the dialog
+    // from flashing stale numbers if React hasn't flushed yet. The generation
+    // token discards an in-flight preview that belongs to a cancelled or
+    // superseded script — otherwise its `finally` would re-enable Run with
+    // the wrong counts.
+    const gen = ++previewGen.current;
+    setPreviews([]);
+
     if (!script.trim()) {
       toast({
         title: "Empty Script",
@@ -355,7 +393,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
     }
 
     if (decision.action === 'allow') {
-      await runApproved(decision, 'allowed', origin);
+      await runApproved(decision, 'allowed', origin, []);
       return;
     }
 
@@ -367,11 +405,13 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
     setPreviews([]);
     setIsPreviewing(true);
     try {
-      setPreviews(await previewImpact(decision.statements, dialect, previewRunner));
+      const next = await previewImpact(decision.statements, dialect, previewRunner);
+      if (gen !== previewGen.current) return;
+      setPreviews(next);
     } catch (error) {
       console.error('Impact preview failed:', error);
     } finally {
-      setIsPreviewing(false);
+      if (gen === previewGen.current) setIsPreviewing(false);
     }
   };
 
@@ -389,17 +429,24 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
   const handleApprove = async () => {
     const decision = pendingDecision;
     const origin = pendingOrigin;
+    const impact = previews;
     if (!decision || !origin) return;
+    previewGen.current += 1;
     setPendingDecision(null);
     setPendingOrigin(null);
-    await runApproved(decision, 'approved', origin);
+    setPreviews([]);
+    setIsPreviewing(false);
+    await runApproved(decision, 'approved', origin, impact);
   };
 
   const handleDecline = () => {
     const decision = pendingDecision;
     const origin = pendingOrigin;
+    previewGen.current += 1;
     setPendingDecision(null);
     setPendingOrigin(null);
+    setPreviews([]);
+    setIsPreviewing(false);
     if (!decision || !origin) return;
     void recordDecision({
       statements: auditableStatements(
@@ -643,7 +690,12 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
                     Save Script
                   </Button>
                 </div>
-                <Button onClick={handleRun} disabled={isRunning} size="sm" className="h-8 text-xs">
+                <Button
+                  onClick={handleRun}
+                  disabled={isRunning || isPreviewing || pendingDecision !== null}
+                  size="sm"
+                  className="h-8 text-xs"
+                >
                   <PlayCircle className="mr-1.5 h-3.5 w-3.5" />
                   {isRunning ? 'Running...' : 'Execute Script'}
                 </Button>

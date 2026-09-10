@@ -187,6 +187,7 @@ export interface DecisionRecord {
     policy: SafetyPolicy;
     error?: string | null;
     estimatedRows?: number | null;
+    actualRows?: number | null;
     durationMs?: number | null;
     model?: string | null;
     prompt?: string | null;
@@ -219,6 +220,7 @@ export async function recordDecision(record: DecisionRecord): Promise<void> {
             outcome: record.outcome,
             error: record.error ?? null,
             estimatedRows: record.estimatedRows ?? null,
+            actualRows: record.actualRows ?? null,
             durationMs: record.durationMs ?? null,
             model: record.model ?? null,
             prompt: record.prompt ?? null,

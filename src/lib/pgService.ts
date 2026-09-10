@@ -348,7 +348,7 @@ class PgService {
     };
   }
 
-  async executeQuery(sql: string): Promise<{ columns: string[], rows: unknown[][] } | null> {
+  async executeQuery(sql: string): Promise<{ columns: string[], rows: unknown[][], rowsAffected: number } | null> {
     if (!this.connected) {
       toast({
         title: "Error",
@@ -378,7 +378,8 @@ class PgService {
 
       return {
         columns: result.columns || [],
-        rows: (result.rows || []) as unknown as unknown[][]
+        rows: (result.rows || []) as unknown as unknown[][],
+        rowsAffected: result.rows_affected ?? 0
       };
     } catch (error) {
       console.error("Query execution error:", error);
