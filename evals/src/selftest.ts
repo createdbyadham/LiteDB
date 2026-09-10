@@ -13,6 +13,7 @@ import { splitStatements, tokenize } from '../../src/lib/sqlTokenizer';
 import { classifyScript, classifyStatement } from '../../src/lib/sqlClassifier';
 import { evaluateScript } from '../../src/lib/sqlPolicy';
 import { buildCountQuery, buildExplainQuery, previewStatement } from '../../src/lib/impactPreview';
+import { buildValidateQuery, canValidate, validateScript } from '../../src/lib/sqlValidator';
 import { createSqliteFixture } from './fixture';
 import { loadCases } from './loadCases';
 import { selectExemplars } from '../../src/lib/fewShot';
@@ -225,6 +226,60 @@ async function main(): Promise<void> {
         'an unrecognised statement is gated as destructive',
         evaluateScript('FROBNICATE t', 'read-only', 'user').action === 'block',
     );
+    check(
+        'YOLO allows a destructive statement outright',
+        evaluateScript(`${drop} TABLE orders`, 'yolo', 'user').action === 'allow',
+    );
+    check(
+        'YOLO is the one policy that waives the AI floor',
+        evaluateScript(`${drop} TABLE orders`, 'yolo', 'ai').action === 'allow',
+        'every other policy floors generated SQL at guarded',
+    );
+    check(
+        'YOLO still requires something to run',
+        evaluateScript('   ', 'yolo', 'ai').action === 'block',
+    );
+
+    // ------------------------------------------------------------ validator ---
+    process.stdout.write('\nvalidator\n');
+
+    check(
+        'the validator compiles rather than runs',
+        buildValidateQuery(`${del} FROM orders`) === `EXPLAIN ${del} FROM orders`,
+    );
+    check(
+        'the validator never uses ANALYZE',
+        !/ANALYZE/i.test(buildValidateQuery(`${del} FROM orders`)),
+        'EXPLAIN ANALYZE would execute the statement it claims to be checking',
+    );
+    check(
+        'a trailing semicolon does not break the wrapper',
+        buildValidateQuery('SELECT 1;') === 'EXPLAIN SELECT 1',
+    );
+    check(
+        'writes are validated, not skipped',
+        canValidate(classifyStatement('UPDATE orders SET status = 1 WHERE id = 2'), 'sqlite'),
+        'checking only reads is what made the old repair loop useless',
+    );
+    check(
+        'Postgres skips utility statements it cannot explain',
+        !canValidate(classifyStatement('CREATE TABLE t (a int)'), 'postgres'),
+        'reporting an unexplainable statement as invalid would have the model fix working SQL',
+    );
+    check(
+        'SQLite validates DDL, which it can explain',
+        canValidate(classifyStatement('CREATE TABLE t (a int)'), 'sqlite'),
+    );
+    check(
+        'an EXPLAIN is not wrapped in another EXPLAIN',
+        !canValidate(classifyStatement('EXPLAIN SELECT 1'), 'sqlite'),
+    );
+    check(
+        'a statement with no recognisable verb is still checked',
+        canValidate(classifyStatement('SELEC * FROM orders'), 'sqlite') &&
+            canValidate(classifyStatement('SELEC * FROM orders'), 'postgres'),
+        'unknown is where the classifier has no opinion and the engine has a good one',
+    );
 
     // -------------------------------------------------------- impact preview ---
     process.stdout.write('\nimpact preview\n');
@@ -370,6 +425,52 @@ async function main(): Promise<void> {
             unboundedImpact.exactRows === Number(total),
             'there is no predicate to count, so the answer is every row',
         );
+
+        // ------------------------------------- validating writes without running them ---
+        // The connection here is physically read-only, which makes it the
+        // sharpest possible proof that validation does not execute: a bare
+        // write is refused by the engine, while the same write compiles fine.
+        let bareWriteRefused = false;
+        try {
+            await fixture.run('UPDATE orders SET status = 1');
+        } catch {
+            bareWriteRefused = true;
+        }
+        check('the fixture refuses a bare write', bareWriteRefused);
+
+        const validWrite = await validateScript(
+            "UPDATE orders SET status = 'x' WHERE id = 1",
+            'sqlite',
+            (sql) => fixture.run(sql),
+        );
+        check(
+            'a valid write compiles on a read-only connection',
+            validWrite === null,
+            validWrite ? `reported: ${validWrite.error}` : '',
+        );
+
+        const badColumn = await validateScript(
+            'UPDATE orders SET nonexistent_column = 1 WHERE id = 1',
+            'sqlite',
+            (sql) => fixture.run(sql),
+        );
+        check(
+            'an unknown column in a write is caught before it runs',
+            badColumn !== null && /nonexistent_column/i.test(badColumn.error),
+            badColumn ? badColumn.error : 'no error reported',
+        );
+
+        const badSyntax = await validateScript('SELEC * FROM orders', 'sqlite', (sql) =>
+            fixture.run(sql),
+        );
+        check('a syntax error is caught', badSyntax !== null);
+
+        const validRead = await validateScript(
+            'SELECT id FROM orders WHERE status IS NOT NULL',
+            'sqlite',
+            (sql) => fixture.run(sql),
+        );
+        check('valid SQL reports no error', validRead === null);
 
         // ------------------------------------------------------- golden set ---
         process.stdout.write('\ngolden set\n');

@@ -23,6 +23,7 @@ import type { StatementClassification } from './sqlClassifier';
 import { DEFAULT_POLICY, type Provenance, type SafetyPolicy } from './sqlPolicy';
 
 const POLICY_STORAGE_KEY = 'sqlSafetyPolicies';
+const YOLO_ACK_KEY = 'sqlYoloAcknowledged';
 
 export interface ActiveConnection {
     /** Stable identity used as the policy key. */
@@ -121,6 +122,50 @@ export function isReadOnly(): boolean {
     return activePolicy() === 'read-only';
 }
 
+/**
+ * Whether the active connection runs generated SQL the instant it is written.
+ *
+ * Read by the editor to decide whether to execute a model's query itself
+ * rather than putting it in the box for review.
+ */
+export function isYolo(): boolean {
+    return activePolicy() === 'yolo';
+}
+
+function readYoloAcks(): string[] {
+    try {
+        const raw = localStorage.getItem(YOLO_ACK_KEY);
+        if (!raw) return [];
+        const parsed: unknown = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Whether this connection has already been warned about YOLO mode.
+ *
+ * Tracked separately from the policy itself so that switching away from YOLO
+ * and back does not re-prompt. The warning exists to stop someone landing in
+ * the mode from a mis-click in a dropdown, not to nag them about a choice
+ * they have already made for this database.
+ */
+export function hasAcknowledgedYolo(connectionId: string): boolean {
+    return readYoloAcks().includes(connectionId);
+}
+
+export function acknowledgeYolo(connectionId: string): void {
+    try {
+        const acks = readYoloAcks();
+        if (acks.includes(connectionId)) return;
+        acks.push(connectionId);
+        localStorage.setItem(YOLO_ACK_KEY, JSON.stringify(acks));
+    } catch (error) {
+        console.error('Failed to persist YOLO acknowledgement:', error);
+    }
+}
+
 /** Error thrown when a service is asked to mutate a read-only connection. */
 export class ReadOnlyConnectionError extends Error {
     constructor(operation: string) {
@@ -193,7 +238,11 @@ export async function recordDecision(record: DecisionRecord): Promise<void> {
 export function auditableStatements(
     statements: StatementClassification[],
     provenance: Provenance,
+    policy?: SafetyPolicy,
 ): StatementClassification[] {
-    if (provenance === 'ai') return statements;
+    // In YOLO nothing else is watching — no approval, no row count, no
+    // refusal — so the log stops being a convenience and becomes the only
+    // record that anything happened. It gets everything.
+    if (provenance === 'ai' || policy === 'yolo') return statements;
     return statements.filter((s) => s.kind !== 'read');
 }

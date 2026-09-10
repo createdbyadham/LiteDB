@@ -29,6 +29,7 @@
     "../src/lib/sqlTokenizer.ts",
     "../src/lib/sqlClassifier.ts",
     "../src/lib/sqlPolicy.ts",
-    "../src/lib/impactPreview.ts"
+    "../src/lib/impactPreview.ts",
+    "../src/lib/sqlValidator.ts"
   ]
 }
