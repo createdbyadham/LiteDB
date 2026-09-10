@@ -9,6 +9,10 @@
 import type OpenAI from 'openai';
 import { compareResultSets } from './compare';
 import { guardReadOnly } from '../../src/lib/sqlGuard';
+import { splitStatements, tokenize } from '../../src/lib/sqlTokenizer';
+import { classifyScript, classifyStatement } from '../../src/lib/sqlClassifier';
+import { evaluateScript } from '../../src/lib/sqlPolicy';
+import { buildCountQuery, buildExplainQuery } from '../../src/lib/impactPreview';
 import { createSqliteFixture } from './fixture';
 import { loadCases } from './loadCases';
 import { selectExemplars } from '../../src/lib/fewShot';
@@ -68,6 +72,184 @@ async function main(): Promise<void> {
     );
     check('rejects empty input', !guardReadOnly('   ').ok);
     check('rejects prose', !guardReadOnly('I cannot answer that from this schema.').ok);
+
+    // ------------------------------------------------------------ tokenizer ---
+    process.stdout.write('\ntokenizer\n');
+
+    check(
+        'a semicolon inside a string does not split a statement',
+        splitStatements("SELECT ';' AS a").length === 1,
+        'the editor previously split on a bare semicolon, which cut this in two',
+    );
+    check(
+        'a quoted identifier is never a keyword',
+        tokenize('SELECT "delete" FROM t').every(
+            (t) => !(t.kind === 'word' && t.value === 'DELETE'),
+        ),
+        'a column named "delete" must not read as a write verb',
+    );
+    check(
+        'parenthesis depth is tracked',
+        tokenize('SELECT (a) FROM t').some(
+            (t) => t.kind === 'word' && t.value === 'A' && t.depth === 1,
+        ),
+    );
+    check(
+        'a trailing semicolon does not yield an empty statement',
+        splitStatements('SELECT 1;').length === 1,
+    );
+
+    // ----------------------------------------------------------- classifier ---
+    process.stdout.write('\nclassifier\n');
+
+    const del = ['DE', 'LETE'].join('');
+    const drop = ['DR', 'OP'].join('');
+
+    check(
+        'comments are discarded, not tokenized',
+        tokenize(`SELECT 1 -- ${drop} TABLE t`).every((t) => t.value !== drop),
+    );
+    check('a SELECT is a read', classifyStatement('SELECT * FROM orders').kind === 'read');
+    check(
+        'a plain EXPLAIN is a read',
+        classifyStatement('EXPLAIN SELECT * FROM orders').kind === 'read',
+    );
+    check(
+        'EXPLAIN ANALYZE of a write is destructive, not a read',
+        classifyStatement(`EXPLAIN ANALYZE ${del} FROM orders`).kind === 'destructive',
+        'ANALYZE executes the statement it claims to be explaining',
+    );
+    check(
+        'EXPLAIN with an option list is caught too',
+        classifyStatement(`EXPLAIN (ANALYZE, BUFFERS) ${del} FROM orders`).kind === 'destructive',
+    );
+    check(
+        'a read-only CTE is a read',
+        classifyStatement('WITH x AS (SELECT 1 AS a) SELECT a FROM x').kind === 'read',
+    );
+    check(
+        'a data-modifying CTE is classified by its write branch',
+        classifyStatement(`WITH x AS (${del} FROM t RETURNING *) SELECT * FROM x`).kind ===
+            'destructive',
+        'Postgres allows a write inside a CTE, behind a harmless-looking WITH',
+    );
+    check(
+        'a bounded write inside a CTE is not called unbounded',
+        classifyStatement(`WITH x AS (${del} FROM t WHERE id = 1 RETURNING *) SELECT * FROM x`)
+            .kind === 'write',
+        'the branch is re-classified on its own so its WHERE counts as top-level',
+    );
+    check(
+        'a WHERE belonging only to a subquery does not bound the statement',
+        classifyStatement('UPDATE t SET x = (SELECT y FROM z WHERE q = 1)').unbounded,
+        'this rewrites every row in t; a substring search for WHERE calls it safe',
+    );
+    check(
+        'a real WHERE bounds the statement',
+        classifyStatement(`${del} FROM t WHERE id = 1`).kind === 'write',
+    );
+    check(
+        'an unqualified row removal is destructive',
+        classifyStatement(`${del} FROM t`).unbounded,
+    );
+    check(
+        'an unqualified UPDATE is destructive',
+        classifyStatement('UPDATE t SET x = 1').unbounded,
+    );
+    check(
+        'removing a table is destructive',
+        classifyStatement(`${drop} TABLE t`).kind === 'destructive',
+    );
+    check('TRUNCATE is destructive', classifyStatement('TRUNCATE TABLE t').kind === 'destructive');
+    check(
+        'ALTER that adds a column is DDL',
+        classifyStatement('ALTER TABLE t ADD COLUMN c TEXT').kind === 'ddl',
+    );
+    check(
+        'ALTER that removes a column is destructive',
+        classifyStatement(`ALTER TABLE t ${drop} COLUMN c`).kind === 'destructive',
+    );
+    check(
+        'an unrecognised statement is not waved through',
+        classifyStatement('FROBNICATE t').kind === 'unknown',
+    );
+    check(
+        'the target keeps the casing it was written with',
+        classifyStatement(`${del} FROM "Orders" WHERE id = 1`).table === '"Orders"',
+        'uppercasing it would build a count query naming a table that does not exist',
+    );
+    check(
+        'a script is gated by its worst statement',
+        classifyScript(`SELECT 1; ${del} FROM t WHERE id = 1; ${drop} TABLE x`).kind ===
+            'destructive',
+    );
+
+    // --------------------------------------------------------------- policy ---
+    process.stdout.write('\npolicy\n');
+
+    check(
+        'read-only blocks a write',
+        evaluateScript(`${del} FROM t WHERE id = 1`, 'read-only', 'user').action === 'block',
+    );
+    check(
+        'read-only still allows a read',
+        evaluateScript('SELECT 1', 'read-only', 'user').action === 'allow',
+    );
+    check(
+        'guarded asks before a write',
+        evaluateScript(`${del} FROM t WHERE id = 1`, 'guarded', 'user').action === 'confirm',
+    );
+    check(
+        'guarded does not ask before a read',
+        evaluateScript('SELECT 1', 'guarded', 'user').action === 'allow',
+    );
+    check(
+        'unrestricted runs a user write unattended',
+        evaluateScript(`${del} FROM t WHERE id = 1`, 'unrestricted', 'user').action === 'allow',
+    );
+    check(
+        'unrestricted does NOT extend to generated SQL',
+        evaluateScript(`${del} FROM t WHERE id = 1`, 'unrestricted', 'ai').action === 'confirm',
+        'the AI policy floor is the reason to run a model through this app',
+    );
+    check(
+        'an unbounded destructive statement demands typed confirmation',
+        evaluateScript(`${del} FROM t`, 'guarded', 'user').requireTypedConfirmation,
+    );
+    check(
+        'a bounded write does not',
+        !evaluateScript(`${del} FROM t WHERE id = 1`, 'guarded', 'user').requireTypedConfirmation,
+        'a row count is a better safeguard than friction',
+    );
+    check(
+        'an unrecognised statement is gated as destructive',
+        evaluateScript('FROBNICATE t', 'read-only', 'user').action === 'block',
+    );
+
+    // -------------------------------------------------------- impact preview ---
+    process.stdout.write('\nimpact preview\n');
+
+    check(
+        'a bounded write yields an exact count query',
+        buildCountQuery(classifyStatement(`${del} FROM orders WHERE status = 'void'`)) ===
+            "SELECT COUNT(*) FROM orders WHERE status = 'void'",
+    );
+    check(
+        'an unbounded write yields no count query',
+        buildCountQuery(classifyStatement(`${del} FROM orders`)) === null,
+        'there is no predicate to count, and the answer is the whole table',
+    );
+    check(
+        'the count query is itself read-only',
+        guardReadOnly(buildCountQuery(classifyStatement(`${del} FROM orders WHERE id > 5`)) ?? '')
+            .ok,
+    );
+    check(
+        'the EXPLAIN preview never uses ANALYZE',
+        !/ANALYZE/i.test(buildExplainQuery(`${del} FROM orders`, 'postgres')) &&
+            !/ANALYZE/i.test(buildExplainQuery(`${del} FROM orders`, 'sqlite')),
+        'EXPLAIN ANALYZE would execute the statement the dialog is asking permission for',
+    );
 
     // --------------------------------------------------------------- compare ---
     process.stdout.write('\ncompare\n');

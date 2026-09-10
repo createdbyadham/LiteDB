@@ -25,6 +25,10 @@
     "../src/lib/schemaTypes.ts",
     "../src/lib/schemaSamples.ts",
     "../src/lib/fewShot.ts",
-    "../src/lib/sqlGuard.ts"
+    "../src/lib/sqlGuard.ts",
+    "../src/lib/sqlTokenizer.ts",
+    "../src/lib/sqlClassifier.ts",
+    "../src/lib/sqlPolicy.ts",
+    "../src/lib/impactPreview.ts"
   ]
 }
