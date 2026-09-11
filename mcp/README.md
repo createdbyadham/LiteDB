@@ -32,19 +32,23 @@ To run exactly the statements above, call execute_approved with:
 ## Install
 
 If LiteDB is running, the server follows whatever you have open. In the app:
-Settings → **Agents**. Step-by-step for each host:
-[Connect an agent](../docs/connect-an-agent.md).
+Settings → **Agents**, or the status-bar **MCP** chip. Step-by-step for each
+host: [Connect an agent](../docs/connect-an-agent.md). Node **22.5+**.
+
+Windows:
 
 ```json
 {
   "mcpServers": {
     "litedb": {
-      "command": "npx",
-      "args": ["-y", "litedb-mcp"]
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "litedb-mcp"]
     }
   }
 }
 ```
+
+macOS / Linux: `"command": "npx", "args": ["-y", "litedb-mcp"]`.
 
 ```bash
 claude mcp add litedb --scope user -- npx -y litedb-mcp
