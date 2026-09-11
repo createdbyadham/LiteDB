@@ -158,16 +158,21 @@ function getSettings(): AISettings {
   return cachedSettings ?? loadAISettings();
 }
 
-function createClient() {
-  const settings = getSettings();
-  const config = settings.configs[settings.activeProvider];
-  
+/**
+ * Build a client for an explicit provider and config.
+ *
+ * Taking the config as an argument rather than reading the saved settings is
+ * what lets the settings dialog test a key the user has typed but not yet
+ * saved. Testing the *previous* credentials and reporting success would be
+ * worse than not testing at all.
+ */
+function clientFor(provider: AIProvider, config: AIProviderConfig) {
   // For Ollama, we need to ensure the apiKey is not empty (even if dummy) for the OpenAI client to work
-  const apiKey = settings.activeProvider === 'ollama' && !config.apiKey 
-    ? 'ollama' 
+  const apiKey = provider === 'ollama' && !config.apiKey
+    ? 'ollama'
     : config.apiKey;
 
-  return new OpenAI({ 
+  return new OpenAI({
     baseURL: config.endpoint || undefined,
     apiKey: apiKey,
     dangerouslyAllowBrowser: true,
@@ -215,6 +220,52 @@ function createClient() {
   });
 }
 
+function createClient() {
+  const settings = getSettings();
+  return clientFor(settings.activeProvider, settings.configs[settings.activeProvider]);
+}
+
+/** Fallback model when none is configured. */
+function defaultModelFor(provider: AIProvider): string {
+  switch (provider) {
+    case 'github':
+      return 'openai/gpt-4o-mini';
+    case 'ollama':
+      return 'llama3';
+    default:
+      return 'gpt-4';
+  }
+}
+
+/**
+ * Send the smallest possible completion, retrying with the newer parameter
+ * name if the model rejects the older one.
+ *
+ * Newer models reject `max_tokens` in favour of `max_completion_tokens`. A
+ * connection test that failed on that would report a bad key when the key is
+ * fine, which is the one thing a test must not do.
+ */
+async function pingModel(client: OpenAI, model: string): Promise<void> {
+  const base = {
+    model,
+    messages: [{ role: 'user' as const, content: 'ping' }],
+  };
+  try {
+    await client.chat.completions.create({ ...base, max_tokens: 1 });
+  } catch (error) {
+    if (!/max_tokens|max_completion_tokens/i.test(String(error))) throw error;
+    await client.chat.completions.create({ ...base, max_completion_tokens: 1 });
+  }
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  /** The provider's own message. Shown verbatim — it is usually specific. */
+  error?: string;
+  /** The model actually tested, after defaulting. */
+  model?: string;
+}
+
 // Re-create client when settings change
 window.addEventListener('aiSettingsChanged', () => {
   void loadAISettingsAsync().then(() => {
@@ -246,6 +297,49 @@ export const aiService = {
   activeModelName(): string | null {
     const settings = getSettings();
     return settings.configs[settings.activeProvider].modelName ?? null;
+  },
+  /**
+   * The models a provider says it has, so they can be picked rather than
+   * typed from memory.
+   *
+   * Uses the OpenAI-compatible `/models` endpoint, which Ollama and OpenAI
+   * both serve. Azure does not — its deployments are user-named and listed
+   * through a different management API — so it returns nothing and the field
+   * stays manual. Returning an empty list rather than throwing keeps that a
+   * normal outcome instead of an error the user has to interpret.
+   */
+  async listModels(provider: AIProvider, config: AIProviderConfig): Promise<string[]> {
+    if (provider === 'azure') return [];
+    const client = clientFor(provider, config);
+    const response = await client.models.list();
+    return response.data
+      .map((model) => model.id)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  },
+  /**
+   * Check that the configured provider, key and model actually work, by
+   * doing the smallest real thing: a one-token completion.
+   *
+   * Listing models is not enough — it proves the key is valid but not that
+   * the chosen model exists or is accessible to this account, which is the
+   * failure people actually hit.
+   */
+  async testConnection(
+    provider: AIProvider,
+    config: AIProviderConfig,
+  ): Promise<ConnectionTestResult> {
+    const model = config.modelName || defaultModelFor(provider);
+    try {
+      await pingModel(clientFor(provider, config), model);
+      return { ok: true, model };
+    } catch (error) {
+      return {
+        ok: false,
+        model,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   },
   /**
    * Set the schema, enriching enumerated columns with sample values when the
@@ -287,20 +381,9 @@ export const aiService = {
     try {
       const settings = getSettings();
       const config = settings.configs[settings.activeProvider];
-      let modelName = config.modelName;
-
-      if (!modelName) {
-        switch (settings.activeProvider) {
-          case 'github':
-            modelName = 'openai/gpt-4o-mini';
-            break;
-          case 'ollama':
-            modelName = 'llama3';
-            break;
-          default:
-            modelName = 'gpt-4';
-        }
-      }
+      // Shared with the connection test, so the model the test checks is the
+      // model that actually runs.
+      const modelName = config.modelName || defaultModelFor(settings.activeProvider);
 
       // K=3 retrieved exemplars. Measured on the eval harness as the single
       // largest win for a small local model (+8.3pp overall, +8.9pp on
