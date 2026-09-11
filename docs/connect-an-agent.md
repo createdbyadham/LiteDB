@@ -62,6 +62,8 @@ Watch, in this order:
    needs approval?
 3. Does it pause, or chain preview → execute on its own?
 
-If (1) does not prompt, the host allowlisted `execute_approved`. The preview
-text is still the record; the README’s honest-limits paragraph is doing real
-work. SQLite is the file on disk, not unsaved editor state — save first.
+If (1) does not prompt, the host auto-ran the tool (Cursor auto-accept, or
+`execute_approved` allowlisted). LiteDB cannot force that click. The preview
+text is still the record; [`mcp/README.md`](../mcp/README.md#what-it-does-not-do)
+is doing real work. SQLite is the file on disk, not unsaved editor state —
+save first.

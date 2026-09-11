@@ -56,9 +56,9 @@ unattended — even on a connection you have set to unrestricted.
 - **SQL Script Management**: Save and reuse your SQL scripts
 - **Dual Database Support**: Works with SQLite and PostgreSQL
 - **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries.
-  - **Privacy-First AI**: 100% Local Text-to-SQL support with Ollama.
-  - Supports OpenAI, any OpenAI-compatible endpoint, and Ollama.
-  - Schema is injected into the LLM upon initialization and refresh.
+  - Settings → **AI**: OpenAI, OpenAI-compatible (LM Studio, vLLM, GitHub Models, Azure, …), or Ollama. Default is Ollama.
+  - Same prompt the eval harness measures: schema + sample values (toggle), retrieved few-shot (K=3), one compile-repair pass.
+- **MCP**: Settings → **Agents**, or the status-bar **MCP** chip. Claude Desktop / Claude Code / Cursor / OpenCode / VS Code follow the open connection — [Connect an agent](docs/connect-an-agent.md).
 - **Write Safety**: Generated SQL is classified before it runs.
   - Read-only / guarded / unrestricted / YOLO modes, remembered per connection.
   - Unqualified `DELETE`/`UPDATE`, `DROP` and `TRUNCATE` intercepted.
@@ -95,11 +95,13 @@ LiteDB integrates advanced vector search capabilities powered by **pgvector** an
 
 ## AI Architecture (Text-to-SQL)
 
-Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline** to ensure high-accuracy SQL generation:
+Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline** to ensure high-accuracy SQL generation. Settings → **AI** is the live matrix: **OpenAI**, **OpenAI compatible**, **Ollama (local)**. GitHub Models / Azure used to be separate rows; they are OpenAI-compatible endpoints now.
 
-1.  **Schema Extraction**: On connection, the app actively introspects the database to extract table definitions, foreign keys, and data types.
-2.  **Dynamic Context Injection**: This metadata is formatted and injected into the LLM's system prompt (System Message), giving the model "awareness" of the specific database structure.
-3.  **Driver-Specific Validation**: The system prompts are tailored to the active driver (e.g., enforcing PostgreSQL specific syntax vs. SQLite), reducing syntax errors in generated queries.
+1.  **Schema Extraction**: On connection, the app introspects tables, foreign keys, and types.
+2.  **Dynamic Context Injection**: That metadata goes into the system prompt, dialect-specific (Postgres vs SQLite).
+3.  **Sample values** (on by default, toggle in Settings): a few distinct values from short enum-like columns so `"Germany"` can match stored `'DE'`. Emails, keys, and PII-looking columns are skipped.
+4.  **Retrieved few-shot (K=3)**: worked examples from an unrelated employees schema. Same default as `npm run eval`.
+5.  **Compile-repair**: if generated SQL does not compile, the engine error goes back to the model once. Writes included — it uses `EXPLAIN`, not a dry run.
 
 ### Measured accuracy
 
@@ -267,25 +269,31 @@ bundle.
 
 ## MCP server
 
-The same write-safety layer, exposed over the Model Context Protocol, so Claude
-Desktop or Claude Code can drive a local database through the guardrails instead
-of around them. That is the reason to point an agent at
-[`litedb-mcp`](mcp/README.md) rather than at a raw Postgres MCP server.
+The same write-safety layer, exposed over the Model Context Protocol, so an
+agent can drive a local database through the guardrails instead of around them.
+That is the reason to point it at [`litedb-mcp`](mcp/README.md) rather than at
+a raw Postgres MCP server.
 
 If LiteDB is running, the server follows whatever you have open. No paths in
 the config, no restart when you switch database. Fastest path: Settings →
-**Agents** in the app, or [Connect an agent](docs/connect-an-agent.md).
+**Agents**, or the status-bar **MCP** chip. Host-by-host:
+[Connect an agent](docs/connect-an-agent.md). Needs **Node 22.5+** on the PATH
+the host uses (`node:sqlite`).
+
+Windows (what the app copies):
 
 ```json
 {
   "mcpServers": {
     "litedb": {
-      "command": "npx",
-      "args": ["-y", "litedb-mcp"]
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "litedb-mcp"]
     }
   }
 }
 ```
+
+macOS / Linux: `"command": "npx", "args": ["-y", "litedb-mcp"]`.
 
 ```bash
 claude mcp add litedb --scope user -- npx -y litedb-mcp
@@ -303,13 +311,13 @@ Seven tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
 `list_vector_columns`, `semantic_search`, `audit_log` — plus a `litedb://schema`
 resource.
 
-**A write never runs on the first call.** `query` classifies the statement,
-measures its impact, and returns a preview and a single-use token; executing it
-is a second, separately named tool call, which is the one your MCP client stops
-and asks you about — with `2 rows of 4 in orders` already on screen. Because
-provenance over MCP is a model by definition, the AI floor applies at every
-setting, so even `unrestricted` previews. There is no configuration that runs a
-generated write unattended, and `LITEDB_POLICY=yolo` is refused at startup.
+**A write never runs on the first `query`.** That call classifies, measures
+impact, and returns a preview plus a single-use token. Running it is a second
+tool, `execute_approved`. Provenance over MCP is a model by definition, so even
+`unrestricted` previews; `LITEDB_POLICY=yolo` is refused at startup. LiteDB
+cannot make the host ask you — Cursor with auto-run will chain both tools
+without a click. The preview is still the record; see
+[`mcp/README.md`](mcp/README.md#what-it-does-not-do).
 
 Underneath the classifier, the engine enforces the same boundary independently —
 SQLite opened read-only, Postgres reads inside `BEGIN READ ONLY` that is always
@@ -336,7 +344,7 @@ own statements.
 
 ### Prerequisites
 
-- Node.js (v16 or higher)
+- Node.js **22.5+** (MCP uses `node:sqlite`; evals want **24+**)
 - Rust (latest stable)
 - PostgreSQL (if using PostgreSQL features)
 
@@ -480,7 +488,9 @@ src/lib/
   ├── impactPreview.ts   # exact row counts and EXPLAIN
   ├── auditLog.ts        # append-only JSONL
   ├── queryGate.ts       # per-connection policy, the audit write path
-  └── mcpHandoff.ts      # file the MCP server reads when you connect in the app
+  ├── mcpHandoff.ts      # file the MCP server reads when you connect in the app
+  ├── mcpAgentConfig.ts  # copy-paste snippets (Claude Code, Cursor, OpenCode, VS Code)
+  └── claudeDesktopMcp.ts # Settings → Agents “Add to Claude Desktop”
 ```
 
 ### Contributing
