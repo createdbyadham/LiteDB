@@ -111,9 +111,20 @@ produce one. Asking it to would mean shipping your search text to an embedding
 API. Here it is embedded by MiniLM or BGE running in this process, so
 "find rows about billing errors" never leaves the machine.
 
+Text search needs one extra package, which is **not** installed by default:
+
+```bash
+npm install @xenova/transformers
+```
+
+It is an optional peer dependency because it pulls in the ONNX runtime and
+sharp — around 210 MB, against 22 MB for the server itself. Charging that to
+someone who only wants `list_tables` would be the wrong default. Without it,
+`semantic_search` still works by `row_id`; text search returns the install
+command rather than failing obscurely.
+
 The first text search downloads the model (~23 MB for the default) and takes
-about 25 seconds. After that it is cached. Search by `row_id` needs no model
-at all.
+about 25 seconds. After that it is cached in `LITEDB_EMBEDDING_CACHE`.
 
 ## How the safety layer actually holds
 

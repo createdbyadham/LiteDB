@@ -28,7 +28,7 @@
     "typecheck:evals": "tsc --noEmit -p evals/tsconfig.json",
     "typecheck:mcp": "tsc --noEmit -p mcp/tsconfig.json",
     "mcp": "tsx mcp/src/index.ts",
-    "mcp:build": "esbuild mcp/src/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=mcp/dist/index.js --banner:js=\"#!/usr/bin/env node\"",
+    "mcp:build": "esbuild mcp/src/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --splitting --outdir=mcp/dist --banner:js=\"#!/usr/bin/env node\" && node mcp/scripts/verify-bundle.mjs",
     "mcp:selftest": "tsx mcp/src/selftest.ts",
     "eval": "tsx evals/src/index.ts",
     "eval:verify": "tsx evals/src/index.ts --verify-references",
