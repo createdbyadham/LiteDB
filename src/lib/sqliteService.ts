@@ -2,6 +2,8 @@
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
 import { assertIdent } from '@/lib/types';
+import { assertWritable, ReadOnlyConnectionError } from '@/lib/queryGate';
+import { classifyStatement } from '@/lib/sqlClassifier';
 import type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData } from '@/lib/types';
 
 export type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData };
@@ -14,6 +16,8 @@ interface Database {
     exec(sql: string): QueryResults[];
     close(): void;
     export(): Uint8Array;
+    /** Rows changed by the most recent statement. sql.js wraps sqlite3_changes. */
+    getRowsModified(): number;
 }
 
 interface QueryResults {
@@ -369,14 +373,33 @@ class SqliteService {
         }
     }
 
-    executeQuery(sql: string): { columns: string[], rows: unknown[][] } | null {
+    executeQuery(sql: string): { columns: string[], rows: unknown[][], rowsAffected: number } | null {
         if (!this.db) {
             return null;
         }
 
+        // Second layer. The SQL editor already asks the gate before it gets
+        // here, but a read-only connection has to hold for every caller —
+        // including the table editor and anything added later that forgets to
+        // ask. Enforcing it at the point of execution is what makes the mode a
+        // property of the connection rather than of one screen.
+        const classification = classifyStatement(sql);
+        if (classification.kind !== 'read') {
+            assertWritable(`the ${classification.verb || 'statement'}`);
+        }
+
         try {
             const result = this.db.exec(sql);
-            
+            // Read immediately after exec, before saveToDisk or anything else
+            // runs a statement of its own and moves the counter.
+            //
+            // Zero for a read, deliberately: sqlite3_changes reports the last
+            // statement that *modified* rows, and a SELECT does not reset it.
+            // Without this guard a SELECT run after an UPDATE inherited the
+            // UPDATE's count and claimed to have changed rows.
+            const rowsAffected =
+                classification.kind === 'read' ? 0 : this.db.getRowsModified();
+
             // Check if this was a modification query and trigger auto-save
             const upperSql = sql.trim().toUpperCase();
             if (this.currentFilePath && (
@@ -391,12 +414,13 @@ class SqliteService {
             }
 
             if (result.length === 0) {
-                return { columns: [], rows: [] };
+                return { columns: [], rows: [], rowsAffected };
             }
 
             return {
                 columns: result[0].columns || [],
-                rows: result[0].values || []
+                rows: result[0].values || [],
+                rowsAffected
             };
         } catch (error) {
             console.error("Error executing query:", error);
@@ -404,16 +428,31 @@ class SqliteService {
         }
     }
 
-    executeBatchOperations(sqlStatements: string[], useTransaction = true): { success: boolean; affectedTables: string[]; errors: string[] } {
+    executeBatchOperations(sqlStatements: string[], useTransaction = true): { success: boolean; affectedTables: string[]; errors: string[]; rowsAffected: number } {
         if (!this.db) {
-            return { success: false, affectedTables: [], errors: ["No database loaded"] };
+            return { success: false, affectedTables: [], errors: ["No database loaded"], rowsAffected: 0 };
         }
 
         // Track tables that might be affected by the operations
         const affectedTables: Set<string> = new Set();
         const errors: string[] = [];
+        // Summed across statements, so a multi-statement script reports what it
+        // actually changed rather than only what its last statement did.
+        let rowsAffected = 0;
 
         try {
+            // Before BEGIN, not inside the loop: a batch that refuses halfway
+            // through leaves the database in a state nobody asked for. Inside
+            // this try so a ReadOnlyConnectionError is returned as an error
+            // rather than thrown past the caller.
+            for (const statement of sqlStatements) {
+                const classification = classifyStatement(statement);
+                if (classification.kind !== 'read') {
+                    assertWritable(`the ${classification.verb || 'statement'}`);
+                    break;
+                }
+            }
+
             // Start transaction if requested
             if (useTransaction) {
                 this.db.exec("BEGIN TRANSACTION");
@@ -427,6 +466,12 @@ class SqliteService {
                 try {
                     // Execute the statement
                     this.db.exec(sql);
+                    // Reads are excluded for the same reason as in
+                    // executeQuery: sqlite3_changes still holds the previous
+                    // write's count when a SELECT runs.
+                    if (classifyStatement(sql).kind !== 'read') {
+                        rowsAffected += this.db.getRowsModified();
+                    }
 
                     // Try to identify affected tables from the SQL
                     const tableMatches = sql.match(/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE)\s+`?(\w+)`?/i);
@@ -443,7 +488,8 @@ class SqliteService {
                         return {
                             success: false,
                             affectedTables: [],
-                            errors: [`Batch operation failed and was rolled back. ${errorMessage}`]
+                            errors: [`Batch operation failed and was rolled back. ${errorMessage}`],
+                            rowsAffected: 0
                         };
                     }
 
@@ -464,7 +510,8 @@ class SqliteService {
             return {
                 success: errors.length === 0,
                 affectedTables: Array.from(affectedTables),
-                errors
+                errors,
+                rowsAffected
             };
         } catch (error) {
             // Handle any unexpected errors
@@ -479,7 +526,8 @@ class SqliteService {
             return {
                 success: false,
                 affectedTables: [],
-                errors: [error instanceof Error ? error.message : "Unknown error occurred during batch operation"]
+                errors: [error instanceof Error ? error.message : "Unknown error occurred during batch operation"],
+                rowsAffected: 0
             };
         }
     }
@@ -488,6 +536,7 @@ class SqliteService {
         if (!this.db) return false;
 
         try {
+            assertWritable(`the edit to ${tableName}`);
             assertIdent(tableName, 'table');
             // Get primary key column
             const primaryKeyColumn = this.getTableColumns(tableName).find(col => col.pk === 1);
@@ -531,6 +580,16 @@ class SqliteService {
             return true;
         } catch (error) {
             console.error('Error updating row:', error);
+            // A refusal is not a malfunction, and silently returning false
+            // leaves the user watching their edit revert with no explanation.
+            // Say which rule stopped it.
+            if (error instanceof ReadOnlyConnectionError) {
+                toast({
+                    title: "Read-only connection",
+                    description: error.message,
+                    variant: "destructive"
+                });
+            }
             return false;
         }
     }

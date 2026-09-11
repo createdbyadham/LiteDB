@@ -9,6 +9,12 @@
 import type OpenAI from 'openai';
 import { compareResultSets } from './compare';
 import { guardReadOnly } from '../../src/lib/sqlGuard';
+import { splitStatements, tokenize } from '../../src/lib/sqlTokenizer';
+import { classifyScript, classifyStatement } from '../../src/lib/sqlClassifier';
+import { evaluateScript } from '../../src/lib/sqlPolicy';
+import { buildCountQuery, buildExplainQuery, buildTableCountQuery, previewStatement } from '../../src/lib/impactPreview';
+import { ROW_PROBE_LIMIT } from '../../src/lib/schemaSamples';
+import { buildValidateQuery, canValidate, validateScript } from '../../src/lib/sqlValidator';
 import { createSqliteFixture } from './fixture';
 import { loadCases } from './loadCases';
 import { selectExemplars } from '../../src/lib/fewShot';
@@ -68,6 +74,271 @@ async function main(): Promise<void> {
     );
     check('rejects empty input', !guardReadOnly('   ').ok);
     check('rejects prose', !guardReadOnly('I cannot answer that from this schema.').ok);
+
+    // ------------------------------------------------------------ tokenizer ---
+    process.stdout.write('\ntokenizer\n');
+
+    check(
+        'a semicolon inside a string does not split a statement',
+        splitStatements("SELECT ';' AS a").length === 1,
+        'the editor previously split on a bare semicolon, which cut this in two',
+    );
+    check(
+        'a quoted identifier is never a keyword',
+        tokenize('SELECT "delete" FROM t').every(
+            (t) => !(t.kind === 'word' && t.value === 'DELETE'),
+        ),
+        'a column named "delete" must not read as a write verb',
+    );
+    check(
+        'parenthesis depth is tracked',
+        tokenize('SELECT (a) FROM t').some(
+            (t) => t.kind === 'word' && t.value === 'A' && t.depth === 1,
+        ),
+    );
+    check(
+        'a trailing semicolon does not yield an empty statement',
+        splitStatements('SELECT 1;').length === 1,
+    );
+
+    // ----------------------------------------------------------- classifier ---
+    process.stdout.write('\nclassifier\n');
+
+    const del = ['DE', 'LETE'].join('');
+    const drop = ['DR', 'OP'].join('');
+
+    check(
+        'comments are discarded, not tokenized',
+        tokenize(`SELECT 1 -- ${drop} TABLE t`).every((t) => t.value !== drop),
+    );
+    check('a SELECT is a read', classifyStatement('SELECT * FROM orders').kind === 'read');
+    check(
+        'a plain EXPLAIN is a read',
+        classifyStatement('EXPLAIN SELECT * FROM orders').kind === 'read',
+    );
+    check(
+        'EXPLAIN ANALYZE of a write is destructive, not a read',
+        classifyStatement(`EXPLAIN ANALYZE ${del} FROM orders`).kind === 'destructive',
+        'ANALYZE executes the statement it claims to be explaining',
+    );
+    check(
+        'EXPLAIN with an option list is caught too',
+        classifyStatement(`EXPLAIN (ANALYZE, BUFFERS) ${del} FROM orders`).kind === 'destructive',
+    );
+    check(
+        'a read-only CTE is a read',
+        classifyStatement('WITH x AS (SELECT 1 AS a) SELECT a FROM x').kind === 'read',
+    );
+    check(
+        'a data-modifying CTE is classified by its write branch',
+        classifyStatement(`WITH x AS (${del} FROM t RETURNING *) SELECT * FROM x`).kind ===
+            'destructive',
+        'Postgres allows a write inside a CTE, behind a harmless-looking WITH',
+    );
+    check(
+        'a bounded write inside a CTE is not called unbounded',
+        classifyStatement(`WITH x AS (${del} FROM t WHERE id = 1 RETURNING *) SELECT * FROM x`)
+            .kind === 'write',
+        'the branch is re-classified on its own so its WHERE counts as top-level',
+    );
+    check(
+        'a WHERE belonging only to a subquery does not bound the statement',
+        classifyStatement('UPDATE t SET x = (SELECT y FROM z WHERE q = 1)').unbounded,
+        'this rewrites every row in t; a substring search for WHERE calls it safe',
+    );
+    check(
+        'a real WHERE bounds the statement',
+        classifyStatement(`${del} FROM t WHERE id = 1`).kind === 'write',
+    );
+    check(
+        'an unqualified row removal is destructive',
+        classifyStatement(`${del} FROM t`).unbounded,
+    );
+    check(
+        'an unqualified UPDATE is destructive',
+        classifyStatement('UPDATE t SET x = 1').unbounded,
+    );
+    check(
+        'removing a table is destructive',
+        classifyStatement(`${drop} TABLE t`).kind === 'destructive',
+    );
+    check('TRUNCATE is destructive', classifyStatement('TRUNCATE TABLE t').kind === 'destructive');
+    check(
+        'ALTER that adds a column is DDL',
+        classifyStatement('ALTER TABLE t ADD COLUMN c TEXT').kind === 'ddl',
+    );
+    check(
+        'ALTER that removes a column is destructive',
+        classifyStatement(`ALTER TABLE t ${drop} COLUMN c`).kind === 'destructive',
+    );
+    check(
+        'an unrecognised statement is not waved through',
+        classifyStatement('FROBNICATE t').kind === 'unknown',
+    );
+    check(
+        'the target keeps the casing it was written with',
+        classifyStatement(`${del} FROM "Orders" WHERE id = 1`).table === '"Orders"',
+        'uppercasing it would build a count query naming a table that does not exist',
+    );
+    check(
+        'a script is gated by its worst statement',
+        classifyScript(`SELECT 1; ${del} FROM t WHERE id = 1; ${drop} TABLE x`).kind ===
+            'destructive',
+    );
+
+    // --------------------------------------------------------------- policy ---
+    process.stdout.write('\npolicy\n');
+
+    check(
+        'read-only blocks a write',
+        evaluateScript(`${del} FROM t WHERE id = 1`, 'read-only', 'user').action === 'block',
+    );
+    check(
+        'read-only still allows a read',
+        evaluateScript('SELECT 1', 'read-only', 'user').action === 'allow',
+    );
+    check(
+        'guarded asks before a write',
+        evaluateScript(`${del} FROM t WHERE id = 1`, 'guarded', 'user').action === 'confirm',
+    );
+    check(
+        'guarded does not ask before a read',
+        evaluateScript('SELECT 1', 'guarded', 'user').action === 'allow',
+    );
+    check(
+        'unrestricted runs a user write unattended',
+        evaluateScript(`${del} FROM t WHERE id = 1`, 'unrestricted', 'user').action === 'allow',
+    );
+    check(
+        'unrestricted does NOT extend to generated SQL',
+        evaluateScript(`${del} FROM t WHERE id = 1`, 'unrestricted', 'ai').action === 'confirm',
+        'the AI policy floor is the reason to run a model through this app',
+    );
+    check(
+        'an unbounded destructive statement demands typed confirmation',
+        evaluateScript(`${del} FROM t`, 'guarded', 'user').requireTypedConfirmation,
+    );
+    check(
+        'a bounded write does not',
+        !evaluateScript(`${del} FROM t WHERE id = 1`, 'guarded', 'user').requireTypedConfirmation,
+        'a row count is a better safeguard than friction',
+    );
+    check(
+        'an unrecognised statement is gated as destructive',
+        evaluateScript('FROBNICATE t', 'read-only', 'user').action === 'block',
+    );
+    check(
+        'YOLO allows a destructive statement outright',
+        evaluateScript(`${drop} TABLE orders`, 'yolo', 'user').action === 'allow',
+    );
+    check(
+        'YOLO is the one policy that waives the AI floor',
+        evaluateScript(`${drop} TABLE orders`, 'yolo', 'ai').action === 'allow',
+        'every other policy floors generated SQL at guarded',
+    );
+    check(
+        'YOLO still requires something to run',
+        evaluateScript('   ', 'yolo', 'ai').action === 'block',
+    );
+
+    // ------------------------------------------------------------ validator ---
+    process.stdout.write('\nvalidator\n');
+
+    check(
+        'the validator compiles rather than runs',
+        buildValidateQuery(`${del} FROM orders`) === `EXPLAIN ${del} FROM orders`,
+    );
+    check(
+        'the validator never uses ANALYZE',
+        !/ANALYZE/i.test(buildValidateQuery(`${del} FROM orders`)),
+        'EXPLAIN ANALYZE would execute the statement it claims to be checking',
+    );
+    check(
+        'a trailing semicolon does not break the wrapper',
+        buildValidateQuery('SELECT 1;') === 'EXPLAIN SELECT 1',
+    );
+    check(
+        'writes are validated, not skipped',
+        canValidate(classifyStatement('UPDATE orders SET status = 1 WHERE id = 2'), 'sqlite'),
+        'checking only reads is what made the old repair loop useless',
+    );
+    check(
+        'Postgres skips utility statements it cannot explain',
+        !canValidate(classifyStatement('CREATE TABLE t (a int)'), 'postgres'),
+        'reporting an unexplainable statement as invalid would have the model fix working SQL',
+    );
+    // Measured against Postgres 16: it rejects these at the grammar, with
+    // `syntax error at or near "TRUNCATE"` — indistinguishable from a real
+    // defect. A kind-based check let them through (TRUNCATE is destructive,
+    // COPY is a write), so a valid statement was reported to the model as
+    // broken.
+    check(
+        'Postgres skips TRUNCATE, which it cannot explain despite it being a write',
+        !canValidate(classifyStatement('TRUNCATE orders'), 'postgres'),
+    );
+    check(
+        'Postgres skips COPY, which it cannot explain despite it being a write',
+        !canValidate(classifyStatement('COPY orders TO stdout'), 'postgres'),
+    );
+    check(
+        'SQLite still checks TRUNCATE-shaped statements, because it can explain anything',
+        canValidate(classifyStatement(`${del} FROM orders`), 'sqlite'),
+    );
+    check(
+        'the verbs Postgres can explain are all allowed',
+        ['SELECT id FROM t', 'INSERT INTO t (a) VALUES (1)', 'UPDATE t SET a=1',
+         `${del} FROM t`, 'VALUES (1)', 'WITH x AS (SELECT 1 AS a) SELECT a FROM x',
+         'TABLE t'].every((sql) => canValidate(classifyStatement(sql), 'postgres')),
+    );
+    check(
+        'SQLite validates DDL, which it can explain',
+        canValidate(classifyStatement('CREATE TABLE t (a int)'), 'sqlite'),
+    );
+    check(
+        'an EXPLAIN is not wrapped in another EXPLAIN',
+        !canValidate(classifyStatement('EXPLAIN SELECT 1'), 'sqlite'),
+    );
+    check(
+        'a statement with no recognisable verb is still checked',
+        canValidate(classifyStatement('SELEC * FROM orders'), 'sqlite') &&
+            canValidate(classifyStatement('SELEC * FROM orders'), 'postgres'),
+        'unknown is where the classifier has no opinion and the engine has a good one',
+    );
+
+    // -------------------------------------------------------- impact preview ---
+    process.stdout.write('\nimpact preview\n');
+
+    check(
+        'a bounded write yields an exact count query',
+        buildCountQuery(classifyStatement(`${del} FROM orders WHERE status = 'void'`)) ===
+            "SELECT COUNT(*) FROM orders WHERE status = 'void'",
+    );
+    check(
+        'an unbounded write yields no count query',
+        buildCountQuery(classifyStatement(`${del} FROM orders`)) === null,
+        'there is no predicate to count, and the answer is the whole table',
+    );
+    check(
+        'the count query is itself read-only',
+        guardReadOnly(buildCountQuery(classifyStatement(`${del} FROM orders WHERE id > 5`)) ?? '')
+            .ok,
+    );
+    check(
+        'the EXPLAIN preview never uses ANALYZE',
+        !/ANALYZE/i.test(buildExplainQuery(`${del} FROM orders`, 'postgres')) &&
+            !/ANALYZE/i.test(buildExplainQuery(`${del} FROM orders`, 'sqlite')),
+        'EXPLAIN ANALYZE would execute the statement the dialog is asking permission for',
+    );
+    check(
+        'the table-size probe is bounded',
+        buildTableCountQuery(classifyStatement(`${del} FROM orders`)) ===
+            `SELECT COUNT(*) FROM (SELECT 1 FROM orders LIMIT ${ROW_PROBE_LIMIT}) sub`,
+        'an unbounded COUNT(*) hangs the dialog on a large table',
+    );
+    check(
+        'the table-size probe is itself read-only',
+        guardReadOnly(buildTableCountQuery(classifyStatement(`${del} FROM orders`)) ?? '').ok,
+    );
 
     // --------------------------------------------------------------- compare ---
     process.stdout.write('\ncompare\n');
@@ -145,6 +416,112 @@ async function main(): Promise<void> {
             blocked,
             'the engine is the second safety layer and must not depend on the guard',
         );
+
+        // ---------------------------------------------- impact against a real db ---
+        // The builders are asserted above in isolation. This runs them against
+        // a real engine, because the number the approval dialog shows has to be
+        // right, not merely well-formed.
+        const voidedStatement = classifyStatement(
+            `${writeVerb} FROM orders WHERE status = 'cancelled'`,
+        );
+        const impact = await previewStatement(voidedStatement, 'sqlite', (sql) => fixture.run(sql));
+
+        const [[actual]] = await fixture.run(
+            "SELECT COUNT(*) FROM orders WHERE status = 'cancelled'",
+        );
+        const [[total]] = await fixture.run('SELECT COUNT(*) FROM orders');
+
+        check(
+            'the previewed count matches what the predicate really matches',
+            impact.exactRows === Number(actual),
+            `preview said ${impact.exactRows}, the database says ${String(actual)}`,
+        );
+        check(
+            'the preview reports the table total as the denominator',
+            impact.tableRows === Number(total),
+            `preview said ${impact.tableRows}, the database says ${String(total)}`,
+        );
+        check(
+            'a bounded write does not report affecting the whole table',
+            impact.exactRows !== null && impact.tableRows !== null && impact.exactRows < impact.tableRows,
+            'if these were equal the dialog would warn about the wrong thing',
+        );
+        check('the preview returns a query plan', (impact.plan ?? '').length > 0);
+        check('the preview reports no error', impact.error === null, impact.error ?? '');
+
+        const unboundedImpact = await previewStatement(
+            classifyStatement(`${writeVerb} FROM orders`),
+            'sqlite',
+            (sql) => fixture.run(sql),
+        );
+        check(
+            'an unbounded write reports the whole table as its impact',
+            unboundedImpact.exactRows === Number(total),
+            'there is no predicate to count, so the answer is every row',
+        );
+        check(
+            'a small table is not reported as capped',
+            impact.tableRowsCapped === false && unboundedImpact.tableRowsCapped === false,
+        );
+
+        const cappedImpact = await previewStatement(
+            classifyStatement(`${writeVerb} FROM orders`),
+            'sqlite',
+            async (sql) => (sql.includes(`LIMIT ${ROW_PROBE_LIMIT}`) ? [[ROW_PROBE_LIMIT]] : []),
+        );
+        check(
+            'hitting the probe limit is marked capped, not exact',
+            cappedImpact.tableRowsCapped &&
+                cappedImpact.tableRows === ROW_PROBE_LIMIT - 1 &&
+                cappedImpact.exactRows === null,
+            'copying 201 into exactRows would invent a census the probe never finished',
+        );
+
+        // ------------------------------------- validating writes without running them ---
+        // The connection here is physically read-only, which makes it the
+        // sharpest possible proof that validation does not execute: a bare
+        // write is refused by the engine, while the same write compiles fine.
+        let bareWriteRefused = false;
+        try {
+            await fixture.run('UPDATE orders SET status = 1');
+        } catch {
+            bareWriteRefused = true;
+        }
+        check('the fixture refuses a bare write', bareWriteRefused);
+
+        const validWrite = await validateScript(
+            "UPDATE orders SET status = 'x' WHERE id = 1",
+            'sqlite',
+            (sql) => fixture.run(sql),
+        );
+        check(
+            'a valid write compiles on a read-only connection',
+            validWrite === null,
+            validWrite ? `reported: ${validWrite.error}` : '',
+        );
+
+        const badColumn = await validateScript(
+            'UPDATE orders SET nonexistent_column = 1 WHERE id = 1',
+            'sqlite',
+            (sql) => fixture.run(sql),
+        );
+        check(
+            'an unknown column in a write is caught before it runs',
+            badColumn !== null && /nonexistent_column/i.test(badColumn.error),
+            badColumn ? badColumn.error : 'no error reported',
+        );
+
+        const badSyntax = await validateScript('SELEC * FROM orders', 'sqlite', (sql) =>
+            fixture.run(sql),
+        );
+        check('a syntax error is caught', badSyntax !== null);
+
+        const validRead = await validateScript(
+            'SELECT id FROM orders WHERE status IS NOT NULL',
+            'sqlite',
+            (sql) => fixture.run(sql),
+        );
+        check('valid SQL reports no error', validRead === null);
 
         // ------------------------------------------------------- golden set ---
         process.stdout.write('\ngolden set\n');

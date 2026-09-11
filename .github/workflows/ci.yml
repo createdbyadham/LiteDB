@@ -29,6 +29,9 @@ jobs:
       - name: Typecheck (app)
         run: npm run typecheck:app
 
+      - name: Typecheck (MCP server)
+        run: npm run typecheck:mcp
+
   evals:
     name: Eval harness (no API calls)
     runs-on: ubuntu-latest
@@ -54,6 +57,33 @@ jobs:
       # case before it can masquerade as a model failure in a scored run.
       - name: Verify golden set
         run: npm run eval:verify
+
+  mcp:
+    name: MCP server (no API calls)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # node:sqlite is unflagged from Node 24 onwards.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm install
+
+      # Asserts the outcome rather than the call: a write must still be
+      # sitting in the table after `query` returns its preview. Every piece of
+      # the guarantee — classifier, policy floor, token store, read-only
+      # connection — can degrade silently, leaving a server that still answers
+      # questions correctly and guards nothing.
+      - name: Server self-test
+        run: npm run mcp:selftest
+
+      # The published artefact is the bundle, not the sources.
+      - name: Build the distributable
+        run: npm run mcp:build
 
   rust:
     runs-on: ubuntu-22.04
