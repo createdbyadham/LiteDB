@@ -18,6 +18,7 @@ import {
     type AuditEntry,
     type AuditOutcome,
 } from './auditLog';
+import { clearHandoff, writeActiveHandoff, type HandoffPostgres } from './mcpHandoff';
 import type { SqlDialect } from './schemaTypes';
 import type { StatementClassification } from './sqlClassifier';
 import { DEFAULT_POLICY, type Provenance, type SafetyPolicy } from './sqlPolicy';
@@ -31,6 +32,10 @@ export interface ActiveConnection {
     /** What the user sees in the status bar and the audit log. */
     label: string;
     dialect: SqlDialect;
+    /** Absolute path of the open file. Null for an in-memory database. */
+    sqlitePath?: string | null;
+    /** Addressing plus password, so the MCP server can follow this connection. */
+    postgres?: HandoffPostgres;
 }
 
 function readPolicies(): Record<string, SafetyPolicy> {
@@ -70,6 +75,9 @@ export function setPolicyFor(connectionId: string, policy: SafetyPolicy): void {
     window.dispatchEvent(
         new CustomEvent('sqlPolicyChanged', { detail: { connectionId, policy } }),
     );
+    if (active && active.id === connectionId) {
+        void writeActiveHandoff(active, policy);
+    }
 }
 
 // Which connection the services should consult. A desktop client holds one at
@@ -82,11 +90,13 @@ export function setActiveConnection(connection: ActiveConnection): void {
     window.dispatchEvent(
         new CustomEvent('sqlPolicyChanged', { detail: { connectionId: connection.id } }),
     );
+    void writeActiveHandoff(connection, policyFor(connection.id));
 }
 
 export function clearActiveConnection(): void {
     active = null;
     window.dispatchEvent(new CustomEvent('sqlPolicyChanged', { detail: { connectionId: null } }));
+    void clearHandoff();
 }
 
 export function activeConnection(): ActiveConnection | null {

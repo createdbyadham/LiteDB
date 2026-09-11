@@ -18,15 +18,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { auditLogLocation, readAudit } from '../../src/lib/auditLog';
-import { installAudit } from './audit';
-import { ConfigError, loadConfig, type ServerConfig } from './config';
-import { openDatabase } from './db';
+import { ConfigError, type ServerConfig } from './config';
+import { LiveSession } from './session';
 import { pluralRows } from './render';
-import { runApproved, runQuery, type ToolContext, type ToolResult } from './tools/query';
+import { runApproved, runQuery, type ToolResult } from './tools/query';
 import { describeTable, listTables, renderSchema } from './tools/schema';
 import { listVectorColumns, semanticSearch, type DistanceMetric } from './tools/vector';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 /** stdout carries the protocol. Everything human-readable goes to stderr. */
 function log(message: string): void {
@@ -74,41 +73,37 @@ function policyBlurb(config: ServerConfig): string {
 }
 
 async function main(): Promise<void> {
-    let config: ServerConfig;
+    const session = new LiveSession();
+
     try {
-        config = loadConfig();
+        const config = (await session.context()).config;
+        log(`litedb-mcp ${VERSION}`);
+        log(`  database: ${config.connectionId} (${config.source})`);
+        log(`  policy:   ${config.policy}`);
+        log(`  audit:    ${config.auditPath}`);
+        log(`  ${policyBlurb(config)}`);
     } catch (error) {
-        if (error instanceof ConfigError) {
+        if (error instanceof ConfigError && !error.retryable) {
             log(`litedb-mcp: ${error.message}`);
             process.exit(1);
         }
-        throw error;
+        log(`litedb-mcp ${VERSION}`);
+        log(`  waiting: ${error instanceof Error ? error.message : String(error)}`);
     }
-
-    const db = await openDatabase(config);
-    installAudit({
-        connection: config.connectionId,
-        dialect: config.dialect,
-        policy: config.policy,
-        path: config.auditPath,
-    });
-
-    const ctx: ToolContext = { db, config };
-
-    log(`litedb-mcp ${VERSION}`);
-    log(`  database: ${config.connectionId}`);
-    log(`  policy:   ${config.policy}`);
-    log(`  audit:    ${config.auditPath}`);
 
     const server = new McpServer(
         { name: 'litedb', version: VERSION },
         {
             instructions: [
-                `LiteDB is connected to ${config.connectionId} (${config.dialect}).`,
-                policyBlurb(config),
+                'Talks to the database currently open in the LiteDB desktop app, or to ' +
+                    'LITEDB_SQLITE_PATH / LITEDB_DATABASE_URL if those are set. Switch ' +
+                    'database or policy in the app and the next tool call follows — no restart. ' +
+                    'If the app is in YOLO, this server maps that down to guarded. ' +
+                    'SQLite is the file on disk, not unsaved editor state — save first.',
                 'Start with list_tables and describe_table — describe_table reports the ' +
                     'values a low-cardinality column actually holds, which is usually the ' +
                     'difference between a query that runs and one that is right.',
+                'Writes are previewed; running them is a separate execute_approved call.',
             ].join(' '),
         },
     );
@@ -125,7 +120,7 @@ async function main(): Promise<void> {
             inputSchema: {},
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
-        async () => guard(() => listTables(ctx)),
+        async () => guard(async () => listTables(await session.context())),
     );
 
     server.registerTool(
@@ -150,7 +145,9 @@ async function main(): Promise<void> {
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
         async ({ table, include_sample_values }) =>
-            guard(() => describeTable(ctx, table, include_sample_values ?? true)),
+            guard(async () =>
+                describeTable(await session.context(), table, include_sample_values ?? true),
+            ),
     );
 
     // -------------------------------------------------------------- query ---
@@ -172,7 +169,7 @@ async function main(): Promise<void> {
             // write half is execute_approved, annotated accordingly.
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
-        async ({ sql }) => guard(() => runQuery(ctx, sql)),
+        async ({ sql }) => guard(async () => runQuery(await session.context(), sql)),
     );
 
     server.registerTool(
@@ -195,7 +192,8 @@ async function main(): Promise<void> {
                 openWorldHint: false,
             },
         },
-        async ({ token }) => guard(() => runApproved(ctx, token)),
+        async ({ token }) =>
+            guard(async () => runApproved(await session.context(), token)),
     );
 
     // ------------------------------------------------------------ vectors ---
@@ -210,7 +208,7 @@ async function main(): Promise<void> {
             inputSchema: {},
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
-        async () => guard(() => listVectorColumns(ctx)),
+        async () => guard(async () => listVectorColumns(await session.context())),
     );
 
     server.registerTool(
@@ -243,8 +241,8 @@ async function main(): Promise<void> {
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
         async ({ table, column, text, row_id, limit, metric }) =>
-            guard(() =>
-                semanticSearch(ctx, {
+            guard(async () =>
+                semanticSearch(await session.context(), {
                     table,
                     column,
                     text,
@@ -272,6 +270,7 @@ async function main(): Promise<void> {
         },
         async ({ limit }) =>
             guard(async () => {
+                await session.context();
                 const entries = await readAudit(limit ?? 20);
                 if (entries.length === 0) {
                     return { text: `Nothing logged yet. The log lives at ${auditLogLocation()}.` };
@@ -303,9 +302,30 @@ async function main(): Promise<void> {
                 'calling describe_table for each table when you need the whole picture.',
             mimeType: 'text/plain',
         },
-        async (uri) => ({
-            contents: [{ uri: uri.href, mimeType: 'text/plain', text: await renderSchema(ctx) }],
-        }),
+        async (uri) => {
+            try {
+                const ctx = await session.context();
+                return {
+                    contents: [
+                        {
+                            uri: uri.href,
+                            mimeType: 'text/plain',
+                            text: await renderSchema(ctx),
+                        },
+                    ],
+                };
+            } catch (error) {
+                return {
+                    contents: [
+                        {
+                            uri: uri.href,
+                            mimeType: 'text/plain',
+                            text: error instanceof Error ? error.message : String(error),
+                        },
+                    ],
+                };
+            }
+        },
     );
 
     const transport = new StdioServerTransport();
@@ -313,7 +333,7 @@ async function main(): Promise<void> {
 
     const shutdown = async (): Promise<void> => {
         try {
-            await db.close();
+            await session.close();
         } finally {
             process.exit(0);
         }

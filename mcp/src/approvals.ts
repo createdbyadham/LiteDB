@@ -41,6 +41,16 @@ export interface PendingApproval {
     token: string;
     /** Exactly what was previewed, and exactly what will run. */
     sql: string;
+    /** The connection the preview was taken against. */
+    connectionId: string;
+    /**
+     * The live target (path or URL) at preview time.
+     *
+     * connectionId is host/port/database and excludes the user. Two roles on
+     * the same database share an id; the target does not. Binding both means
+     * a token issued as ada cannot execute as admin.
+     */
+    target: string;
     decision: GateDecision;
     estimates: ImpactEstimate[];
     createdAt: number;
@@ -58,6 +68,8 @@ export function create(
     sql: string,
     decision: GateDecision,
     estimates: ImpactEstimate[],
+    connectionId: string,
+    target: string,
     now = Date.now(),
 ): PendingApproval {
     sweep(now);
@@ -72,6 +84,8 @@ export function create(
     const approval: PendingApproval = {
         token: randomUUID(),
         sql,
+        connectionId,
+        target,
         decision,
         estimates,
         createdAt: now,
@@ -91,11 +105,30 @@ export class UnknownApprovalError extends Error {
     }
 }
 
+export class StaleApprovalError extends Error {
+    constructor() {
+        super(
+            'This approval was issued against a different database than the one now ' +
+                'open. The token is still valid — switch back, or call query again to ' +
+                'preview against the current database.',
+        );
+        this.name = 'StaleApprovalError';
+    }
+}
+
 /** Take an approval out of the store. Succeeds at most once per token. */
-export function claim(token: string, now = Date.now()): PendingApproval {
+export function claim(
+    token: string,
+    connectionId: string,
+    target: string,
+    now = Date.now(),
+): PendingApproval {
     sweep(now);
     const approval = pending.get(token);
     if (!approval) throw new UnknownApprovalError();
+    if (approval.connectionId !== connectionId || approval.target !== target) {
+        throw new StaleApprovalError();
+    }
     pending.delete(token);
     return approval;
 }

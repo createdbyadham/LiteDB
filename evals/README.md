@@ -581,7 +581,7 @@ any query producing the same rows.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--provider` | `ollama` | `openai`, `github`, `azure`, `ollama` |
+| `--provider` | `ollama` | `openai`, `openai-compatible`, `ollama` |
 | `--model` | provider default | Model override |
 | `--dialect` | `sqlite` | `sqlite` or `postgres` |
 | `--slice` | all | Restrict to one slice |
@@ -608,8 +608,7 @@ which is the fastest way to see what a prompt change actually did.
 | Provider | Environment |
 | --- | --- |
 | `openai` | `OPENAI_API_KEY` |
-| `github` | `GITHUB_MODELS_TOKEN` or `GITHUB_TOKEN` |
-| `azure` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` |
+| `openai-compatible` | `OPENAI_BASE_URL`, optional `OPENAI_COMPAT_API_KEY` or `OPENAI_API_KEY` |
 | `ollama` | none (`OLLAMA_HOST` to override the endpoint) |
 
 Results are written to `results/<tag>.json` and `results/<tag>.md`.

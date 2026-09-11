@@ -18,7 +18,7 @@
   "include": [
     "src",
     "../src/lib/auditLog.ts",
-    "../src/lib/connectionId.ts",
+    "../src/lib/mcpHandoff.ts",
     "../src/lib/impactPreview.ts",
     "../src/lib/schemaSamples.ts",
     "../src/lib/schemaTypes.ts",

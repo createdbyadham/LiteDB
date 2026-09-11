@@ -31,6 +31,35 @@ To run exactly the statements above, call execute_approved with:
 
 ## Install
 
+If LiteDB is running, the server follows whatever you have open. In the app:
+Settings → **Agents**. Step-by-step for each host:
+[Connect an agent](../docs/connect-an-agent.md).
+
+```json
+{
+  "mcpServers": {
+    "litedb": {
+      "command": "npx",
+      "args": ["-y", "litedb-mcp"]
+    }
+  }
+}
+```
+
+```bash
+claude mcp add litedb --scope user -- npx -y litedb-mcp
+```
+
+Switch database in the app, or flip the status-bar policy, and the next tool
+call follows. No paths, no restart. YOLO in the app maps down to `guarded`.
+
+That file is `claude_desktop_config.json` for Claude Desktop; for Claude Code
+it is `.mcp.json` in the project, or `claude mcp add`. MCP servers load at
+startup, so add it, then start a fresh session.
+
+Without the app — a CI box, a machine that has never launched LiteDB — set the
+target as environment variables. Env wins when both are present:
+
 ```json
 {
   "mcpServers": {
@@ -54,31 +83,42 @@ For PostgreSQL, swap the env block:
 }
 ```
 
-That file is `claude_desktop_config.json` for Claude Desktop; for Claude Code
-it is `.mcp.json` in the project, or `claude mcp add`.
-
 ## Configuration
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `LITEDB_SQLITE_PATH` | — | Path to a SQLite file. Mutually exclusive with the next. |
-| `LITEDB_DATABASE_URL` | — | `postgres://…` connection string. |
-| `LITEDB_POLICY` | `read-only` | `read-only`, `guarded`, or `unrestricted`. |
+| *(none)* | the app's open database | Handoff file next to the audit log. |
+| `LITEDB_SQLITE_PATH` | — | Path to a SQLite file. Mutually exclusive with the next. Wins over the app. |
+| `LITEDB_DATABASE_URL` | — | `postgres://…` connection string. Wins over the app. |
+| `LITEDB_POLICY` | app dropdown, or `read-only` for env | `read-only`, `guarded`, or `unrestricted`. |
 | `LITEDB_MAX_ROWS` | `200` | Cap on rows returned by one tool call. |
 | `LITEDB_AUDIT_PATH` | the desktop app's log | Where statements are recorded. |
 | `LITEDB_EMBEDDING_MODEL` | `minilm` | `minilm` (384d), `bge-base` (768d), `bge-large` (1024d). |
 | `LITEDB_EMBEDDING_CACHE` | `<app data>/models` | Where the embedding model is downloaded to. |
 
-**The default is `read-only`,** which is the opposite of the desktop app's
-`guarded` default and deliberately so. The app's first job is editing tables
-and there is a person in front of it; here the caller is a model and the
-session may be unattended. Opt into writes explicitly.
+**Following the app.** Connect in LiteDB and the agent uses that database. The
+status-bar dropdown is the policy. SQLite is the file on disk, not the
+editor's unsaved buffer — save first if you have been editing. An in-memory
+database cannot be shared; save it to a file.
 
-**`yolo` is not available.** In the app it is a real mode, behind a
+**The env default is `read-only`,** which is the opposite of the desktop app's
+`guarded` default and deliberately so. The app's first job is editing tables
+and there is a person in front of it; a server started from env alone is a
+model and the session may be unattended. Opt into writes explicitly, or use
+the app's dropdown.
+
+**`yolo` is not available over MCP.** In the app it is a real mode, behind a
 confirmation, with a banner in the status bar and someone at the keyboard.
-Over MCP there is no banner and nobody is necessarily watching, so it would
-just be an unattended agent with unlimited write access. The server refuses to
-start with `LITEDB_POLICY=yolo` and says why.
+If the app is in YOLO, the handoff maps that down to `guarded`. Setting
+`LITEDB_POLICY=yolo` refuses to start and says why.
+
+**The Postgres password.** Sharing a connection means sharing the credential.
+The handoff file stores it in plaintext in your app-data directory — the same
+exposure as putting it in `claude_desktop_config.json`, in a less
+screenshot-prone place, and out of a file you might sync between machines.
+The cleaner version would read it back out of the OS keychain where LiteDB
+already put it, but that needs a native module and would cost the package its
+"22 MB, no native deps" property.
 
 ## Tools
 
@@ -196,7 +236,7 @@ Point `LITEDB_AUDIT_PATH` somewhere else if you would rather keep them apart.
 ## Development
 
 ```bash
-npm run mcp:selftest   # 58 assertions, no model, no API key, no network
+npm run mcp:selftest   # 73 assertions, no model, no API key, no network
 npm run typecheck:mcp
 npm run mcp:build      # bundles to mcp/dist/index.js
 ```

@@ -2,7 +2,7 @@
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
 import { assertIdent } from '@/lib/types';
-import { assertWritable } from '@/lib/queryGate';
+import { assertWritable, clearActiveConnection } from '@/lib/queryGate';
 import { classifyStatement } from '@/lib/sqlClassifier';
 import type { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/types';
 
@@ -81,6 +81,7 @@ class PgService {
       this.currentTables = [];
       this.currentConfig = null;
       this.connected = false;
+      clearActiveConnection();
 
       toast({
         title: "Connection Error",
@@ -573,6 +574,7 @@ class PgService {
       this.currentTables = [];
       this.hasPgVector = false;
       this.vectorColumns = [];
+      clearActiveConnection();
     }
   }
 

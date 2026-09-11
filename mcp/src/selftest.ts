@@ -10,14 +10,22 @@
 // So the assertions below check the *outcome* — did the row change? — rather
 // than checking that the right function was called.
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { parseLog } from '../../src/lib/auditLog';
+import {
+    mcpPolicyFromApp,
+    parseHandoff,
+    postgresTarget,
+    serializeHandoff,
+    type McpHandoff,
+} from '../../src/lib/mcpHandoff';
+import { mergeLiteDbMcp } from '../../src/lib/mcpAgentConfig';
 import * as approvals from './approvals';
 import { installAudit } from './audit';
-import { ConfigError, defaultAuditPath, loadConfig, type ServerConfig } from './config';
+import { ConfigError, IN_MEMORY_MESSAGE, NO_DATABASE_MESSAGE, defaultAuditPath, loadConfig, type ServerConfig } from './config';
 import { openDatabase, ReadOnlyServerError, type Database } from './db';
 import { renderTable } from './render';
 import { runApproved, runQuery, type ToolContext } from './tools/query';
@@ -90,6 +98,7 @@ function configFor(harness: Harness, policy: ServerConfig['policy']): ServerConf
         auditPath: harness.auditPath,
         embeddingModelId: 'minilm',
         modelCachePath: join(harness.dir, 'models'),
+        source: 'env',
     };
 }
 
@@ -127,9 +136,14 @@ async function main(): Promise<void> {
     // ------------------------------------------------------------ config ---
     process.stdout.write('\nconfig\n');
 
+    const missingHandoff = join(tmpdir(), 'litedb-mcp-no-handoff.json');
+    const noDb = threw(() => loadConfig({ LITEDB_HANDOFF_PATH: missingHandoff }));
     check(
         'refuses to start with no database',
-        threw(() => loadConfig({})) instanceof ConfigError,
+        noDb instanceof ConfigError &&
+            noDb.retryable &&
+            noDb.message === NO_DATABASE_MESSAGE,
+        'the error has to mention both the app and the env vars',
     );
 
     check(
@@ -142,7 +156,7 @@ async function main(): Promise<void> {
     const yolo = threw(() => loadConfig({ LITEDB_SQLITE_PATH: 'a.db', LITEDB_POLICY: 'yolo' }));
     check(
         'refuses LITEDB_POLICY=yolo',
-        yolo instanceof ConfigError && /yolo/i.test(yolo.message),
+        yolo instanceof ConfigError && /yolo/i.test(yolo.message) && !yolo.retryable,
         'YOLO has no banner and nobody watching over MCP; it must not be reachable',
     );
 
@@ -168,6 +182,114 @@ async function main(): Promise<void> {
         defaultAuditPath({ LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' }).includes(
             'com.adhamehab.litedb',
         ),
+    );
+
+    check('YOLO in the app maps down to guarded', mcpPolicyFromApp('yolo') === 'guarded');
+    check('guarded in the app stays guarded', mcpPolicyFromApp('guarded') === 'guarded');
+
+    const handoffDir = mkdtempSync(join(tmpdir(), 'litedb-mcp-handoff-'));
+    const handoffFile = join(handoffDir, 'mcp-handoff.json');
+    const sqliteHandoff: McpHandoff = {
+        version: 1,
+        updatedAt: '2026-09-11T00:00:00.000Z',
+        connectionId: 'sqlite:/tmp/shop.db',
+        label: 'sqlite:shop.db',
+        dialect: 'sqlite',
+        policy: 'guarded',
+        sqlitePath: '/tmp/shop.db',
+    };
+    writeFileSync(handoffFile, serializeHandoff(sqliteHandoff));
+
+    check(
+        'handoff supplies the open SQLite file',
+        loadConfig({ LITEDB_HANDOFF_PATH: handoffFile }).target === '/tmp/shop.db' &&
+            loadConfig({ LITEDB_HANDOFF_PATH: handoffFile }).policy === 'guarded' &&
+            loadConfig({ LITEDB_HANDOFF_PATH: handoffFile }).source === 'handoff',
+    );
+
+    check(
+        'env wins over the handoff file',
+        loadConfig({
+            LITEDB_HANDOFF_PATH: handoffFile,
+            LITEDB_SQLITE_PATH: '/other.db',
+        }).target === '/other.db' &&
+            loadConfig({
+                LITEDB_HANDOFF_PATH: handoffFile,
+                LITEDB_SQLITE_PATH: '/other.db',
+            }).source === 'env' &&
+            loadConfig({
+                LITEDB_HANDOFF_PATH: handoffFile,
+                LITEDB_SQLITE_PATH: '/other.db',
+            }).policy === 'read-only',
+    );
+
+    const yoloHandoff = { ...sqliteHandoff, policy: 'yolo' as const };
+    writeFileSync(handoffFile, serializeHandoff(yoloHandoff));
+    check(
+        'YOLO in the handoff becomes guarded, not a refusal',
+        loadConfig({ LITEDB_HANDOFF_PATH: handoffFile }).policy === 'guarded',
+        'YOLO means a human is watching the window, which is exactly what is not true over MCP',
+    );
+
+    const memoryHandoff = { ...sqliteHandoff, policy: 'guarded' as const, sqlitePath: null };
+    writeFileSync(handoffFile, serializeHandoff(memoryHandoff));
+    const memory = threw(() => loadConfig({ LITEDB_HANDOFF_PATH: handoffFile }));
+    check(
+        'in-memory SQLite is refused with a specific error',
+        memory instanceof ConfigError &&
+            memory.retryable &&
+            memory.message === IN_MEMORY_MESSAGE,
+    );
+
+    const pgHandoff: McpHandoff = {
+        version: 1,
+        updatedAt: '2026-09-11T00:00:00.000Z',
+        connectionId: 'postgres:localhost:5432/shop',
+        label: 'postgres:localhost/shop',
+        dialect: 'postgres',
+        policy: 'read-only',
+        postgres: {
+            host: 'localhost',
+            port: 5432,
+            database: 'shop',
+            username: 'ada',
+            password: 's3cret',
+            ssl: false,
+        },
+    };
+    writeFileSync(handoffFile, serializeHandoff(pgHandoff));
+    const fromPg = loadConfig({ LITEDB_HANDOFF_PATH: handoffFile });
+    check(
+        'handoff Postgres URL includes the password',
+        fromPg.target === postgresTarget(pgHandoff.postgres!) && fromPg.target.includes('s3cret'),
+    );
+    check(
+        'handoff Postgres identity still excludes the password',
+        fromPg.connectionId === 'postgres:localhost:5432/shop' && !fromPg.connectionId.includes('s3cret'),
+    );
+
+    const roundTrip = parseHandoff(serializeHandoff(pgHandoff));
+    check('handoff round-trips', roundTrip.postgres?.password === 's3cret');
+
+    check(
+        'LITEDB_POLICY overrides the handoff policy',
+        loadConfig({ LITEDB_HANDOFF_PATH: handoffFile, LITEDB_POLICY: 'unrestricted' }).policy ===
+            'unrestricted',
+    );
+
+    const mergedDesktop = JSON.parse(
+        mergeLiteDbMcp('{"preferences":{"sidebarMode":"epitaxy"}}', {
+            command: 'npx',
+            args: ['-y', 'litedb-mcp'],
+        }),
+    );
+    check(
+        'Claude Desktop merge keeps preferences',
+        mergedDesktop.preferences?.sidebarMode === 'epitaxy',
+    );
+    check(
+        'Claude Desktop merge puts mcpServers at the top level',
+        mergedDesktop.mcpServers?.litedb?.command === 'npx' && !('mcpServers' in (mergedDesktop.preferences ?? {})),
     );
 
     // --------------------------------------------------------- read-only ---
@@ -402,7 +524,7 @@ async function main(): Promise<void> {
         appliedPolicy: 'guarded' as const,
     };
 
-    const held = approvals.create('DELETE FROM orders', fakeDecision, [], 1_000);
+    const held = approvals.create('DELETE FROM orders', fakeDecision, [], 'sqlite:a', '/a.db', 1_000);
     check('an approval is stored', approvals.size() === 1);
     check(
         'the SQL is held server-side',
@@ -412,17 +534,50 @@ async function main(): Promise<void> {
 
     check(
         'an approval expires',
-        threw(() => approvals.claim(held.token, 1_000 + approvals.TTL_MS + 1)) !== null,
+        threw(() => approvals.claim(held.token, 'sqlite:a', '/a.db', 1_000 + approvals.TTL_MS + 1)) !==
+            null,
         'the row count that justified it goes stale',
     );
 
     approvals.reset();
-    const fresh = approvals.create('DELETE FROM orders', fakeDecision, [], 1_000);
+    const fresh = approvals.create('DELETE FROM orders', fakeDecision, [], 'sqlite:a', '/a.db', 1_000);
     check(
         'a fresh approval is claimable',
-        approvals.claim(fresh.token, 1_000).token === fresh.token,
+        approvals.claim(fresh.token, 'sqlite:a', '/a.db', 1_000).token === fresh.token,
     );
     check('claiming removes it', approvals.size() === 0);
+
+    approvals.reset();
+    const bound = approvals.create('DELETE FROM orders', fakeDecision, [], 'sqlite:a', '/a.db', 1_000);
+    check(
+        'a token cannot run against a different database',
+        threw(() => approvals.claim(bound.token, 'sqlite:b', '/b.db', 1_000)) !== null,
+    );
+    check(
+        'the mismatched token is still claimable on the original database',
+        approvals.claim(bound.token, 'sqlite:a', '/a.db', 1_000).token === bound.token,
+    );
+
+    approvals.reset();
+    const role = approvals.create(
+        'DELETE FROM orders',
+        fakeDecision,
+        [],
+        'postgres:localhost:5432/shop',
+        'postgres://ada@localhost:5432/shop',
+        1_000,
+    );
+    check(
+        'a token cannot run as a different role on the same database',
+        threw(() =>
+            approvals.claim(
+                role.token,
+                'postgres:localhost:5432/shop',
+                'postgres://admin@localhost:5432/shop',
+                1_000,
+            ),
+        ) !== null,
+    );
 
     // ------------------------------------------------------ schema tools ---
     process.stdout.write('\nschema tools\n');

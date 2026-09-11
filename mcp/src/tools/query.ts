@@ -236,7 +236,13 @@ export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResul
         estimates.push(await previewStatement(statement, ctx.db.dialect, runner));
     }
 
-    const approval = approvals.create(sql, decision, estimates);
+    const approval = approvals.create(
+        sql,
+        decision,
+        estimates,
+        ctx.config.connectionId,
+        ctx.config.target,
+    );
 
     // Logged now, before anything is approved. A write the agent proposed and
     // never came back for is worth being able to see.
@@ -283,7 +289,7 @@ export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResul
 export async function runApproved(ctx: ToolContext, token: string): Promise<ToolResult> {
     let approval: approvals.PendingApproval;
     try {
-        approval = approvals.claim(token);
+        approval = approvals.claim(token, ctx.config.connectionId, ctx.config.target);
     } catch (error) {
         return { text: error instanceof Error ? error.message : String(error), isError: true };
     }
