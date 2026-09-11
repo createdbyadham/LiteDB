@@ -33,20 +33,6 @@ export interface ActiveConnection {
     dialect: SqlDialect;
 }
 
-/** Identity for a loaded SQLite file. In-memory databases share one key. */
-export function sqliteConnectionId(filePath?: string | null): string {
-    return filePath ? `sqlite:${filePath}` : 'sqlite:in-memory';
-}
-
-/** Identity for a Postgres connection. Excludes credentials by construction. */
-export function postgresConnectionId(
-    host: string,
-    port: number | string,
-    database: string,
-): string {
-    return `postgres:${host}:${port}/${database}`;
-}
-
 function readPolicies(): Record<string, SafetyPolicy> {
     try {
         const raw = localStorage.getItem(POLICY_STORAGE_KEY);

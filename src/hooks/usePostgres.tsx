@@ -3,7 +3,8 @@ import { pgService, PgConfig, VectorColumnInfo, VectorStats, SimilarityResult } 
 import { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
-import { clearActiveConnection, postgresConnectionId, setActiveConnection } from '@/lib/queryGate';
+import { clearActiveConnection, setActiveConnection } from '@/lib/queryGate';
+import { postgresConnectionId } from '@/lib/connectionId';
 
 export interface UsePgReturn {
   isConnected: boolean;

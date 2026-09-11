@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { sqliteService, TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
-import { clearActiveConnection, setActiveConnection, sqliteConnectionId } from '@/lib/queryGate';
+import { clearActiveConnection, setActiveConnection } from '@/lib/queryGate';
+import { sqliteConnectionId } from '@/lib/connectionId';
 
 export interface UseSqliteReturn {
     isLoaded: boolean;

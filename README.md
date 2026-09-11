@@ -265,6 +265,49 @@ you can edit it; and entries hold SQL verbatim, including literal values, which
 is why it never leaves the machine and is never attached to a diagnostics
 bundle.
 
+## MCP server
+
+The same write-safety layer, exposed over the Model Context Protocol, so Claude
+Desktop or Claude Code can drive a local database through the guardrails instead
+of around them. That is the reason to point an agent at
+[`litedb-mcp`](mcp/README.md) rather than at a raw Postgres MCP server.
+
+```json
+{
+  "mcpServers": {
+    "litedb": {
+      "command": "npx",
+      "args": ["-y", "litedb-mcp"],
+      "env": { "LITEDB_SQLITE_PATH": "/absolute/path/to/your.db" }
+    }
+  }
+}
+```
+
+Seven tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
+`list_vector_columns`, `semantic_search`, `audit_log` — plus a `litedb://schema`
+resource.
+
+**A write never runs on the first call.** `query` classifies the statement,
+measures its impact, and returns a preview and a single-use token; executing it
+is a second, separately named tool call, which is the one your MCP client stops
+and asks you about — with `2 rows of 4 in orders` already on screen. Because
+provenance over MCP is a model by definition, the AI floor applies at every
+setting, so even `unrestricted` previews. There is no configuration that runs a
+generated write unattended, and `yolo` is refused at startup: it is a mode that
+only makes sense with a banner in a status bar and someone watching it.
+
+Underneath the classifier, the engine enforces the same boundary independently —
+SQLite opened read-only, Postgres reads inside `BEGIN READ ONLY` that is always
+rolled back — so a statement that beats the parser still meets
+`cannot execute UPDATE in a read-only transaction`.
+
+Semantic search embeds your query text with MiniLM or BGE **in the server
+process**, so searching a pgvector column by meaning sends nothing to an
+embedding API. And it writes to the same audit log the desktop app reads: run
+something over MCP, open LiteDB, and it is there in the Audit tab next to your
+own statements.
+
 ## Tech Stack
 
 - React

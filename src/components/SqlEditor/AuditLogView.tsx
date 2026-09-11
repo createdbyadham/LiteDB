@@ -30,6 +30,7 @@ const DECISION_LABEL: Record<AuditDecision, string> = {
     approved: 'approved',
     blocked: 'blocked by policy',
     declined: 'declined',
+    pending: 'awaiting approval',
 };
 
 function formatTimestamp(iso: string): string {

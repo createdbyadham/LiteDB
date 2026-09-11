@@ -14,7 +14,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { PgConfig } from './pgService';
-import { postgresConnectionId } from './queryGate';
+import { postgresConnectionId } from './connectionId';
 
 const STORAGE_KEY = 'recentPgConnections';
 const KEYCHAIN_SERVICE = 'LiteDB';
