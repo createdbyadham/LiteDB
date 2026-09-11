@@ -212,9 +212,20 @@ async function persistNow(contents: string | null): Promise<void> {
         console.error('Failed to write MCP handoff:', error);
         return;
     }
-    if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('mcpHandoffChanged'));
-    }
+    notifyHandoffChanged();
+}
+
+/**
+ * Tell the Agents panel the file changed. `globalThis` instead of `window`
+ * so this module still typechecks under the MCP Node tsconfig (no DOM lib).
+ */
+function notifyHandoffChanged(): void {
+    const host = globalThis as {
+        Event?: new (type: string) => object;
+        dispatchEvent?: (event: object) => void;
+    };
+    if (typeof host.Event !== 'function' || typeof host.dispatchEvent !== 'function') return;
+    host.dispatchEvent(new host.Event('mcpHandoffChanged'));
 }
 
 function persist(contents: string | null): Promise<void> {
