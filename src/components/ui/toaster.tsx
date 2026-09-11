@@ -1,3 +1,4 @@
+import { Check, CircleAlert } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import {
   Toast,
@@ -12,15 +13,31 @@ export function Toaster() {
   const { toasts } = useToast()
 
   return (
-    <ToastProvider duration={5000}>
-      {toasts.map(function ({ id, title, description, action, ...props }) {
+    <ToastProvider duration={4000} swipeDirection="down">
+      {toasts.map(function ({ id, title, description, action, variant, ...props }) {
+        const destructive = variant === "destructive"
         return (
-          <Toast key={id} {...props}>
-            <div className="grid gap-1">
-              {title && <ToastTitle>{title}</ToastTitle>}
-              {description && (
-                <ToastDescription>{description}</ToastDescription>
-              )}
+          <Toast key={id} variant={variant} {...props}>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span
+                className={
+                  destructive
+                    ? "flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-400"
+                    : "flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400"
+                }
+              >
+                {destructive ? (
+                  <CircleAlert className="h-3 w-3" />
+                ) : (
+                  <Check className="h-3 w-3" strokeWidth={3} />
+                )}
+              </span>
+              <div className="flex min-w-0 items-baseline gap-2">
+                {title && <ToastTitle className="shrink-0">{title}</ToastTitle>}
+                {description && (
+                  <ToastDescription className="truncate">{description}</ToastDescription>
+                )}
+              </div>
             </div>
             {action}
             <ToastClose />

@@ -2,6 +2,8 @@
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
 import { assertIdent } from '@/lib/types';
+import { assertWritable, clearActiveConnection } from '@/lib/queryGate';
+import { classifyStatement } from '@/lib/sqlClassifier';
 import type { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/types';
 
 // Define PostgreSQL connection config
@@ -79,6 +81,7 @@ class PgService {
       this.currentTables = [];
       this.currentConfig = null;
       this.connected = false;
+      clearActiveConnection();
 
       toast({
         title: "Connection Error",
@@ -346,7 +349,7 @@ class PgService {
     };
   }
 
-  async executeQuery(sql: string): Promise<{ columns: string[], rows: unknown[][] } | null> {
+  async executeQuery(sql: string): Promise<{ columns: string[], rows: unknown[][], rowsAffected: number } | null> {
     if (!this.connected) {
       toast({
         title: "Error",
@@ -354,6 +357,15 @@ class PgService {
         variant: "destructive"
       });
       return null;
+    }
+
+    // Second layer. The SQL editor already asks the gate before it gets here,
+    // but a read-only connection has to hold for every caller — including the
+    // table editor and anything added later that forgets to ask. Thrown rather
+    // than toasted so the caller learns the statement did not run.
+    const classification = classifyStatement(sql);
+    if (classification.kind !== 'read') {
+      assertWritable(`the ${classification.verb || 'statement'}`);
     }
 
     try {
@@ -367,7 +379,8 @@ class PgService {
 
       return {
         columns: result.columns || [],
-        rows: (result.rows || []) as unknown as unknown[][]
+        rows: (result.rows || []) as unknown as unknown[][],
+        rowsAffected: result.rows_affected ?? 0
       };
     } catch (error) {
       console.error("Query execution error:", error);
@@ -391,6 +404,7 @@ class PgService {
     }
 
     try {
+      assertWritable(`the insert into ${tableName}`);
       assertIdent(tableName, 'table');
       const columns = Object.keys(rowData);
       const values = Object.values(rowData);
@@ -439,6 +453,7 @@ class PgService {
     }
 
     try {
+      assertWritable(`the edit to ${tableName}`);
       assertIdent(tableName, 'table');
       const columns = await this.getTableColumns(tableName);
 
@@ -559,6 +574,7 @@ class PgService {
       this.currentTables = [];
       this.hasPgVector = false;
       this.vectorColumns = [];
+      clearActiveConnection();
     }
   }
 
@@ -857,6 +873,7 @@ class PgService {
     if (!this.connected) return false;
 
     try {
+      assertWritable(`the row deletion from ${tableName}`);
       assertIdent(tableName, 'table');
       assertIdent(primaryKeyColumn, 'column');
       const sql = `DELETE FROM "${tableName}" WHERE "${primaryKeyColumn}" IN (${rowIds.map(id => this.formatValueForSQL(id)).join(',')})`;

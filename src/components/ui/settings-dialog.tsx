@@ -11,23 +11,51 @@ import { Input } from "./input"
 import { Label } from "./label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select"
 import { Switch } from "./switch"
-import { Settings2, Copy, Download } from "lucide-react"
-import { useEffect, useState } from "react"
+import { Settings2, Copy, Download, ChevronDown, RefreshCw, Check, X, Loader2 } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useToast } from "./use-toast"
-import { AIProvider, AISettings, defaultSettings, loadAISettingsAsync, saveNonSecretSettings } from "@/lib/aiService"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./dropdown-menu"
+import { aiService, AIProvider, AISettings, defaultSettings, loadAISettingsAsync, saveNonSecretSettings } from "@/lib/aiService"
 import { storeAllApiKeys } from "@/lib/secretStorage"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs"
+import { AgentsPanel } from "./agents-panel"
 import { appLogDir } from '@tauri-apps/api/path'
 import { readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { save } from '@tauri-apps/plugin-dialog'
 
+/** Outcome of the last connection test, for the button beside the model field. */
+type TestState =
+  | { status: 'idle' }
+  | { status: 'testing' }
+  | { status: 'ok'; model: string }
+  | { status: 'failed'; error: string };
+
 export function SettingsDialog() {
   const [settings, setSettings] = useState<AISettings>(defaultSettings);
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState('ai');
   const { toast } = useToast();
+
+  const [models, setModels] = useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [test, setTest] = useState<TestState>({ status: 'idle' });
+  const modelsRequest = useRef(0);
+  const testRequest = useRef(0);
 
   useEffect(() => {
     void loadAISettingsAsync().then(setSettings);
+  }, []);
+
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const next = (event as CustomEvent<{ tab?: string }>).detail?.tab ?? 'ai';
+      setTab(next);
+      setOpen(true);
+    };
+    window.addEventListener('openSettings', onOpen);
+    return () => window.removeEventListener('openSettings', onOpen);
   }, []);
 
   const handleSave = async () => {
@@ -69,6 +97,65 @@ export function SettingsDialog() {
         }
       }
     }));
+    // Any edit invalidates the last result. Leaving a green tick next to a key
+    // that has since been retyped is worse than showing nothing.
+    setTest({ status: 'idle' });
+  };
+
+  /**
+   * Ask the provider what models it has.
+   *
+   * Uses the config currently on screen, not the saved one, so a key typed a
+   * moment ago works without saving first. Never throws — a provider that
+   * cannot list its models is a normal outcome, and the field stays typeable.
+   */
+  const loadModels = useCallback(async () => {
+    const provider = settings.activeProvider;
+    const config = settings.configs[provider];
+    const request = ++modelsRequest.current;
+    setIsLoadingModels(true);
+    setModelsError(null);
+    try {
+      const found = await aiService.listModels(provider, config);
+      if (request !== modelsRequest.current) return;
+      setModels(found);
+      if (found.length === 0) {
+        setModelsError('This provider returned no models. Type the name instead.');
+      }
+    } catch (error) {
+      if (request !== modelsRequest.current) return;
+      setModels([]);
+      setModelsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (request === modelsRequest.current) setIsLoadingModels(false);
+    }
+  }, [settings]);
+
+  // Switching provider invalidates both the model list and the test result:
+  // they belong to the provider that was selected when they were produced.
+  useEffect(() => {
+    modelsRequest.current += 1;
+    testRequest.current += 1;
+    setModels([]);
+    setModelsError(null);
+    setIsLoadingModels(false);
+    setTest({ status: 'idle' });
+  }, [settings.activeProvider]);
+
+  const runTest = async () => {
+    const provider = settings.activeProvider;
+    const request = ++testRequest.current;
+    setTest({ status: 'testing' });
+    const result = await aiService.testConnection(
+      provider,
+      settings.configs[provider],
+    );
+    if (request !== testRequest.current) return;
+    setTest(
+      result.ok
+        ? { status: 'ok', model: result.model ?? '' }
+        : { status: 'failed', error: result.error ?? 'Unknown error' },
+    );
   };
 
   const getLogsContent = async () => {
@@ -130,136 +217,260 @@ export function SettingsDialog() {
   };
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="ghost" size="icon" className="h-9 w-12 rounded-none hover:bg-muted/50">
           <Settings2 className="h-4 w-4 text-muted-foreground" />
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[560px]">
+        <DialogHeader className="space-y-1 px-6 pb-4 pt-6">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Manage application settings and configurations.
+            Provider credentials, agents, and logging.
           </DialogDescription>
         </DialogHeader>
         
-        <Tabs defaultValue="ai" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="ai">AI Provider</TabsTrigger>
-            <TabsTrigger value="logs">Logs & Debug</TabsTrigger>
-          </TabsList>
+        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 w-full flex-1 flex-col">
+          <div className="px-6">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="ai">AI Provider</TabsTrigger>
+              <TabsTrigger value="agents">Agents</TabsTrigger>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+            </TabsList>
+          </div>
 
-          <TabsContent value="ai" className="space-y-4 py-4">
-            <div className="grid gap-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="provider" className="text-right">
-                  Provider
-                </Label>
-                <Select 
-                  value={settings.activeProvider}
-                  onValueChange={(value: AIProvider) => {
-                    setSettings(prev => ({ 
-                      ...prev, 
-                      activeProvider: value
-                    }));
-                  }}
-                >
-                  <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="github">GitHub</SelectItem>
-                    <SelectItem value="azure">Azure OpenAI</SelectItem>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                    <SelectItem value="ollama">Ollama (Local)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="apiKey" className="text-right">
-                  API Key
+          <TabsContent value="ai" className="mt-0 min-h-0 space-y-5 overflow-y-auto px-6 py-5">
+            <div className="space-y-1.5">
+              <Label htmlFor="provider">Provider</Label>
+              <Select
+                value={settings.activeProvider}
+                onValueChange={(value: AIProvider) => {
+                  setSettings(prev => ({
+                    ...prev,
+                    activeProvider: value
+                  }));
+                }}
+              >
+                <SelectTrigger id="provider">
+                  <SelectValue placeholder="Select provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="openai-compatible">OpenAI compatible</SelectItem>
+                  <SelectItem value="ollama">Ollama (local)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {settings.activeProvider !== 'ollama' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="apiKey">
+                  {settings.activeProvider === 'openai-compatible' ? 'API Key (optional)' : 'API Key'}
                 </Label>
                 <Input
                   id="apiKey"
                   type="password"
                   value={currentConfig.apiKey}
                   onChange={(e) => updateCurrentConfig({ apiKey: e.target.value })}
-                  className="col-span-3"
+                  placeholder={settings.activeProvider === 'openai-compatible' ? 'if the server requires one' : ''}
                 />
               </div>
-              {settings.activeProvider !== 'openai' && (
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="endpoint" className="text-right">
-                    Endpoint
-                  </Label>
-                  <Input
-                    id="endpoint"
-                    type="text"
-                    value={currentConfig.endpoint || ''}
-                    onChange={(e) => updateCurrentConfig({ endpoint: e.target.value })}
-                    className="col-span-3"
-                    placeholder={settings.activeProvider === 'ollama' ? 'http://localhost:11434/v1' : ''}
-                  />
-                </div>
-              )}
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="modelName" className="text-right">
-                  Model Name
-                </Label>
+            )}
+
+            {settings.activeProvider !== 'openai' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="endpoint">Endpoint</Label>
+                <Input
+                  id="endpoint"
+                  type="text"
+                  value={currentConfig.endpoint || ''}
+                  onChange={(e) => updateCurrentConfig({ endpoint: e.target.value })}
+                  placeholder={
+                    settings.activeProvider === 'ollama'
+                      ? 'http://localhost:11434/v1'
+                      : 'https://api.groq.com/openai/v1'
+                  }
+                />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="modelName">Model</Label>
+              <div className="flex gap-2">
+                {/* Still an input, not a dropdown. The list is discovery,
+                    not a constraint — a model released this morning must
+                    remain typeable even if the provider has not listed it. */}
                 <Input
                   id="modelName"
                   type="text"
                   value={currentConfig.modelName || ''}
                   onChange={(e) => updateCurrentConfig({ modelName: e.target.value })}
-                  className="col-span-3"
-                  placeholder={settings.activeProvider === 'ollama' ? 'llama3' : 'gpt-4'}
+                  className="min-w-0 flex-1"
+                  placeholder={
+                    settings.activeProvider === 'ollama'
+                      ? 'llama3'
+                      : settings.activeProvider === 'openai'
+                        ? 'gpt-4o-mini'
+                        : 'model id'
+                  }
                 />
+                {/* modal={false}: a modal dropdown + body { overflow: hidden }
+                    eats wheel events, so the model list cannot scroll. */}
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-10 shrink-0"
+                      onClick={() => {
+                        if (models.length === 0 && !isLoadingModels) void loadModels();
+                      }}
+                    >
+                      {isLoadingModels ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      )}
+                      <span className="ml-1.5 text-xs">Browse</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    sideOffset={6}
+                    collisionPadding={12}
+                    className="w-80 p-0"
+                  >
+                    <div className="flex items-center justify-between px-2.5 py-2 border-b">
+                      <span className="text-[11px] text-muted-foreground">
+                        {isLoadingModels
+                          ? 'Loading…'
+                          : models.length > 0
+                            ? `${models.length} available`
+                            : 'No models listed'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void loadModels();
+                        }}
+                        className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      >
+                        <RefreshCw
+                          className={`h-3 w-3 ${isLoadingModels ? 'animate-spin' : ''}`}
+                        />
+                        Refresh
+                      </button>
+                    </div>
+                    {modelsError && (
+                      <p className="px-2.5 py-2 text-[11px] text-muted-foreground leading-snug">
+                        {modelsError}
+                      </p>
+                    )}
+                    {models.length > 0 && (
+                      <div
+                        className="max-h-60 overflow-y-auto overscroll-contain py-1"
+                        onWheel={(event) => event.stopPropagation()}
+                      >
+                        {models.map((model) => (
+                          <DropdownMenuItem
+                            key={model}
+                            title={model}
+                            onSelect={() => updateCurrentConfig({ modelName: model })}
+                            className="font-mono text-xs"
+                          >
+                            <span className="truncate">{model}</span>
+                          </DropdownMenuItem>
+                        ))}
+                      </div>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              <div className="grid grid-cols-4 items-start gap-4">
-                <Label htmlFor="sampleValues" className="text-right pt-1">
-                  Sample Values
-                </Label>
-                <div className="col-span-3 flex items-start gap-3">
-                  <Switch
-                    id="sampleValues"
-                    checked={settings.includeSampleValues}
-                    onCheckedChange={(checked) =>
-                      setSettings((prev) => ({ ...prev, includeSampleValues: checked }))
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Send a few example values from short, low-cardinality text columns
-                    (e.g. status, country) so the AI can match &quot;Germany&quot; to a
-                    stored &quot;DE&quot;. Columns that look like emails, keys or personal
-                    data are never sampled. Turn this off to send column names and types
-                    only. Reconnect for the change to take effect.
-                  </p>
-                </div>
+
+              <div className="flex items-start gap-2 pt-0.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 text-xs"
+                  onClick={() => void runTest()}
+                  disabled={test.status === 'testing'}
+                >
+                  {test.status === 'testing' && (
+                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                  )}
+                  Test connection
+                </Button>
+                {test.status === 'testing' && settings.activeProvider === 'ollama' && (
+                  // Measured at 19s for a cold 7B on this machine: Ollama
+                  // loads the model into VRAM on the first request. Without
+                  // this line the button just sits there and looks broken.
+                  <span className="text-[11px] text-muted-foreground leading-snug">
+                    A local model may take a while to load the first time.
+                  </span>
+                )}
+                {test.status === 'ok' && (
+                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 leading-snug">
+                    <Check className="h-3.5 w-3.5 shrink-0" />
+                    {test.model} responded
+                  </span>
+                )}
+                {test.status === 'failed' && (
+                  <span className="min-w-0 text-[11px] text-destructive flex items-start gap-1 leading-snug">
+                    <X className="h-3.5 w-3.5 shrink-0 mt-px" />
+                    {test.error}
+                  </span>
+                )}
               </div>
-              <div className="flex justify-end pt-2">
-                <Button onClick={handleSave}>Save changes</Button>
+            </div>
+
+            <div className="flex items-start gap-3 rounded-md border border-border/80 px-3 py-2.5">
+              <Switch
+                id="sampleValues"
+                className="mt-0.5"
+                checked={settings.includeSampleValues}
+                onCheckedChange={(checked) =>
+                  setSettings((prev) => ({ ...prev, includeSampleValues: checked }))
+                }
+              />
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor="sampleValues">Sample values</Label>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Sends a few values from short columns (status, country) so
+                  &quot;Germany&quot; can match stored &quot;DE&quot;. Emails, keys,
+                  and PII-looking columns are skipped. Reconnect to apply.
+                </p>
               </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button onClick={handleSave}>Save changes</Button>
             </div>
           </TabsContent>
 
-          <TabsContent value="logs" className="space-y-4 py-4">
-            <div className="space-y-4">
-              <div className="rounded-md bg-muted p-4">
-                <h4 className="mb-2 text-sm font-medium">Export Error Logs</h4>
-                <p className="text-xs text-muted-foreground mb-4">
-                  If you're experiencing issues, you can export the application logs to attach to a bug report.
-                </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={handleCopyLogs} className="flex-1">
-                    <Copy className="mr-2 h-4 w-4" />
-                    Copy to Clipboard
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleExportLogs} className="flex-1">
-                    <Download className="mr-2 h-4 w-4" />
-                    Export to File
-                  </Button>
-                </div>
+          <TabsContent value="agents" className="mt-0 min-h-0 overflow-y-auto px-6 py-5">
+            <AgentsPanel />
+          </TabsContent>
+
+          <TabsContent value="logs" className="mt-0 min-h-0 overflow-y-auto px-6 py-5">
+            <div className="rounded-md border border-border/80 p-4">
+              <h4 className="mb-1.5 text-sm font-medium">Export error logs</h4>
+              <p className="mb-4 text-xs text-muted-foreground leading-relaxed">
+                Attach these to a bug report if something is going wrong.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleCopyLogs} className="flex-1">
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleExportLogs} className="flex-1">
+                  <Download className="mr-2 h-4 w-4" />
+                  Export
+                </Button>
               </div>
             </div>
           </TabsContent>

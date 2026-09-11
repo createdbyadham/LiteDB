@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { sqliteService, TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
 import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
+import { clearActiveConnection, setActiveConnection } from '@/lib/queryGate';
+import { sqliteConnectionId } from '@/lib/connectionId';
 
 export interface UseSqliteReturn {
     isLoaded: boolean;
@@ -20,6 +22,24 @@ export function useSqlite(): UseSqliteReturn {
     const [isLoaded, setIsLoaded] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [tables, setTables] = useState<TableInfo[]>([]);
+
+    /**
+     * Tell the safety layer which database is loaded.
+     *
+     * Registered on every path that leaves a database open, because the policy
+     * is looked up by connection: a connection the gate does not know about
+     * falls back to the default rather than to the one the user chose for this
+     * file.
+     */
+    const registerConnection = () => {
+        const filePath = sqliteService.currentFilePath;
+        setActiveConnection({
+            id: sqliteConnectionId(filePath),
+            label: filePath ? `sqlite:${filePath.split(/[\\/]/).pop()}` : 'sqlite:in-memory',
+            dialect: 'sqlite',
+            sqlitePath: filePath ?? null,
+        });
+    };
 
     const pushSQLiteSchemaToAI = async (tableList: TableInfo[]) => {
         try {
@@ -62,6 +82,7 @@ export function useSqlite(): UseSqliteReturn {
                     setTables(existingTables);
                     setIsLoaded(true);
                     // Push schema to AI
+                    registerConnection();
                     void pushSQLiteSchemaToAI(existingTables);
                 }
             } catch {
@@ -69,6 +90,7 @@ export function useSqlite(): UseSqliteReturn {
                     setIsLoaded(false);
                     setTables([]);
                     aiService.clearSchema();
+                    clearActiveConnection();
                 }
             }
         };
@@ -98,6 +120,7 @@ export function useSqlite(): UseSqliteReturn {
                     setTables(tableList);
                     setIsLoaded(true);
                     // Push schema to AI
+                    registerConnection();
                     void pushSQLiteSchemaToAI(tableList);
 
                     toast({
@@ -110,6 +133,7 @@ export function useSqlite(): UseSqliteReturn {
                     setIsLoaded(false);
                     setTables([]);
                     aiService.clearSchema();
+                    clearActiveConnection();
 
                     toast({
                         title: "Warning",
@@ -123,11 +147,13 @@ export function useSqlite(): UseSqliteReturn {
             setIsLoaded(false);
             setTables([]);
             aiService.clearSchema();
+            clearActiveConnection();
             return false;
         } catch (error) {
             setIsLoaded(false);
             setTables([]);
             aiService.clearSchema();
+            clearActiveConnection();
 
             toast({
                 title: "Error",
@@ -200,9 +226,11 @@ export function useSqlite(): UseSqliteReturn {
             setTables(tableList);
             // Update AI schema
             if (tableList.length > 0) {
+                registerConnection();
                 void pushSQLiteSchemaToAI(tableList);
             } else {
                 aiService.clearSchema();
+                clearActiveConnection();
             }
         } catch {
             toast({

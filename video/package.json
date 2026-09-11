@@ -1,0 +1,25 @@
+{
+  "name": "litedb-eval-video",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LinkedIn motion graphic for the LiteDB text-to-SQL eval",
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render EvalPost out/eval-post.mp4",
+    "still": "remotion still EvalThumbnail out/eval-thumbnail.png",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.355",
+    "@remotion/google-fonts": "^4.0.355",
+    "@remotion/transitions": "^4.0.355",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.355"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.8.2"
+  }
+}

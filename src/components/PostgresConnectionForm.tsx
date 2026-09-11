@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PgConfig } from '@/lib/pgService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,7 +6,15 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { usePostgres } from '@/hooks/usePostgres';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ChevronUp, ChevronDown } from 'lucide-react';
+import { ChevronUp, ChevronDown, KeyRound, Server, X } from 'lucide-react';
+import {
+  describeConnection,
+  forgetConnection,
+  listRecentConnections,
+  loadPassword,
+  rememberConnection,
+  type RecentConnection,
+} from '@/lib/recentConnections';
 
 interface PostgresConnectionFormProps {
   onConnectionSuccess?: () => void;
@@ -15,7 +23,9 @@ interface PostgresConnectionFormProps {
 export default function PostgresConnectionForm({ onConnectionSuccess }: PostgresConnectionFormProps) {
   const { connectToDatabase, isConnecting } = usePostgres();
   const [showCredentialsDialog, setShowCredentialsDialog] = useState(false);
-  
+  const [recent, setRecent] = useState<RecentConnection[]>([]);
+  const [savePassword, setSavePassword] = useState(true);
+
   const [config, setConfig] = useState<PgConfig>({
     host: 'localhost',
     port: 5432,
@@ -24,7 +34,40 @@ export default function PostgresConnectionForm({ onConnectionSuccess }: Postgres
     password: '',
     ssl: false
   });
-  
+
+  useEffect(() => {
+    setRecent(listRecentConnections());
+  }, []);
+
+  /**
+   * Fill the form from a remembered connection and go straight to the
+   * credentials step.
+   *
+   * A saved password is fetched from the OS keychain here rather than held in
+   * component state from the start, so it exists in memory only between
+   * choosing the connection and connecting.
+   */
+  const openRecent = async (entry: RecentConnection) => {
+    const password = entry.hasSavedPassword ? await loadPassword(entry.id) : null;
+    setConfig({
+      host: entry.host,
+      port: entry.port,
+      database: entry.database,
+      username: entry.username,
+      password: password ?? '',
+      ssl: entry.ssl,
+    });
+    setSavePassword(entry.hasSavedPassword);
+    setShowCredentialsDialog(true);
+  };
+
+  const removeRecent = async (event: React.MouseEvent, id: string) => {
+    // The row is itself a button; without this the click would also open it.
+    event.stopPropagation();
+    await forgetConnection(id);
+    setRecent(listRecentConnections());
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type } = e.target;
     
@@ -47,16 +90,63 @@ export default function PostgresConnectionForm({ onConnectionSuccess }: Postgres
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
     setShowCredentialsDialog(false);
-    
+
     const success = await connectToDatabase(config);
-    
-    if (success && onConnectionSuccess) {
-      onConnectionSuccess();
+
+    if (success) {
+      // Only remembered once it actually worked. Offering to reopen a
+      // connection that never connected is worse than not offering.
+      await rememberConnection(config, savePassword);
+      setRecent(listRecentConnections());
+      onConnectionSuccess?.();
     }
   };
   
   return (
     <>
+      {recent.length > 0 && (
+        <div className="mb-5 space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs text-muted-foreground">Recent</Label>
+          </div>
+          <div className="space-y-1.5">
+            {recent.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                onClick={() => void openRecent(entry)}
+                className="group w-full flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/60 transition-colors"
+              >
+                <Server className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate font-mono text-xs">{describeConnection(entry)}</span>
+                {entry.hasSavedPassword && (
+                  <KeyRound
+                    className="h-3 w-3 shrink-0 text-emerald-500"
+                    aria-label="Password saved"
+                  />
+                )}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  aria-label={`Forget ${describeConnection(entry)}`}
+                  onClick={(event) => void removeRecent(event, entry.id)}
+                  className="ml-auto shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-background text-muted-foreground hover:text-foreground transition-opacity"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              or connect to a new one
+            </span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleFormSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -163,10 +253,28 @@ export default function PostgresConnectionForm({ onConnectionSuccess }: Postgres
               />
             </div>
 
+            <div className="flex items-start space-x-2 pt-1">
+              <Checkbox
+                id="savePassword"
+                checked={savePassword}
+                onCheckedChange={(checked) => setSavePassword(checked === true)}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="savePassword" className="text-sm font-normal">
+                  Remember this connection
+                </Label>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Host, database and username are stored locally. The password goes to your
+                  operating system&apos;s keychain, never to a file.
+                </p>
+              </div>
+            </div>
+
             <DialogFooter className="sm:justify-between pt-2">
-              <Button 
-                type="button" 
-                variant="outline" 
+              <Button
+                type="button"
+                variant="outline"
                 onClick={() => setShowCredentialsDialog(false)}
               >
                 Cancel

@@ -32,6 +32,8 @@ const DatabaseView = () => {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [tableColumns, setTableColumns] = useState<ColumnInfo[]>([]);
   const [tableData, setTableData] = useState<{ columns: string[], rows: RowData[] }>({ columns: [], rows: [] });
+  /** Bumped whenever something writes, to force the visible rows to reload. */
+  const [dataVersion, setDataVersion] = useState(0);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('browse');
   const [lastSaved] = useState<Date | null>(null);
@@ -231,7 +233,27 @@ const DatabaseView = () => {
     return () => {
       mounted = false;
     };
-  }, [selectedTable]);
+    // `dataVersion` is what lets a write elsewhere in the app pull fresh rows.
+    // Without it this only ran on a table *change*, so after running an UPDATE
+    // in the SQL editor the grid kept showing pre-write values — a successful
+    // write that looks like a silent failure.
+  }, [selectedTable, dataVersion]);
+
+  /**
+   * Called after anything that changes the database from the SQL editor.
+   *
+   * Refreshes both the table list (a script may have created or dropped one)
+   * and the rows on screen. Previously only the list was refreshed, and only
+   * for DDL, so an UPDATE left the grid showing stale values.
+   */
+  const refreshAfterWrite = async () => {
+    if (isPostgresActive) {
+      await refreshPostgresTables();
+    } else {
+      refreshSqliteTables();
+    }
+    setDataVersion((version) => version + 1);
+  };
 
   const handleBackClick = () => {
     if (isPostgresActive) {
@@ -273,18 +295,27 @@ const DatabaseView = () => {
       }
     } else {
       if (isDeleteOperation(newRow)) {
-        const sql = `DELETE FROM ${selectedTable} WHERE ${newRow.primaryKeyColumn} IN (${newRow.rowIds.map(id => `'${id}'`).join(',')})`;
-        const result = sqliteService.executeBatchOperations([sql]);
+        try {
+          const sql = `DELETE FROM ${selectedTable} WHERE ${newRow.primaryKeyColumn} IN (${newRow.rowIds.map(id => `'${id}'`).join(',')})`;
+          const result = sqliteService.executeBatchOperations([sql]);
 
-        if (!result.success && result.errors.length > 0) {
+          if (!result.success && result.errors.length > 0) {
+            toast({
+              title: "Delete Error",
+              description: result.errors.join('\n'),
+              variant: "destructive"
+            });
+          }
+
+          return result.success;
+        } catch (error) {
           toast({
             title: "Delete Error",
-            description: result.errors.join('\n'),
+            description: error instanceof Error ? error.message : "Failed to delete rows",
             variant: "destructive"
           });
+          return false;
         }
-
-        return result.success;
       } else if (oldRow) {
         return sqliteService.updateRow(selectedTable, oldRow, newRow as RowData);
       }
@@ -513,7 +544,7 @@ const DatabaseView = () => {
             {activeTab === 'query' && (
               <SqlEditor
                 isPostgres={isPostgresActive}
-                refreshTables={isPostgresActive ? refreshPostgresTables : refreshSqliteTables}
+                refreshTables={refreshAfterWrite}
               />
             )}
 

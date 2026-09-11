@@ -8,7 +8,16 @@ export interface QueryResult {
   success: boolean;
   columns: string[];
   rows: RowData[];
+  /** Rows returned. Zero for an UPDATE or DELETE. */
   row_count: number;
+  /**
+   * Rows the statement changed, as reported by the server.
+   *
+   * The only honest answer to "did my write do anything?" — an UPDATE whose
+   * WHERE matches nothing succeeds and returns no rows, which looks identical
+   * to one that changed thousands.
+   */
+  rows_affected: number;
   error?: string;
 }
 
@@ -39,12 +48,13 @@ export const tauriService = {
         query: params.query
       });
     } catch (e) {
-      return { 
-        success: false, 
-        columns: [], 
-        rows: [], 
-        row_count: 0, 
-        error: String(e) 
+      return {
+        success: false,
+        columns: [],
+        rows: [],
+        row_count: 0,
+        rows_affected: 0,
+        error: String(e)
       };
     }
   },
