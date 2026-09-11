@@ -34,7 +34,17 @@ export type AuditDecision =
     /** Policy refused it. It never ran. */
     | 'blocked'
     /** The user was asked and said no. It never ran. */
-    | 'declined';
+    | 'declined'
+    /**
+     * Approval was offered and the answer has not come back yet.
+     *
+     * Written by the MCP server, where the two halves of an approval are two
+     * separate tool calls and an unknown amount of time apart. Recording the
+     * request when it is made means a write the agent proposed and never came
+     * back for still leaves a trace; the matching `approved` entry is written
+     * when — if — it runs.
+     */
+    | 'pending';
 
 export type AuditOutcome = 'ok' | 'error' | 'not-run';
 
@@ -113,9 +123,40 @@ export function parseLog(contents: string): AuditEntry[] {
     return entries;
 }
 
-/** True inside the Tauri shell, where a real file is available. */
+/**
+ * Somewhere to put entries other than the two places this module knows about.
+ *
+ * The desktop app writes through Tauri and `npm run dev` falls back to
+ * localStorage; the MCP server has neither, and a log that silently no-ops
+ * there would be worse than no log at all — it is the only safeguard left
+ * once a statement has been approved. So the host may supply its own sink,
+ * and everything else about the log — the format, the parser, the append
+ * ordering — stays shared.
+ */
+export interface AuditSink {
+    append(line: string): Promise<void>;
+    /** Whole log, as written. Empty string when nothing has been logged. */
+    read(): Promise<string>;
+    /** Human-readable location, for the settings dialog and the MCP banner. */
+    location(): string;
+}
+
+let sink: AuditSink | null = null;
+
+/** Install a host-provided sink. Pass null to fall back to the built-ins. */
+export function setAuditSink(next: AuditSink | null): void {
+    sink = next;
+}
+
+/**
+ * True inside the Tauri shell, where a real file is available.
+ *
+ * Probes `globalThis` rather than `window` — identical in a browser, and it
+ * keeps this module compiling under a Node tsconfig that has no DOM types,
+ * which is what lets the MCP server share the format.
+ */
 function inTauri(): boolean {
-    return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    return '__TAURI_INTERNALS__' in globalThis;
 }
 
 /**
@@ -152,6 +193,10 @@ let writeChain: Promise<void> = Promise.resolve();
 export function recordAudit(entry: AuditEntry): Promise<void> {
     writeChain = writeChain.then(async () => {
         try {
+            if (sink) {
+                await sink.append(serializeEntry(entry));
+                return;
+            }
             if (!inTauri()) {
                 appendToLocalStorage(entry);
                 return;
@@ -179,7 +224,9 @@ export function recordAudit(entry: AuditEntry): Promise<void> {
 export async function readAudit(limit = 200): Promise<AuditEntry[]> {
     try {
         let contents = '';
-        if (inTauri()) {
+        if (sink) {
+            contents = await sink.read();
+        } else if (inTauri()) {
             const { BaseDirectory, exists, readTextFile } = await import('@tauri-apps/plugin-fs');
             const present = await exists(LOG_PATH, { baseDir: BaseDirectory.AppLocalData });
             if (!present) return [];
@@ -196,5 +243,6 @@ export async function readAudit(limit = 200): Promise<AuditEntry[]> {
 
 /** Where the log lives, for the settings dialog to show the user. */
 export function auditLogLocation(): string {
+    if (sink) return sink.location();
     return inTauri() ? `<app data>/${LOG_PATH}` : 'browser localStorage (development only)';
 }

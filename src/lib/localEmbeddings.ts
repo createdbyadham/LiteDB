@@ -10,9 +10,29 @@ type PipelineProgress = {
   file?: string;
 };
 
-// Configure transformers.js to use local cache
+// Models are fetched from the Hugging Face CDN rather than looked for on
+// disk first, in both hosts.
 env.allowLocalModels = false;
-env.useBrowserCache = true;
+
+// Only a browser has a Cache API. transformers.js does not degrade when asked
+// for one it cannot provide — it throws "Browser cache is not available in
+// this environment" before the first byte is fetched — so this has to be a
+// question about the host rather than a constant. Node falls back to the
+// filesystem cache, which transformers.js enables on its own. Probed with `in`
+// rather than `typeof` so it compiles under a tsconfig with no DOM types.
+env.useBrowserCache = 'caches' in globalThis;
+
+/**
+ * Where downloaded model files are kept, outside the browser.
+ *
+ * Left alone in a browser, where the Cache API decides. In Node the default
+ * is a directory inside `node_modules/@xenova/transformers`, which is the
+ * wrong place for a published package to write to; the MCP server points this
+ * at the app's own data directory so a model downloaded once is reused.
+ */
+export function configureEmbeddingCache(directory: string): void {
+    env.cacheDir = directory;
+}
 
 // Available models
 export interface EmbeddingModel {
