@@ -142,13 +142,28 @@ class SqliteDatabase implements Database {
         private readonly writable: boolean,
     ) {
         this.reader = new DatabaseSync(path, { readOnly: true });
+
+        // `columns()` arrived in node:sqlite some releases after the module
+        // itself did, and everything below depends on it to tell a query from
+        // a statement that only reports `changes`. Degrading gracefully was
+        // the first instinct and the wrong one: without it every SELECT falls
+        // through to the write branch and comes back as "0 rows changed" —
+        // an answer that looks like data rather than like a failure. A server
+        // that cannot read correctly should say so at startup.
+        if (typeof this.reader.prepare('SELECT 1').columns !== 'function') {
+            this.reader.close();
+            throw new Error(
+                `This Node (${process.version}) provides node:sqlite without ` +
+                    'StatementSync.columns(), so LiteDB cannot distinguish a query from a ' +
+                    'write and would report every read as 0 rows changed. Upgrade Node — ' +
+                    '24 LTS or newer is safest.',
+            );
+        }
     }
 
     private run(db: DatabaseSync, sql: string): QueryResult {
         const statement = db.prepare(sql);
-        // `columns()` landed in Node after `node:sqlite` itself did; degrade
-        // rather than crash on a Node old enough to lack it.
-        const meta = typeof statement.columns === 'function' ? statement.columns() : [];
+        const meta = statement.columns();
 
         if (meta.length === 0) {
             // Nothing to return means it is not a query, so `changes` is this
