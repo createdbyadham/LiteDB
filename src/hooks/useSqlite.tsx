@@ -37,6 +37,7 @@ export function useSqlite(): UseSqliteReturn {
             id: sqliteConnectionId(filePath),
             label: filePath ? `sqlite:${filePath.split(/[\\/]/).pop()}` : 'sqlite:in-memory',
             dialect: 'sqlite',
+            sqlitePath: filePath ?? null,
         });
     };
 

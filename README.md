@@ -57,7 +57,7 @@ unattended — even on a connection you have set to unrestricted.
 - **Dual Database Support**: Works with SQLite and PostgreSQL
 - **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries.
   - **Privacy-First AI**: 100% Local Text-to-SQL support with Ollama.
-  - Supports OpenAI, GitHub, and Azure providers.
+  - Supports OpenAI, any OpenAI-compatible endpoint, and Ollama.
   - Schema is injected into the LLM upon initialization and refresh.
 - **Write Safety**: Generated SQL is classified before it runs.
   - Read-only / guarded / unrestricted / YOLO modes, remembered per connection.
@@ -117,7 +117,7 @@ npm run eval -- --provider ollama  # score a local model
 
 109 cases across five slices (`single-table`, `joins`, `aggregation`,
 `window-functions`, `ambiguous-schema`), over two fixture schemas, runnable against SQLite or PostgreSQL
-and any of the four supported providers. Failures are typed — a query that
+and OpenAI, any OpenAI-compatible endpoint, or Ollama. Failures are typed — a query that
 answers the wrong question is reported separately from one that fails to parse,
 and provider outages are excluded from the score entirely.
 
@@ -272,17 +272,32 @@ Desktop or Claude Code can drive a local database through the guardrails instead
 of around them. That is the reason to point an agent at
 [`litedb-mcp`](mcp/README.md) rather than at a raw Postgres MCP server.
 
+If LiteDB is running, the server follows whatever you have open. No paths in
+the config, no restart when you switch database. Fastest path: Settings →
+**Agents** in the app, or [Connect an agent](docs/connect-an-agent.md).
+
 ```json
 {
   "mcpServers": {
     "litedb": {
       "command": "npx",
-      "args": ["-y", "litedb-mcp"],
-      "env": { "LITEDB_SQLITE_PATH": "/absolute/path/to/your.db" }
+      "args": ["-y", "litedb-mcp"]
     }
   }
 }
 ```
+
+```bash
+claude mcp add litedb --scope user -- npx -y litedb-mcp
+```
+
+The status-bar policy is the agent's policy. Set the connection read-only in
+the UI and the next tool call is read-only. YOLO is the one exception: it maps
+down to guarded, because YOLO means a human is watching this window, which is
+exactly what isn't true over MCP.
+
+Without the app — CI, a box that has never launched LiteDB — set
+`LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`. Env wins when both are present.
 
 Seven tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
 `list_vector_columns`, `semantic_search`, `audit_log` — plus a `litedb://schema`
@@ -294,8 +309,7 @@ is a second, separately named tool call, which is the one your MCP client stops
 and asks you about — with `2 rows of 4 in orders` already on screen. Because
 provenance over MCP is a model by definition, the AI floor applies at every
 setting, so even `unrestricted` previews. There is no configuration that runs a
-generated write unattended, and `yolo` is refused at startup: it is a mode that
-only makes sense with a banner in a status bar and someone watching it.
+generated write unattended, and `LITEDB_POLICY=yolo` is refused at startup.
 
 Underneath the classifier, the engine enforces the same boundary independently —
 SQLite opened read-only, Postgres reads inside `BEGIN READ ONLY` that is always
@@ -465,7 +479,8 @@ src/lib/
   ├── sqlValidator.ts    # compiles generated SQL without running it
   ├── impactPreview.ts   # exact row counts and EXPLAIN
   ├── auditLog.ts        # append-only JSONL
-  └── queryGate.ts       # per-connection policy, the audit write path
+  ├── queryGate.ts       # per-connection policy, the audit write path
+  └── mcpHandoff.ts      # file the MCP server reads when you connect in the app
 ```
 
 ### Contributing

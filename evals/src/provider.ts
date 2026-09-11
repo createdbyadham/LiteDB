@@ -1,8 +1,8 @@
 // Model access for the harness.
 //
-// Mirrors the provider matrix the app ships (OpenAI, GitHub Models, Azure
-// OpenAI, Ollama) but talks to them directly rather than through the Tauri
-// proxy, which does not exist outside the desktop shell.
+// Mirrors the provider matrix the app ships (OpenAI, OpenAI-compatible, Ollama)
+// but talks to them directly rather than through the Tauri proxy, which does
+// not exist outside the desktop shell.
 
 import OpenAI from 'openai';
 import type { ChatMessage } from '../../src/lib/promptBuilder';
@@ -23,8 +23,7 @@ export interface GenerationResult {
 
 const DEFAULT_MODELS: Record<string, string> = {
     openai: 'gpt-4o-mini',
-    github: 'openai/gpt-4o-mini',
-    azure: 'gpt-4o-mini',
+    'openai-compatible': 'gpt-4o-mini',
     ollama: 'qwen2.5-coder:7b',
 };
 
@@ -44,22 +43,15 @@ export function resolveProvider(provider: string, modelOverride?: string): Provi
         case 'openai':
             return { provider, model, apiKey: requireEnv('OPENAI_API_KEY', provider) };
 
-        case 'github':
+        case 'openai-compatible':
             return {
                 provider,
                 model,
-                baseURL: 'https://models.github.ai/inference',
+                baseURL: requireEnv('OPENAI_BASE_URL', provider),
                 apiKey:
-                    process.env.GITHUB_MODELS_TOKEN ||
-                    requireEnv('GITHUB_TOKEN', provider),
-            };
-
-        case 'azure':
-            return {
-                provider,
-                model,
-                baseURL: requireEnv('AZURE_OPENAI_ENDPOINT', provider),
-                apiKey: requireEnv('AZURE_OPENAI_API_KEY', provider),
+                    process.env.OPENAI_COMPAT_API_KEY ||
+                    process.env.OPENAI_API_KEY ||
+                    'local',
             };
 
         case 'ollama':

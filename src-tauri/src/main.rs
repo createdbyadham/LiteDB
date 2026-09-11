@@ -6,11 +6,13 @@
 use futures_util::TryStreamExt;
 use keyring::Entry;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::redirect;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
 use sqlx::{Column, Either, Row, ValueRef};
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tauri::State;
 use tokio::sync::Mutex;
 
@@ -226,15 +228,83 @@ struct ProxyResponse {
     body: String,
 }
 
-// Hosts that proxy_request is allowed to reach. Keeps the proxy from being a
-// general-purpose SSRF tool. Localhost is for Ollama; the rest are the AI
-// providers advertised in the README.
-fn is_proxy_host_allowed(host: &str) -> bool {
-    let host = host.to_ascii_lowercase();
-    matches!(
-        host.as_str(),
-        "localhost" | "127.0.0.1" | "::1" | "models.github.ai" | "api.openai.com"
-    ) || host.ends_with(".openai.azure.com")
+const AWS_IMDS_V4: Ipv4Addr = Ipv4Addr::new(169, 254, 169, 254);
+const AZURE_IMDS_V4: Ipv4Addr = Ipv4Addr::new(168, 63, 129, 16);
+const ALIYUN_IMDS_V4: Ipv4Addr = Ipv4Addr::new(100, 100, 100, 200);
+const AWS_IMDS_V6: Ipv6Addr = Ipv6Addr::new(0xfd00, 0x0ec2, 0, 0, 0, 0, 0, 0x254);
+
+fn is_imds_v4(ip: Ipv4Addr) -> bool {
+    ip == AWS_IMDS_V4 || ip == AZURE_IMDS_V4 || ip == ALIYUN_IMDS_V4 || ip.is_link_local()
+}
+
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_imds_v4(v4),
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_imds_v4(v4);
+            }
+            v6 == AWS_IMDS_V6
+        }
+    }
+}
+
+fn is_metadata_domain(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host == "metadata.google.internal"
+        || host == "metadata"
+        || host.ends_with(".metadata.google.internal")
+}
+
+fn is_loopback(url: &reqwest::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => {
+            ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+        None => false,
+    }
+}
+
+fn is_lan_http(url: &reqwest::Url) -> bool {
+    if is_loopback(url) {
+        return true;
+    }
+    match url.host() {
+        Some(url::Host::Domain(d)) => d.to_ascii_lowercase().ends_with(".local"),
+        Some(url::Host::Ipv4(ip)) => ip.is_private(),
+        Some(url::Host::Ipv6(ip)) => (ip.segments()[0] & 0xfe00) == 0xfc00,
+        None => false,
+    }
+}
+
+// OpenAI-compatible endpoints are user-typed, so this cannot be a fixed
+// hostname list. http is limited to this machine / LAN so keys are not sent
+// in the clear. Redirects are disabled — an allowed https URL must not be
+// able to bounce into IMDS.
+fn is_proxy_url_allowed(url: &reqwest::Url) -> Result<(), String> {
+    match url.scheme() {
+        "http" | "https" => {}
+        s => return Err(format!("scheme not allowed: {s}")),
+    }
+    match url.host() {
+        Some(url::Host::Domain(d)) if is_metadata_domain(&d.to_ascii_lowercase()) => {
+            return Err(format!("host not allowed: {d}"));
+        }
+        Some(url::Host::Ipv4(ip)) if is_blocked_ip(IpAddr::V4(ip)) => {
+            return Err("host not allowed".into());
+        }
+        Some(url::Host::Ipv6(ip)) if is_blocked_ip(IpAddr::V6(ip)) => {
+            return Err("host not allowed".into());
+        }
+        Some(_) => {}
+        None => return Err("url has no host".into()),
+    }
+    if url.scheme() == "https" || is_lan_http(url) {
+        return Ok(());
+    }
+    Err("http host not allowed".into())
 }
 
 #[tauri::command]
@@ -245,16 +315,12 @@ async fn proxy_request(
     body: Option<String>,
 ) -> Result<ProxyResponse, String> {
     let parsed = reqwest::Url::parse(&url).map_err(|e| format!("invalid url: {e}"))?;
-    match parsed.scheme() {
-        "http" | "https" => {}
-        s => return Err(format!("scheme not allowed: {s}")),
-    }
-    let host = parsed.host_str().ok_or("url has no host")?;
-    if !is_proxy_host_allowed(host) {
-        return Err(format!("host not allowed: {host}"));
-    }
+    is_proxy_url_allowed(&parsed)?;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .redirect(redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
 
     let mut header_map = HeaderMap::new();
     for (key, value) in headers {
@@ -437,5 +503,35 @@ mod tests {
         );
 
         pool.execute("DROP TABLE row_json_probe").await.unwrap();
+    }
+
+    fn url(s: &str) -> reqwest::Url {
+        reqwest::Url::parse(s).unwrap()
+    }
+
+    #[test]
+    fn proxy_allows_openai_and_compatible_https() {
+        assert!(is_proxy_url_allowed(&url("https://api.openai.com/v1/models")).is_ok());
+        assert!(is_proxy_url_allowed(&url("https://api.groq.com/openai/v1/models")).is_ok());
+        assert!(is_proxy_url_allowed(&url("https://models.github.ai/inference")).is_ok());
+    }
+
+    #[test]
+    fn proxy_allows_local_http() {
+        assert!(is_proxy_url_allowed(&url("http://localhost:11434/v1")).is_ok());
+        assert!(is_proxy_url_allowed(&url("http://127.0.0.1:1234/v1")).is_ok());
+        assert!(is_proxy_url_allowed(&url("http://[::1]:11434/v1")).is_ok());
+        assert!(is_proxy_url_allowed(&url("http://192.168.1.10:8080/v1")).is_ok());
+        assert!(is_proxy_url_allowed(&url("http://lmstudio.local:1234/v1")).is_ok());
+    }
+
+    #[test]
+    fn proxy_blocks_cleartext_public_and_metadata() {
+        assert!(is_proxy_url_allowed(&url("http://api.openai.com/v1")).is_err());
+        assert!(is_proxy_url_allowed(&url("https://169.254.169.254/latest")).is_err());
+        assert!(is_proxy_url_allowed(&url("http://169.254.169.254/latest")).is_err());
+        assert!(is_proxy_url_allowed(&url("https://[::ffff:169.254.169.254]/latest")).is_err());
+        assert!(is_proxy_url_allowed(&url("https://metadata.google.internal/")).is_err());
+        assert!(is_proxy_url_allowed(&url("ftp://localhost/x")).is_err());
     }
 }

@@ -56,11 +56,15 @@ export class UnknownTableError extends Error {
 }
 
 export class ReadOnlyServerError extends Error {
-    constructor() {
+    constructor(source: 'env' | 'handoff' = 'env') {
         super(
-            'This server is running read-only (LITEDB_POLICY=read-only), so nothing ' +
-                'that changes the database can run. Restart it with LITEDB_POLICY=guarded ' +
-                'to allow writes behind an approval step.',
+            source === 'handoff'
+                ? 'This connection is read-only in LiteDB, so nothing that changes the ' +
+                      'database can run. Switch the policy dropdown in the status bar to ' +
+                      'guarded to allow writes behind an approval step.'
+                : 'This server is running read-only (LITEDB_POLICY=read-only), so nothing ' +
+                      'that changes the database can run. Restart it with LITEDB_POLICY=guarded ' +
+                      'to allow writes behind an approval step.',
         );
         this.name = 'ReadOnlyServerError';
     }
@@ -140,6 +144,7 @@ class SqliteDatabase implements Database {
     constructor(
         private readonly path: string,
         private readonly writable: boolean,
+        private readonly source: 'env' | 'handoff' = 'env',
     ) {
         this.reader = new DatabaseSync(path, { readOnly: true });
 
@@ -190,7 +195,7 @@ class SqliteDatabase implements Database {
     }
 
     async write(sql: string): Promise<QueryResult> {
-        if (!this.writable) throw new ReadOnlyServerError();
+        if (!this.writable) throw new ReadOnlyServerError(this.source);
         if (!this.writer) this.writer = new DatabaseSync(this.path);
         // A write may have been a CREATE or DROP.
         this.tables = null;
@@ -281,6 +286,7 @@ class PostgresDatabase implements Database {
     constructor(
         private readonly client: any,
         private readonly writable: boolean,
+        private readonly source: 'env' | 'handoff' = 'env',
     ) {}
 
     async read(sql: string): Promise<QueryResult> {
@@ -300,7 +306,7 @@ class PostgresDatabase implements Database {
     }
 
     async write(sql: string): Promise<QueryResult> {
-        if (!this.writable) throw new ReadOnlyServerError();
+        if (!this.writable) throw new ReadOnlyServerError(this.source);
         // A write may have been a CREATE or DROP.
         this.tables = null;
         const res = await this.client.query({ text: sql, rowMode: 'array' });
@@ -430,7 +436,7 @@ export async function openDatabase(config: ServerConfig): Promise<Database> {
     const writable = config.policy !== 'read-only';
 
     if (config.dialect === 'sqlite') {
-        return new SqliteDatabase(config.target, writable);
+        return new SqliteDatabase(config.target, writable, config.source);
     }
 
     let pg: any;
@@ -452,7 +458,7 @@ export async function openDatabase(config: ServerConfig): Promise<Database> {
     const Client = pg.Client ?? pg.default?.Client;
     const client = new Client({ connectionString: config.target });
     await client.connect();
-    return new PostgresDatabase(client, writable);
+    return new PostgresDatabase(client, writable, config.source);
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Server, HardDrive, Database, CheckCircle2, Clock, Eye, Flame, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Server, HardDrive, Database, CheckCircle2, Clock, Eye, Flame, Plug, ShieldCheck, ShieldOff } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -238,6 +238,21 @@ const StatusBar = ({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {isConnected && (
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent('openSettings', { detail: { tab: 'agents' } }))
+            }
+            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+            aria-label="Connect an agent"
+            title="Connect an agent"
+          >
+            <Plug className="w-3 h-3" aria-hidden />
+            <span>MCP</span>
+          </button>
+        )}
 
         {lastSaved && (
           <div className="flex items-center gap-1.5 text-muted-foreground">

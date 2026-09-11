@@ -1,13 +1,14 @@
 import OpenAI from "openai";
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import { loadAllApiKeys } from './secretStorage';
+import { loadAllApiKeys, adoptLegacyApiKeys, markLegacyApiKeysMigrated } from './secretStorage';
 import { buildRepairMessages, buildTextToSqlMessages, stripSqlFences } from './promptBuilder';
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
 import type { DatabaseSchema } from './schemaTypes';
 
 export type { ColumnSchema, DatabaseSchema, SqlDialect, TableSchema } from './schemaTypes';
 
-export type AIProvider = 'github' | 'azure' | 'openai' | 'ollama';
+export const AI_PROVIDERS = ['openai', 'openai-compatible', 'ollama'] as const;
+export type AIProvider = (typeof AI_PROVIDERS)[number];
 
 export type AIProviderConfig = {
   apiKey: string;
@@ -28,24 +29,19 @@ export type AISettings = {
 };
 
 export const defaultSettings: AISettings = {
-  activeProvider: 'github',
+  activeProvider: 'ollama',
   configs: {
-    github: {
-      apiKey: '',
-      endpoint: 'https://models.github.ai/inference',
-      modelName: 'openai/gpt-4o-mini'
-    },
     openai: {
       apiKey: '',
-      modelName: 'gpt-4'
+      modelName: 'gpt-4o-mini'
     },
-    azure: {
+    'openai-compatible': {
       apiKey: '',
       endpoint: '',
       modelName: ''
     },
     ollama: {
-      apiKey: 'ollama', // Dummy key for local
+      apiKey: 'ollama',
       endpoint: 'http://localhost:11434/v1',
       modelName: 'llama3'
     }
@@ -64,7 +60,19 @@ type StoredAISettings = {
   includeSampleValues?: boolean;
 };
 
-const AI_PROVIDERS: AIProvider[] = ['github', 'azure', 'openai', 'ollama'];
+/** GitHub Models / Azure used to be first-class; they are just OpenAI-compatible endpoints now. */
+function coerceProvider(value: unknown): AIProvider {
+  if (value === 'openai' || value === 'ollama' || value === 'openai-compatible') return value;
+  if (value === 'github' || value === 'azure') return 'openai-compatible';
+  return defaultSettings.activeProvider;
+}
+
+function storedConfig(
+  configs: Record<string, StoredProviderConfig> | undefined,
+  key: string,
+): StoredProviderConfig | undefined {
+  return configs?.[key];
+}
 
 function mergeWithDefaults(stored: Partial<StoredAISettings>): AISettings {
   const settings: AISettings = {
@@ -96,18 +104,31 @@ function readStoredSettings(): StoredAISettings | null {
   const parsed = JSON.parse(savedSettings);
   if (!parsed.configs) return null;
 
-  const configs = Object.fromEntries(
-    AI_PROVIDERS.map((provider) => [
-      provider,
-      {
-        endpoint: parsed.configs[provider]?.endpoint,
-        modelName: parsed.configs[provider]?.modelName,
-      },
-    ]),
-  ) as Record<AIProvider, StoredProviderConfig>;
+  const raw = parsed.configs as Record<string, StoredProviderConfig>;
+  const compatible =
+    storedConfig(raw, 'openai-compatible') ??
+    (parsed.activeProvider === 'azure' ? storedConfig(raw, 'azure') : undefined) ??
+    (parsed.activeProvider === 'github' ? storedConfig(raw, 'github') : undefined) ??
+    storedConfig(raw, 'github') ??
+    storedConfig(raw, 'azure');
+
+  const configs = {
+    openai: {
+      endpoint: raw.openai?.endpoint,
+      modelName: raw.openai?.modelName,
+    },
+    'openai-compatible': {
+      endpoint: compatible?.endpoint,
+      modelName: compatible?.modelName,
+    },
+    ollama: {
+      endpoint: raw.ollama?.endpoint,
+      modelName: raw.ollama?.modelName,
+    },
+  } as Record<AIProvider, StoredProviderConfig>;
 
   return {
-    activeProvider: parsed.activeProvider ?? defaultSettings.activeProvider,
+    activeProvider: coerceProvider(parsed.activeProvider),
     configs,
     includeSampleValues: parsed.includeSampleValues,
   };
@@ -143,6 +164,18 @@ export async function loadAISettingsAsync(): Promise<AISettings> {
   const settings = loadAISettings();
 
   const apiKeys = await loadAllApiKeys();
+  if (!apiKeys['openai-compatible']) {
+    let preferAzure = false;
+    try {
+      const raw = JSON.parse(localStorage.getItem('aiSettings') || 'null');
+      preferAzure = raw?.activeProvider === 'azure';
+    } catch {
+      preferAzure = false;
+    }
+    apiKeys['openai-compatible'] = await adoptLegacyApiKeys(preferAzure);
+  } else {
+    markLegacyApiKeysMigrated();
+  }
   for (const provider of AI_PROVIDERS) {
     settings.configs[provider] = {
       ...settings.configs[provider],
@@ -167,13 +200,20 @@ function getSettings(): AISettings {
  * worse than not testing at all.
  */
 function clientFor(provider: AIProvider, config: AIProviderConfig) {
-  // For Ollama, we need to ensure the apiKey is not empty (even if dummy) for the OpenAI client to work
-  const apiKey = provider === 'ollama' && !config.apiKey
-    ? 'ollama'
-    : config.apiKey;
+  // The OpenAI SDK refuses an empty key even when the server ignores it
+  // (Ollama, LM Studio, and some compatible proxies).
+  const apiKey =
+    config.apiKey ||
+    (provider === 'openai' ? '' : 'local');
+
+  const baseURL =
+    provider === 'openai' ? undefined : config.endpoint?.trim() || undefined;
+  if (provider !== 'openai' && !baseURL) {
+    throw new Error('Set an endpoint for this provider.');
+  }
 
   return new OpenAI({
-    baseURL: config.endpoint || undefined,
+    baseURL,
     apiKey: apiKey,
     dangerouslyAllowBrowser: true,
     fetch: async (url, init) => {
@@ -228,12 +268,10 @@ function createClient() {
 /** Fallback model when none is configured. */
 function defaultModelFor(provider: AIProvider): string {
   switch (provider) {
-    case 'github':
-      return 'openai/gpt-4o-mini';
     case 'ollama':
       return 'llama3';
     default:
-      return 'gpt-4';
+      return 'gpt-4o-mini';
   }
 }
 
@@ -302,14 +340,11 @@ export const aiService = {
    * The models a provider says it has, so they can be picked rather than
    * typed from memory.
    *
-   * Uses the OpenAI-compatible `/models` endpoint, which Ollama and OpenAI
-   * both serve. Azure does not — its deployments are user-named and listed
-   * through a different management API — so it returns nothing and the field
-   * stays manual. Returning an empty list rather than throwing keeps that a
-   * normal outcome instead of an error the user has to interpret.
+   * Uses the OpenAI-compatible `/models` endpoint. A host that does not
+   * implement it leaves the field typeable; an empty list is a normal
+   * outcome, not an error the user has to interpret.
    */
   async listModels(provider: AIProvider, config: AIProviderConfig): Promise<string[]> {
-    if (provider === 'azure') return [];
     const client = clientFor(provider, config);
     const response = await client.models.list();
     return response.data

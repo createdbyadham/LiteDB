@@ -1,13 +1,28 @@
 // What the server was told to connect to, and how much latitude it has.
 //
-// Everything arrives as environment variables because that is what MCP hosts
-// can actually set: a `claude_desktop_config.json` entry has a command, args
-// and an env map, and nothing else. No config file to find, no state to carry
-// between runs.
+// Two sources, in this order:
+//
+//   1. `LITEDB_DATABASE_URL` / `LITEDB_SQLITE_PATH`. The distributable shape:
+//      `npx -y litedb-mcp` on a CI box, against a file, no LiteDB installed.
+//      An MCP host can set environment variables and nothing else, so this is
+//      what the published package has to honour.
+//   2. The handoff file the desktop app writes when you connect. Same app-data
+//      directory as the audit log. No env, no restart: switch database in the
+//      app and the next tool call follows.
+//
+// Neither → an error that explains both, rather than a guess.
 
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { postgresConnectionId, sqliteConnectionId } from '../../src/lib/connectionId';
+import {
+    HANDOFF_FILENAME,
+    HandoffError,
+    mcpPolicyFromApp,
+    parseHandoff,
+    postgresTarget,
+} from '../../src/lib/mcpHandoff';
 import type { SqlDialect } from '../../src/lib/schemaTypes';
 import type { SafetyPolicy } from '../../src/lib/sqlPolicy';
 
@@ -15,9 +30,18 @@ import type { SafetyPolicy } from '../../src/lib/sqlPolicy';
 const APP_IDENTIFIER = 'com.adhamehab.litedb';
 
 export class ConfigError extends Error {
-    constructor(message: string) {
+    /**
+     * Retryable errors clear themselves without restarting the server: open a
+     * database in LiteDB, save an in-memory file, rewrite a damaged handoff.
+     * Env conflicts do not — the process has to be relaunched with different
+     * variables — so those fail startup.
+     */
+    readonly retryable: boolean;
+
+    constructor(message: string, retryable = false) {
         super(message);
         this.name = 'ConfigError';
+        this.retryable = retryable;
     }
 }
 
@@ -36,6 +60,8 @@ export interface ServerConfig {
     embeddingModelId: string;
     /** Directory the embedding model is downloaded to and reused from. */
     modelCachePath: string;
+    /** Where the target came from. Controls the read-only refusal copy. */
+    source: 'env' | 'handoff';
 }
 
 /** The desktop app's data directory, mirroring Tauri v2's `AppLocalData`. */
@@ -75,6 +101,20 @@ export function defaultModelCachePath(env: NodeJS.ProcessEnv = process.env): str
     return join(appDataDir(env), 'models');
 }
 
+/** Where the desktop app writes the currently-open connection. */
+export function defaultHandoffPath(env: NodeJS.ProcessEnv = process.env): string {
+    return join(appDataDir(env), HANDOFF_FILENAME);
+}
+
+export const NO_DATABASE_MESSAGE =
+    'No database configured. Open a database in the LiteDB app — the agent ' +
+    'follows whatever is connected — or set LITEDB_SQLITE_PATH to a .sqlite/.db ' +
+    'file, or LITEDB_DATABASE_URL to a postgres:// connection string.';
+
+export const IN_MEMORY_MESSAGE =
+    'LiteDB has an in-memory SQLite database open. MCP talks to the file on ' +
+    'disk, not the editor\'s copy — save the database to a file and reopen it.';
+
 /**
  * Policies this server will run under.
  *
@@ -88,20 +128,17 @@ export function defaultModelCachePath(env: NodeJS.ProcessEnv = process.env): str
  */
 const ALLOWED_POLICIES: SafetyPolicy[] = ['read-only', 'guarded', 'unrestricted'];
 
-function parsePolicy(raw: string | undefined): SafetyPolicy {
-    // Read-only by default, which is the opposite of the app's `guarded`
-    // default and deliberately so: the app's first job is editing tables, and
-    // there is a person in front of it. Here the caller is a model, the
-    // session may be unattended, and the safe default costs one environment
-    // variable to change.
-    if (!raw) return 'read-only';
+function parsePolicy(raw: string | undefined): SafetyPolicy | null {
+    if (!raw) return null;
     const value = raw.trim().toLowerCase();
     if (value === 'yolo') {
         throw new ConfigError(
             'LITEDB_POLICY=yolo is not available over MCP. YOLO mode exists in the ' +
                 'desktop app behind a confirmation and a visible banner, with someone ' +
                 'at the keyboard; neither is true of a server. Use "unrestricted" if ' +
-                'you want writes to need only one approval instead of two.',
+                'you want writes to need only one approval instead of two. If LiteDB ' +
+                'is in YOLO, the handoff maps that down to guarded on its own — do ' +
+                'not set the variable.',
         );
     }
     if (!ALLOWED_POLICIES.includes(value as SafetyPolicy)) {
@@ -137,9 +174,52 @@ function describePostgres(url: string): string {
     }
 }
 
+function readHandoffFile(path: string) {
+    let contents: string;
+    try {
+        contents = readFileSync(path, 'utf8');
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw new ConfigError(
+            `Could not read the LiteDB handoff file at ${path}: ` +
+                (error instanceof Error ? error.message : String(error)) +
+                '. Reconnect in the app to rewrite it.',
+            true,
+        );
+    }
+    try {
+        return parseHandoff(contents);
+    } catch (error) {
+        const message = error instanceof HandoffError ? error.message : String(error);
+        throw new ConfigError(message, true);
+    }
+}
+
+function fromEnv(
+    dialect: SqlDialect,
+    target: string,
+    connectionId: string,
+    shared: Omit<ServerConfig, 'dialect' | 'target' | 'connectionId' | 'source' | 'policy'> & {
+        policy: SafetyPolicy | null;
+    },
+): ServerConfig {
+    return {
+        dialect,
+        target,
+        connectionId,
+        policy: shared.policy ?? 'read-only',
+        maxRows: shared.maxRows,
+        auditPath: shared.auditPath,
+        embeddingModelId: shared.embeddingModelId,
+        modelCachePath: shared.modelCachePath,
+        source: 'env',
+    };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     const databaseUrl = env.LITEDB_DATABASE_URL?.trim();
     const sqlitePath = env.LITEDB_SQLITE_PATH?.trim();
+    const envPolicy = parsePolicy(env.LITEDB_POLICY);
 
     if (databaseUrl && sqlitePath) {
         throw new ConfigError(
@@ -147,15 +227,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
                 'One server, one database.',
         );
     }
-    if (!databaseUrl && !sqlitePath) {
-        throw new ConfigError(
-            'No database configured. Set LITEDB_SQLITE_PATH to a .sqlite/.db file, ' +
-                'or LITEDB_DATABASE_URL to a postgres:// connection string.',
-        );
-    }
 
     const shared = {
-        policy: parsePolicy(env.LITEDB_POLICY),
+        policy: envPolicy,
         maxRows: parseMaxRows(env.LITEDB_MAX_ROWS),
         auditPath: env.LITEDB_AUDIT_PATH?.trim() || defaultAuditPath(env),
         embeddingModelId: env.LITEDB_EMBEDDING_MODEL?.trim() || 'minilm',
@@ -163,18 +237,52 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     };
 
     if (databaseUrl) {
+        return fromEnv('postgres', databaseUrl, describePostgres(databaseUrl), shared);
+    }
+    if (sqlitePath) {
+        return fromEnv('sqlite', sqlitePath, sqliteConnectionId(sqlitePath), shared);
+    }
+
+    const handoffPath = env.LITEDB_HANDOFF_PATH?.trim() || defaultHandoffPath(env);
+    const handoff = readHandoffFile(handoffPath);
+    if (!handoff) {
+        throw new ConfigError(NO_DATABASE_MESSAGE, true);
+    }
+
+    if (handoff.dialect === 'sqlite') {
+        if (!handoff.sqlitePath) {
+            throw new ConfigError(IN_MEMORY_MESSAGE, true);
+        }
         return {
-            ...shared,
-            dialect: 'postgres',
-            target: databaseUrl,
-            connectionId: describePostgres(databaseUrl),
+            dialect: 'sqlite',
+            target: handoff.sqlitePath,
+            connectionId: handoff.connectionId,
+            policy: envPolicy ?? mcpPolicyFromApp(handoff.policy),
+            maxRows: shared.maxRows,
+            auditPath: shared.auditPath,
+            embeddingModelId: shared.embeddingModelId,
+            modelCachePath: shared.modelCachePath,
+            source: 'handoff',
         };
     }
 
+    if (!handoff.postgres) {
+        throw new ConfigError(
+            'LiteDB has Postgres open but the handoff file has no connection details. ' +
+                'Reconnect from the app.',
+            true,
+        );
+    }
+
     return {
-        ...shared,
-        dialect: 'sqlite',
-        target: sqlitePath as string,
-        connectionId: sqliteConnectionId(sqlitePath),
+        dialect: 'postgres',
+        target: postgresTarget(handoff.postgres),
+        connectionId: handoff.connectionId,
+        policy: envPolicy ?? mcpPolicyFromApp(handoff.policy),
+        maxRows: shared.maxRows,
+        auditPath: shared.auditPath,
+        embeddingModelId: shared.embeddingModelId,
+        modelCachePath: shared.modelCachePath,
+        source: 'handoff',
     };
 }

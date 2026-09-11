@@ -87,6 +87,23 @@ export function usePostgres(): UsePgReturn {
 
         // Check if we already have a connection
         if (pgService.connected) {
+          const existing = pgService.currentConfig;
+          if (existing) {
+            setActiveConnection({
+              id: postgresConnectionId(existing.host, existing.port, existing.database),
+              label: `postgres:${existing.host}/${existing.database}`,
+              dialect: 'postgres',
+              postgres: {
+                host: existing.host,
+                port: existing.port,
+                database: existing.database,
+                username: existing.username,
+                password: existing.password,
+                ssl: existing.ssl ?? false,
+              },
+            });
+          }
+
           const existingTables = await pgService.getTables();
 
           if (mounted) {
@@ -111,6 +128,7 @@ export function usePostgres(): UsePgReturn {
           setHasPgVector(false);
           setVectorColumns([]);
           aiService.clearSchema();
+          clearActiveConnection();
         }
       }
     };
@@ -128,6 +146,8 @@ export function usePostgres(): UsePgReturn {
     setTables([]); // Clear existing tables while connecting
     setHasPgVector(false);
     setVectorColumns([]);
+    pgService.disconnect();
+    clearActiveConnection();
 
     try {
       // Ensure pgService is initialized
@@ -144,6 +164,14 @@ export function usePostgres(): UsePgReturn {
           id: postgresConnectionId(config.host, config.port, config.database),
           label: `postgres:${config.host}/${config.database}`,
           dialect: 'postgres',
+          postgres: {
+            host: config.host,
+            port: config.port,
+            database: config.database,
+            username: config.username,
+            password: config.password,
+            ssl: config.ssl ?? false,
+          },
         });
 
         const tableList = await pgService.getTables();
@@ -188,6 +216,8 @@ export function usePostgres(): UsePgReturn {
       setHasPgVector(false);
       setVectorColumns([]);
       aiService.clearSchema();
+      pgService.disconnect();
+      clearActiveConnection();
       return false;
     } catch (error) {
       setIsConnected(false);
@@ -195,6 +225,8 @@ export function usePostgres(): UsePgReturn {
       setHasPgVector(false);
       setVectorColumns([]);
       aiService.clearSchema();
+      pgService.disconnect();
+      clearActiveConnection();
 
       toast({
         title: "Connection Error",
