@@ -10,6 +10,8 @@ import { useEffect } from 'react';
 import { check } from '@tauri-apps/plugin-updater';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { sealHandoff } from '@/lib/mcpHandoff';
 
 const App = () => {
   useEffect(() => {
@@ -37,6 +39,22 @@ const App = () => {
       }
     };
     checkForAppUpdates();
+
+    let cancelled = false;
+    let unlistenClose: (() => void) | undefined;
+    void getCurrentWindow()
+      .onCloseRequested(async () => {
+        await sealHandoff();
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlistenClose = fn;
+      });
+
+    return () => {
+      cancelled = true;
+      unlistenClose?.();
+    };
   }, []);
 
   return (

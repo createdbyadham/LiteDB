@@ -8,7 +8,8 @@
 //      what the published package has to honour.
 //   2. The handoff file the desktop app writes when you connect. Same app-data
 //      directory as the audit log. No env, no restart: switch database in the
-//      app and the next tool call follows.
+//      app and the next tool call follows. Deleted when the app quits, so this
+//      is the open connection, not the last one.
 //
 // Neither → an error that explains both, rather than a guess.
 
@@ -101,7 +102,10 @@ export function defaultModelCachePath(env: NodeJS.ProcessEnv = process.env): str
     return join(appDataDir(env), 'models');
 }
 
-/** Where the desktop app writes the currently-open connection. */
+/**
+ * Where the desktop app writes the currently-open connection.
+ * Removed when the window closes, so this is "open now", not "last opened".
+ */
 export function defaultHandoffPath(env: NodeJS.ProcessEnv = process.env): string {
     return join(appDataDir(env), HANDOFF_FILENAME);
 }

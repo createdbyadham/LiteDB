@@ -2,7 +2,9 @@
 
 LiteDB already has the database open. The MCP server follows that connection —
 no path, no URL, no restart when you switch databases. The status-bar policy is
-the agent's policy (YOLO maps down to guarded).
+the agent's policy (YOLO maps down to guarded). Quitting the app removes the
+handoff, including any Postgres password, so the agent cannot keep using the
+last database.
 
 You need Node 22.5+ on the PATH the host uses.
 
@@ -11,9 +13,11 @@ You need Node 22.5+ on the PATH the host uses.
 Settings → **Agents**, or the **MCP** chip in the status bar.
 
 - Green “Agents can see this connection” means the handoff file is on disk.
+  It is removed when you disconnect or quit.
 - **Add to Claude Desktop** merges `mcpServers.litedb` into
-  `claude_desktop_config.json` (both the documented file and the Windows Store
-  copy, if it exists). Fully quit Claude — tray too — then a new chat.
+  `claude_desktop_config.json` — always the documented file, plus the Windows
+  Store copy when the Store version is installed. Fully quit Claude — tray too —
+  then a new chat.
 - Everyone else: copy the snippet for Claude Code, Cursor, OpenCode, or VS Code.
 
 `mcpServers` is a **top-level** key, sibling of `preferences`. Nesting it inside

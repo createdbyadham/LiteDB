@@ -129,7 +129,7 @@ export function AgentsPanel() {
                         {connection
                             ? `${connection.label} · app ${policy}` +
                               (policy === 'yolo' ? ` → agent ${agentPolicy}` : ` · agent ${agentPolicy}`)
-                            : 'Connect to a database first. The agent follows whatever is open.'}
+                            : 'Connect to a database first. The agent follows whatever is open, and quitting clears it.'}
                         {connection && !handoffOnDisk
                             ? ' Reconnect so the handoff file is written.'
                             : null}
@@ -142,7 +142,7 @@ export function AgentsPanel() {
                 <p className="text-xs text-muted-foreground leading-relaxed">
                     Merges <code className="font-mono">mcpServers.litedb</code> into{' '}
                     <code className="font-mono">claude_desktop_config.json</code>, including the
-                    Windows Store copy if it exists. Does not touch the rest of the file.
+                    Windows Store copy when the Store version is installed. Does not touch the rest of the file.
                 </p>
                 <Button
                     type="button"

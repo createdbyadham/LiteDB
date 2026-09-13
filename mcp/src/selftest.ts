@@ -10,7 +10,7 @@
 // So the assertions below check the *outcome* — did the row change? — rather
 // than checking that the right function was called.
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -23,6 +23,7 @@ import {
     type McpHandoff,
 } from '../../src/lib/mcpHandoff';
 import { mergeLiteDbMcp } from '../../src/lib/mcpAgentConfig';
+import { CLAUDE_STORE_PACKAGE, windowsClaudeConfigPaths } from '../../src/lib/claudeDesktopMcp';
 import * as approvals from './approvals';
 import { installAudit } from './audit';
 import { ConfigError, IN_MEMORY_MESSAGE, NO_DATABASE_MESSAGE, defaultAuditPath, loadConfig, type ServerConfig } from './config';
@@ -268,6 +269,16 @@ async function main(): Promise<void> {
         fromPg.connectionId === 'postgres:localhost:5432/shop' && !fromPg.connectionId.includes('s3cret'),
     );
 
+    const sslHandoff = {
+        ...pgHandoff,
+        postgres: { ...pgHandoff.postgres!, ssl: true },
+    };
+    check(
+        'handoff SSL encrypts without verifying the cert (matches the app checkbox)',
+        postgresTarget(sslHandoff.postgres).includes('sslmode=no-verify') &&
+            !postgresTarget(sslHandoff.postgres).includes('sslmode=require'),
+    );
+
     const roundTrip = parseHandoff(serializeHandoff(pgHandoff));
     check('handoff round-trips', roundTrip.postgres?.password === 's3cret');
 
@@ -290,6 +301,28 @@ async function main(): Promise<void> {
     check(
         'Claude Desktop merge puts mcpServers at the top level',
         mergedDesktop.mcpServers?.litedb?.command === 'npx' && !('mcpServers' in (mergedDesktop.preferences ?? {})),
+    );
+
+    const roaming = 'C:\\Users\\ada\\AppData\\Roaming';
+    const local = 'C:\\Users\\ada\\AppData\\Local';
+    const normalOnly = windowsClaudeConfigPaths(roaming, local, false);
+    check(
+        'Windows always writes the documented Claude config',
+        normalOnly.length === 1 &&
+            normalOnly[0] === 'C:\\Users\\ada\\AppData\\Roaming\\Claude\\claude_desktop_config.json',
+    );
+    check(
+        'Windows skips the Store copy when the Store app is not installed',
+        !normalOnly.some((p) => p.includes('Packages')),
+        'writing it anyway creates a fake package folder for an app that is not there',
+    );
+    const withStore = windowsClaudeConfigPaths(roaming, local, true);
+    check(
+        'Windows writes both when the Store app is installed',
+        withStore.length === 2 &&
+            withStore[0] === normalOnly[0] &&
+            withStore[1] ===
+                `C:\\Users\\ada\\AppData\\Local\\Packages\\${CLAUDE_STORE_PACKAGE}\\LocalCache\\Roaming\\Claude\\claude_desktop_config.json`,
     );
 
     // --------------------------------------------------------- read-only ---
@@ -470,6 +503,44 @@ async function main(): Promise<void> {
             'the write in a mixed script did not run',
             countRows(harness, 'customers', "country = 'FR'") === 0,
             'nothing in a script needing approval may execute before approval',
+        );
+    } finally {
+        await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
+    // ---------------------------------------------------- WAL visibility ---
+    process.stdout.write('\nWAL visibility\n');
+
+    approvals.reset();
+    harness = buildFixture();
+    {
+        const walSetup = new DatabaseSync(harness.dbPath);
+        walSetup.exec('PRAGMA journal_mode=WAL');
+        walSetup.close();
+    }
+    config = configFor(harness, 'guarded');
+    db = await openDatabase(config);
+    ctx = { db, config };
+    installAudit({
+        connection: config.connectionId,
+        dialect: 'sqlite',
+        policy: 'guarded',
+        path: harness.auditPath,
+    });
+
+    try {
+        const mtimeBefore = statSync(harness.dbPath).mtimeMs;
+        const preview = await runQuery(ctx, "UPDATE orders SET status = 'refunded' WHERE id = 2");
+        const token = /token: ([0-9a-f-]{36})/.exec(preview.text)?.[1] ?? '';
+        // Clear of any filesystem timestamp granularity.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const result = await runApproved(ctx, token);
+        check('an approved write to a WAL-mode file runs', result.text.startsWith('Executed.'));
+        check(
+            "and moves the main file's modified time",
+            statSync(harness.dbPath).mtimeMs !== mtimeBefore,
+            'the app spots outside writes by mtime; a write left sitting in -wal is invisible to it and gets saved over',
         );
     } finally {
         await db.close();

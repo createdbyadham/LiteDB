@@ -69,6 +69,28 @@ unattended — even on a connection you have set to unrestricted.
 - **Autosave & Export**: Automatically save changes and export query results to **CSV, Excel, or JSON**.
 - **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
 
+## Compared honestly
+
+LiteDB is a SQLite/Postgres desktop client with an agent and a write-safety
+layer. It is not a replacement for a general DBA workbench.
+
+| | LiteDB | TablePlus | Beekeeper Studio | DBeaver |
+| --- | :---: | :---: | :---: | :---: |
+| SQLite + PostgreSQL | ✓ | ✓ | ✓ | ✓ |
+| MySQL, SQL Server, and the rest | — | ✓ | ✓ | ✓ |
+| SSH tunnel / jump host | — | ✓ | ✓ | ✓ |
+| ERD | ✓ | paid | plugins | ✓ |
+| Text-to-SQL (local or cloud) | ✓ | — | — | Pro AI |
+| Write-safety (classify, row-count approval, audit) | ✓ | — | — | — |
+| MCP server through those guardrails | ✓ | — | — | — |
+| pgvector semantic search in the app | ✓ | — | — | — |
+| JDBC / every obscure driver | — | — | — | ✓ |
+| Native polish / years of query UX | — | ✓ | — | — |
+
+The losses that matter in practice: **two dialects**, no SSH, and TablePlus
+still feels faster for “just run this SQL.” Use those tools for that. Use this
+one when a model is allowed near the database, or when pgvector is the point.
+
 ## Schema Visualization
 
 LiteDB now includes a powerful **Entity Relationship Diagram (ERD)** generator:
@@ -275,7 +297,9 @@ That is the reason to point it at [`litedb-mcp`](mcp/README.md) rather than at
 a raw Postgres MCP server.
 
 If LiteDB is running, the server follows whatever you have open. No paths in
-the config, no restart when you switch database. Fastest path: Settings →
+the config, no restart when you switch database. Quitting the app clears that
+handoff — including a stored Postgres password — so an agent cannot keep using
+the last connection. Fastest path: Settings →
 **Agents**, or the status-bar **MCP** chip. Host-by-host:
 [Connect an agent](docs/connect-an-agent.md). Needs **Node 22.5+** on the PATH
 the host uses (`node:sqlite`).

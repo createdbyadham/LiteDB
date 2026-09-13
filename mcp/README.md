@@ -31,7 +31,8 @@ To run exactly the statements above, call execute_approved with:
 
 ## Install
 
-If LiteDB is running, the server follows whatever you have open. In the app:
+If LiteDB is running, the server follows whatever you have open. Quitting the
+app clears the handoff (and any Postgres password in it). In the app:
 Settings → **Agents**, or the status-bar **MCP** chip. Step-by-step for each
 host: [Connect an agent](../docs/connect-an-agent.md). Node **22.5+**.
 
@@ -91,7 +92,7 @@ For PostgreSQL, swap the env block:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| *(none)* | the app's open database | Handoff file next to the audit log. |
+| *(none)* | the app's currently open database | Handoff file next to the audit log. Removed when the app quits. |
 | `LITEDB_SQLITE_PATH` | — | Path to a SQLite file. Mutually exclusive with the next. Wins over the app. |
 | `LITEDB_DATABASE_URL` | — | `postgres://…` connection string. Wins over the app. |
 | `LITEDB_POLICY` | app dropdown, or `read-only` for env | `read-only`, `guarded`, or `unrestricted`. |
@@ -103,7 +104,8 @@ For PostgreSQL, swap the env block:
 **Following the app.** Connect in LiteDB and the agent uses that database. The
 status-bar dropdown is the policy. SQLite is the file on disk, not the
 editor's unsaved buffer — save first if you have been editing. An in-memory
-database cannot be shared; save it to a file.
+database cannot be shared; save it to a file. Quitting LiteDB deletes the
+handoff file, so this is the *open* connection, not the last one.
 
 **The env default is `read-only`,** which is the opposite of the desktop app's
 `guarded` default and deliberately so. The app's first job is editing tables
@@ -120,9 +122,10 @@ If the app is in YOLO, the handoff maps that down to `guarded`. Setting
 The handoff file stores it in plaintext in your app-data directory — the same
 exposure as putting it in `claude_desktop_config.json`, in a less
 screenshot-prone place, and out of a file you might sync between machines.
-The cleaner version would read it back out of the OS keychain where LiteDB
-already put it, but that needs a native module and would cost the package its
-"22 MB, no native deps" property.
+Disconnecting or quitting the app deletes the file. The cleaner version would
+read it back out of the OS keychain where LiteDB already put it, but that
+needs a native module and would cost the package its "22 MB, no native deps"
+property.
 
 ## Tools
 

@@ -39,6 +39,10 @@ class SqliteService {
     private currentTables: TableInfo[] = [];
     private lastSavedData: Uint8Array | null = null;
     public currentFilePath: string | null = null;
+    /** mtime of the file when we last loaded it or successfully wrote it. */
+    private diskMtimeMs: number | null = null;
+    /** Serializes disk reads/writes so a reload cannot race an in-flight save. */
+    private ioChain: Promise<void> = Promise.resolve();
 
     async init() {
         if (this.SQL) {
@@ -106,44 +110,25 @@ class SqliteService {
                 throw new Error("SQL.js failed to initialize");
             }
 
-            // Convert ArrayBuffer to Uint8Array properly
             const data = new Uint8Array(buffer);
-
-            // Store the initial data and file path
-            this.lastSavedData = data;
-            if (filePath) {
-                this.currentFilePath = filePath;
-            }
-
-            // Close existing database if any
-            if (this.db) {
-                this.db.close();
-                this.db = null;
-            }
-
-            try {
-                // Create new database instance
-                this.db = new this.SQL.Database(data);
-
-                // Verify database is valid by trying to read tables
-                this.currentTables = this.getTables();
-
-                return true;
-            } catch (dbError) {
-                console.error("Database creation error:", dbError);
-                this.currentTables = [];
-                this.currentFilePath = null;
-                toast({
-                    title: "Invalid Database",
-                    description: "The file appears to be corrupted or not a valid SQLite database.",
-                    variant: "destructive"
-                });
+            if (!this.swapInDatabase(data, { keepCurrentOnFailure: false })) {
                 return false;
             }
+
+            if (filePath) {
+                this.currentFilePath = filePath;
+                await this.captureDiskMtime();
+            } else {
+                this.currentFilePath = null;
+                this.diskMtimeMs = null;
+            }
+
+            return true;
         } catch (error) {
             console.error("Failed to load database:", error);
             this.currentTables = [];
             this.currentFilePath = null;
+            this.diskMtimeMs = null;
             toast({
                 title: "Error",
                 description: error instanceof Error ? error.message : "Failed to load database",
@@ -151,6 +136,44 @@ class SqliteService {
             });
             return false;
         }
+    }
+
+    /**
+     * Open `data` in a new sql.js handle and swap it in only after it parses.
+     * A truncated file from an agent must not close the live editor first.
+     */
+    private swapInDatabase(data: Uint8Array, opts: { keepCurrentOnFailure: boolean }): boolean {
+        if (!this.SQL) return false;
+
+        let next: Database;
+        try {
+            next = new this.SQL.Database(data);
+            next.exec("SELECT name FROM sqlite_master LIMIT 1");
+        } catch (dbError) {
+            console.error("Database creation error:", dbError);
+            toast({
+                title: "Invalid Database",
+                description: "The file appears to be corrupted or not a valid SQLite database.",
+                variant: "destructive"
+            });
+            if (!opts.keepCurrentOnFailure) {
+                if (this.db) {
+                    this.db.close();
+                    this.db = null;
+                }
+                this.currentTables = [];
+                this.currentFilePath = null;
+                this.diskMtimeMs = null;
+            }
+            return false;
+        }
+
+        const previous = this.db;
+        this.db = next;
+        this.lastSavedData = data;
+        this.currentTables = this.getTables();
+        previous?.close();
+        return true;
     }
 
     getTables(): TableInfo[] {
@@ -349,14 +372,97 @@ class SqliteService {
         }
     }
 
-    private async saveToDisk(): Promise<boolean> {
+    private async captureDiskMtime(): Promise<void> {
+        if (!this.currentFilePath) {
+            this.diskMtimeMs = null;
+            return;
+        }
+        this.diskMtimeMs = await tauriService.getFileMtime(this.currentFilePath);
+    }
+
+    /**
+     * sql.js holds a full copy of the file. If an agent (or anything else)
+     * wrote the file since we loaded it, writing our copy back would silently
+     * undo that. Refuse, and offer a reload instead.
+     */
+    private async diskChangedUnderUs(): Promise<boolean> {
+        if (!this.currentFilePath || this.diskMtimeMs == null) return false;
+        const now = await tauriService.getFileMtime(this.currentFilePath);
+        // We had an mtime and now cannot read one: do not overwrite.
+        if (now == null) return true;
+        return now !== this.diskMtimeMs;
+    }
+
+    private offerReloadInsteadOfOverwrite(): void {
+        this.dispatchWindowEvent('sqliteFileChangedOnDisk');
+    }
+
+    async reloadFromDisk(): Promise<boolean> {
+        return this.enqueueIo(() => this.reloadFromDiskNow());
+    }
+
+    private async reloadFromDiskNow(): Promise<boolean> {
+        if (!this.currentFilePath) return false;
+        const path = this.currentFilePath;
+        const result = await tauriService.readDatabase(path);
+        if (!result.success || !result.data) {
+            toast({
+                title: "Reload failed",
+                description: result.error || "Could not re-read the database file",
+                variant: "destructive",
+            });
+            return false;
+        }
+        const copy = new Uint8Array(result.data);
+        if (!this.swapInDatabase(copy, { keepCurrentOnFailure: true })) {
+            return false;
+        }
+        this.currentFilePath = path;
+        await this.captureDiskMtime();
+        this.dispatchWindowEvent('sqliteFileReloaded');
+        toast({
+            title: "Reloaded from disk",
+            description: "Editor now matches the file, including any agent writes.",
+        });
+        return true;
+    }
+
+    private enqueueIo<T>(work: () => Promise<T>): Promise<T> {
+        const pending = this.ioChain.then(work, work);
+        this.ioChain = pending.then(
+            () => undefined,
+            () => undefined,
+        );
+        return pending;
+    }
+
+    private dispatchWindowEvent(type: string): void {
+        const host = globalThis as {
+            Event?: new (type: string) => object;
+            dispatchEvent?: (event: object) => void;
+        };
+        if (typeof host.Event !== 'function' || typeof host.dispatchEvent !== 'function') return;
+        host.dispatchEvent(new host.Event(type));
+    }
+
+    private saveToDisk(): Promise<boolean> {
+        return this.enqueueIo(() => this.saveToDiskNow());
+    }
+
+    private async saveToDiskNow(): Promise<boolean> {
         if (!this.db || !this.currentFilePath) return false;
 
         try {
+            if (await this.diskChangedUnderUs()) {
+                this.offerReloadInsteadOfOverwrite();
+                return false;
+            }
+
             this.lastSavedData = this.db.export();
             const result = await tauriService.saveDatabase(this.currentFilePath, this.lastSavedData);
-            
+
             if (result.success) {
+                await this.captureDiskMtime();
                 return true;
             } else {
                 console.error('Failed to auto-save database:', result.error);
@@ -698,6 +804,7 @@ class SqliteService {
             this.db.close();
             this.db = null;
         }
+        this.diskMtimeMs = null;
     }
 }
 
