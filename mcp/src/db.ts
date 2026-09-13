@@ -95,6 +95,11 @@ export interface Database {
     hasPgVector(): Promise<boolean>;
     /** Quote an identifier for this dialect. */
     quote(identifier: string): string;
+    /**
+     * Make committed writes visible to other processes watching the file.
+     * Only does anything for SQLite in WAL mode — see SqliteDatabase.
+     */
+    flushWrites(): Promise<void>;
     close(): Promise<void>;
 }
 
@@ -200,6 +205,22 @@ class SqliteDatabase implements Database {
         // A write may have been a CREATE or DROP.
         this.tables = null;
         return this.run(this.writer, sql);
+    }
+
+    /**
+     * Fold the WAL back into the main file after an approved write.
+     *
+     * In WAL mode a write lands in `<file>-wal` and the main file's modified
+     * time does not move until a checkpoint. The desktop app notices "someone
+     * else wrote this file" by exactly that modified time, so without this it
+     * cannot see an agent's write and saves its in-memory copy straight over
+     * it. TRUNCATE also empties the -wal, so nothing stale is left beside a
+     * file the app later rewrites. On a rollback-journal database it is a
+     * no-op.
+     */
+    async flushWrites(): Promise<void> {
+        if (!this.writer) return;
+        this.writer.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get();
     }
 
     async tableNames(): Promise<string[]> {
@@ -425,6 +446,10 @@ class PostgresDatabase implements Database {
 
     quote(identifier: string): string {
         return quoteIdent(identifier);
+    }
+
+    async flushWrites(): Promise<void> {
+        // A server, not a file: nothing is watching its modified time.
     }
 
     async close(): Promise<void> {

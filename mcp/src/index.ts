@@ -25,7 +25,7 @@ import { runApproved, runQuery, type ToolResult } from './tools/query';
 import { describeTable, listTables, renderSchema } from './tools/schema';
 import { listVectorColumns, semanticSearch, type DistanceMetric } from './tools/vector';
 
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 /** stdout carries the protocol. Everything human-readable goes to stderr. */
 function log(message: string): void {
@@ -98,6 +98,7 @@ async function main(): Promise<void> {
                 'Talks to the database currently open in the LiteDB desktop app, or to ' +
                     'LITEDB_SQLITE_PATH / LITEDB_DATABASE_URL if those are set. Switch ' +
                     'database or policy in the app and the next tool call follows — no restart. ' +
+                    'Quitting the app clears the handoff. ' +
                     'If the app is in YOLO, this server maps that down to guarded. ' +
                     'SQLite is the file on disk, not unsaved editor state — save first.',
                 'Start with list_tables and describe_table — describe_table reports the ' +

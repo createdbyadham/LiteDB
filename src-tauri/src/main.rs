@@ -13,6 +13,7 @@ use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
 use sqlx::{Column, Either, Row, ValueRef};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use tauri::Manager;
 use tauri::State;
 use tokio::sync::Mutex;
 
@@ -392,6 +393,12 @@ fn delete_secret(service: String, account: String) -> Result<(), String> {
     }
 }
 
+fn clear_mcp_handoff(app: &tauri::AppHandle) {
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        let _ = std::fs::remove_file(dir.join("mcp-handoff.json"));
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -402,6 +409,14 @@ fn main() {
         .manage(PostgresState {
             pool: Mutex::new(None),
         })
+        .setup(|app| {
+            // A crash or a killed process never reaches the window and exit
+            // events below, which would leave the last connection — Postgres
+            // password included — advertised to agents indefinitely. Start
+            // clean; connecting writes it again.
+            clear_mcp_handoff(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             connect_postgres,
             execute_postgres_query,
@@ -411,8 +426,20 @@ fn main() {
             get_secret,
             delete_secret
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                clear_mcp_handoff(window.app_handle());
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Second delete after every window is gone, in case a plugin-fs
+            // write that was already in flight completed after Destroyed.
+            if let tauri::RunEvent::Exit = event {
+                clear_mcp_handoff(app);
+            }
+        });
 }
 
 #[cfg(test)]

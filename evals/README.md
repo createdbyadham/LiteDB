@@ -611,10 +611,16 @@ which is the fastest way to see what a prompt change actually did.
 | `openai-compatible` | `OPENAI_BASE_URL`, optional `OPENAI_COMPAT_API_KEY` or `OPENAI_API_KEY` |
 | `ollama` | none (`OLLAMA_HOST` to override the endpoint) |
 
+`--provider github` is refused. GitHub Models shut down in July 2026. Point
+`openai-compatible` at whatever replaced it for you (OpenRouter, Foundry, a
+local server).
+
 Results are written to `results/<tag>.json` and `results/<tag>.md`.
 
 ## CI
 
 - **Every pull request** runs the self-test and golden-set verification. No
   credentials, no cost.
-- **Nightly** runs the scored eval on both dialects and uploads the reports.
+- **Nightly** (`eval-nightly.yml`) scores both dialects with `--provider openai`
+  (`gpt-4o-mini` unless you override). Needs repo secret `OPENAI_API_KEY`.
+  Dispatch with `openai-compatible` or `ollama` if you have the matching env.

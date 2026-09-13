@@ -13,6 +13,9 @@
 // native module and would cost the published package its "no native deps"
 // property. Stated here because a safety feature that overclaims is worse than
 // none.
+//
+// Cleared on disconnect *and* when the window closes, so quitting the app
+// does not leave the last database (and its password) advertised to an agent.
 
 import type { SqlDialect } from './schemaTypes';
 import type { SafetyPolicy } from './sqlPolicy';
@@ -147,7 +150,12 @@ export function postgresTarget(cfg: HandoffPostgres): string {
     const pass = encodeURIComponent(cfg.password);
     const host = cfg.host.includes(':') && !cfg.host.startsWith('[') ? `[${cfg.host}]` : cfg.host;
     const database = encodeURIComponent(cfg.database);
-    const ssl = cfg.ssl ? '?sslmode=require' : '';
+    // `sslmode=require` in node-pg now verifies the server cert (libpq 17
+    // behaviour) and prints a SECURITY WARNING. The app checkbox is "Use SSL"
+    // with no CA to trust — encrypt, don't verify — which is `no-verify`.
+    // Without this, a self-signed or private-CA host that the desktop app
+    // accepted would fail in the agent with a certificate error.
+    const ssl = cfg.ssl ? '?sslmode=no-verify' : '';
     return `postgres://${user}:${pass}@${host}:${cfg.port}/${database}${ssl}`;
 }
 
@@ -171,6 +179,7 @@ export function writeActiveHandoff(
     connection: HandoffConnection,
     policy: SafetyPolicy,
 ): Promise<void> {
+    if (sealed) return Promise.resolve();
     const payload: McpHandoff = {
         version: HANDOFF_VERSION,
         updatedAt: new Date().toISOString(),
@@ -190,10 +199,21 @@ export function clearHandoff(): Promise<void> {
     return persist(null);
 }
 
+/**
+ * Quit path. Further writes are dropped so a racing persist cannot put the
+ * Postgres password back after the file is deleted.
+ */
+export function sealHandoff(): Promise<void> {
+    sealed = true;
+    return persist(null);
+}
+
 let persistChain: Promise<void> = Promise.resolve();
+let sealed = false;
 
 async function persistNow(contents: string | null): Promise<void> {
     if (!inTauri()) return;
+    if (sealed && contents !== null) return;
     try {
         const { BaseDirectory, exists, remove, writeTextFile } = await import(
             '@tauri-apps/plugin-fs'

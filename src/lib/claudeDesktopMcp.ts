@@ -3,6 +3,8 @@
 // Two files on Windows: the documented Roaming path, and the MSIX virtualized
 // copy the store install actually reads. Writing only the first is how a valid
 // JSON file produces "Failed / Server disconnected" with no explanation.
+// Writing the second when the Store app is not installed is how LiteDB ends up
+// creating a fake package folder under %LOCALAPPDATA%\Packages.
 
 import { mergeLiteDbMcp, stdioServerEntry } from './mcpAgentConfig';
 
@@ -25,7 +27,43 @@ async function pathExists(path: string): Promise<boolean> {
     return exists(path);
 }
 
-/** Config files we merge into. Windows always gets Roaming + Store copies. */
+/** Package family name of the Microsoft Store build of Claude Desktop. */
+export const CLAUDE_STORE_PACKAGE = 'Claude_pzs8sxrjxfjjc';
+
+/**
+ * Which Claude Desktop config files to write on Windows.
+ *
+ * The documented Roaming path is always written. A normal install that has
+ * never been launched may not have the folder yet, and gating on it would skip
+ * exactly the person who installs Claude and connects LiteDB before opening it.
+ *
+ * The Store path is written only when the Store package is installed. The
+ * package folder is the signal rather than `Roaming\Claude` inside it, because
+ * that subfolder only appears after the Store app has run once.
+ */
+export function windowsClaudeConfigPaths(
+    roamingDir: string,
+    localDir: string,
+    storeInstalled: boolean,
+): string[] {
+    const paths = [join(roamingDir, 'Claude', 'claude_desktop_config.json')];
+    if (storeInstalled) {
+        paths.push(
+            join(
+                localDir,
+                'Packages',
+                CLAUDE_STORE_PACKAGE,
+                'LocalCache',
+                'Roaming',
+                'Claude',
+                'claude_desktop_config.json',
+            ),
+        );
+    }
+    return paths;
+}
+
+/** Config files we merge into. Windows gets Roaming, plus Store when installed. */
 export async function claudeDesktopConfigPaths(): Promise<string[]> {
     const { dataDir, localDataDir, homeDir, configDir } = await import('@tauri-apps/api/path');
     const [data, local, home, config] = await Promise.all([
@@ -36,18 +74,17 @@ export async function claudeDesktopConfigPaths(): Promise<string[]> {
     ]);
 
     if (isWindows()) {
-        return [
-            join(data, 'Claude', 'claude_desktop_config.json'),
-            join(
-                local,
-                'Packages',
-                'Claude_pzs8sxrjxfjjc',
-                'LocalCache',
-                'Roaming',
-                'Claude',
-                'claude_desktop_config.json',
-            ),
-        ];
+        let storeInstalled = false;
+        try {
+            storeInstalled = await pathExists(join(local, 'Packages', CLAUDE_STORE_PACKAGE));
+        } catch (error) {
+            // A scope denial lands here too. Skipping the Store copy is the safe
+            // failure — creating it on a guess is the bug this replaced — but it
+            // should not be silent, or a capability regression looks like "not
+            // installed" forever.
+            console.warn('Could not check for the Store build of Claude Desktop:', error);
+        }
+        return windowsClaudeConfigPaths(data, local, storeInstalled);
     }
 
     const candidates = [

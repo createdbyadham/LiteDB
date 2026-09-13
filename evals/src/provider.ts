@@ -36,8 +36,18 @@ function requireEnv(name: string, provider: string): string {
 }
 
 export function resolveProvider(provider: string, modelOverride?: string): ProviderConfig {
+    if (provider === 'github' || provider === 'azure') {
+        throw new Error(
+            `"${provider}" is no longer a first-class eval provider (GitHub Models ` +
+                'retired July 2026). Use --provider openai, or --provider openai-compatible ' +
+                'with OPENAI_BASE_URL.',
+        );
+    }
+
     const model = modelOverride || DEFAULT_MODELS[provider];
-    if (!model) throw new Error(`Unknown provider "${provider}".`);
+    if (!model) {
+        throw new Error(`Unknown provider "${provider}". Use openai, openai-compatible, or ollama.`);
+    }
 
     switch (provider) {
         case 'openai':
@@ -64,7 +74,7 @@ export function resolveProvider(provider: string, modelOverride?: string): Provi
             };
 
         default:
-            throw new Error(`Unknown provider "${provider}".`);
+            throw new Error(`Unknown provider "${provider}". Use openai, openai-compatible, or ollama.`);
     }
 }
 

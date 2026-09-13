@@ -43,6 +43,7 @@
     {
       "identifier": "fs:allow-exists",
       "allow": [
+        { "path": "$LOCALDATA/Packages/Claude_pzs8sxrjxfjjc" },
         { "path": "$DATA/Claude" },
         { "path": "$DATA/Claude/**" },
         { "path": "$CONFIG/Claude" },

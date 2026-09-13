@@ -24,6 +24,7 @@ import {
   Box,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { ExportDialog } from '@/components/ExportDialog';
 import { SemanticSearch, VectorInspector, SimilarRowsModal, MockDataGenerator } from '@/components/VectorAdmin';
 
@@ -238,6 +239,33 @@ const DatabaseView = () => {
     // in the SQL editor the grid kept showing pre-write values — a successful
     // write that looks like a silent failure.
   }, [selectedTable, dataVersion]);
+
+  useEffect(() => {
+    const onReloaded = () => {
+      refreshSqliteTables();
+      setDataVersion((v) => v + 1);
+    };
+    const onChangedOnDisk = () => {
+      toast({
+        title: 'File changed on disk',
+        description:
+          'Something else updated this database, so your last change was not saved — it would have overwritten theirs. Reload to load their version. Reloading discards your unsaved edit.',
+        variant: 'destructive',
+        duration: 20000,
+        action: (
+          <ToastAction altText="Reload from disk" onClick={() => void sqliteService.reloadFromDisk()}>
+            Reload
+          </ToastAction>
+        ),
+      });
+    };
+    window.addEventListener('sqliteFileReloaded', onReloaded);
+    window.addEventListener('sqliteFileChangedOnDisk', onChangedOnDisk);
+    return () => {
+      window.removeEventListener('sqliteFileReloaded', onReloaded);
+      window.removeEventListener('sqliteFileChangedOnDisk', onChangedOnDisk);
+    };
+  }, [refreshSqliteTables]);
 
   /**
    * Called after anything that changes the database from the SQL editor.

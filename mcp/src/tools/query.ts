@@ -301,6 +301,14 @@ export async function runApproved(ctx: ToolContext, token: string): Promise<Tool
     try {
         const results = await runApprovedStatements(ctx.db, decision.statements);
         const actualRows = results.reduce((sum, r) => sum + r.rowsAffected, 0);
+        try {
+            await ctx.db.flushWrites();
+        } catch (error) {
+            // The write is committed. Failing the call now would report a
+            // change that happened as one that did not, so log it instead: the
+            // app may not notice this write until the file is reopened.
+            console.error('Could not checkpoint after an approved write:', error);
+        }
 
         await record({
             statements: decision.statements,
