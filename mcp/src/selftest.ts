@@ -14,6 +14,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
 import { parseLog } from '../../src/lib/auditLog';
 import { saveWouldClobber } from '../../src/lib/diskGuard';
 import { pgSslHint } from '../../src/lib/pgSslHint';
@@ -32,7 +33,7 @@ import { ConfigError, IN_MEMORY_MESSAGE, NO_DATABASE_MESSAGE, defaultAuditPath, 
 import { openDatabase, postgresConnectFailure, ReadOnlyServerError, type Database } from './db';
 import { renderTable } from './render';
 import { LiveSession } from './session';
-import { runApproved, runQuery, type ToolContext } from './tools/query';
+import { executeApprovedInput, runApproved, runQuery, type ToolContext } from './tools/query';
 import { describeTable, listTables } from './tools/schema';
 
 let failures = 0;
@@ -504,6 +505,29 @@ async function main(): Promise<void> {
         );
 
         check('an unknown token is refused', (await runApproved(ctx, 'not-a-token')).isError === true);
+
+        // The agent that skips the preview and calls execute_approved with SQL
+        // in hand. It must be refused, and told which step it missed — a
+        // generic "Required" had one guessing at empty tokens.
+        const skipped = z
+            .object(executeApprovedInput)
+            .safeParse({ sql: "DELETE FROM orders WHERE status = 'pending'" });
+        check('execute_approved with SQL and no token is rejected', !skipped.success);
+        check(
+            'the rejection points at query',
+            !skipped.success && skipped.error.issues[0]?.message === approvals.NO_TOKEN_MESSAGE,
+            skipped.success ? '' : skipped.error.issues[0]?.message,
+        );
+        check(
+            'SQL cannot ride along with a token',
+            !('sql' in (z.object(executeApprovedInput).safeParse({ token: 'x', sql: 'DROP TABLE orders' }).data ?? {})),
+        );
+
+        const ordersBeforeBlank = countRows(harness, 'orders');
+        const blank = await runApproved(ctx, '   ');
+        check('a blank token is refused', blank.isError === true);
+        check('a blank token points at query', blank.text === approvals.NO_TOKEN_MESSAGE, blank.text);
+        check('a blank token changes nothing', countRows(harness, 'orders') === ordersBeforeBlank);
 
         const entries = auditEntries(harness);
         check(

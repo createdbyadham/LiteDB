@@ -24,6 +24,7 @@
 // reported before anything ran, that what runs is byte-for-byte what was
 // previewed, and that all of it reaches the audit log either way.
 
+import { z } from 'zod';
 import {
     previewStatement,
     type ImpactEstimate,
@@ -285,6 +286,20 @@ export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResul
         ].join('\n'),
     };
 }
+
+/**
+ * execute_approved's arguments. Token only — see approvals.ts for why.
+ *
+ * The SDK rejects a call without a token before runApproved sees it, so the
+ * hint has to live on the schema too. `message` rather than `required_error`
+ * because `npx litedb-mcp` may resolve zod 3 or 4, and only `message` means
+ * the same thing in both.
+ */
+export const executeApprovedInput = {
+    token: z
+        .string({ message: approvals.NO_TOKEN_MESSAGE })
+        .describe("The token from the query tool's preview."),
+};
 
 export async function runApproved(ctx: ToolContext, token: string): Promise<ToolResult> {
     let approval: approvals.PendingApproval;

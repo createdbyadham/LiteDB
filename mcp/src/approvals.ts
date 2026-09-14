@@ -94,6 +94,25 @@ export function create(
     return approval;
 }
 
+/**
+ * What an agent is told when it calls execute_approved without a token.
+ *
+ * The usual cause is skipping the preview and reaching for execute_approved
+ * with SQL in hand. A bare "token: Required" leaves it guessing, so this
+ * names the step it missed.
+ */
+export const NO_TOKEN_MESSAGE =
+    'execute_approved takes a token, not SQL. Call query with the statement first: ' +
+    'a write comes back as a preview with a token, and that token is what ' +
+    'execute_approved runs.';
+
+export class MissingTokenError extends Error {
+    constructor() {
+        super(NO_TOKEN_MESSAGE);
+        this.name = 'MissingTokenError';
+    }
+}
+
 export class UnknownApprovalError extends Error {
     constructor() {
         super(
@@ -123,6 +142,7 @@ export function claim(
     target: string,
     now = Date.now(),
 ): PendingApproval {
+    if (token.trim() === '') throw new MissingTokenError();
     sweep(now);
     const approval = pending.get(token);
     if (!approval) throw new UnknownApprovalError();

@@ -21,11 +21,11 @@ import { auditLogLocation, readAudit } from '../../src/lib/auditLog';
 import { ConfigError, type ServerConfig } from './config';
 import { LiveSession } from './session';
 import { pluralRows } from './render';
-import { runApproved, runQuery, type ToolResult } from './tools/query';
+import { executeApprovedInput, runApproved, runQuery, type ToolResult } from './tools/query';
 import { describeTable, listTables, renderSchema } from './tools/schema';
 import { listVectorColumns, semanticSearch, type DistanceMetric } from './tools/vector';
 
-const VERSION = '0.1.3';
+const VERSION = '0.1.4';
 
 /** stdout carries the protocol. Everything human-readable goes to stderr. */
 function log(message: string): void {
@@ -178,14 +178,12 @@ async function main(): Promise<void> {
         {
             title: 'Execute an approved statement',
             description:
-                'Run the statements a previous `query` call previewed. Takes only the ' +
-                'token — the SQL is held server-side, so what runs is exactly what was ' +
-                'previewed. Single-use, and expires five minutes after the preview. ' +
-                'Confirm the row count with the person you are working for before ' +
-                'calling this.',
-            inputSchema: {
-                token: z.string().describe("The token from the query tool's preview."),
-            },
+                'Second step, after query. Runs the statements a previous `query` call ' +
+                'previewed. Takes only the token — the SQL is held server-side, so what ' +
+                'runs is exactly what was previewed. Single-use, and expires five minutes ' +
+                'after the preview. Confirm the row count with the person you are working ' +
+                'for before calling this.',
+            inputSchema: executeApprovedInput,
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: true,
