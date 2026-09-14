@@ -4,6 +4,7 @@ import { tauriService } from '@/lib/tauri';
 import { assertIdent } from '@/lib/types';
 import { assertWritable, clearActiveConnection } from '@/lib/queryGate';
 import { classifyStatement } from '@/lib/sqlClassifier';
+import { pgSslHint } from '@/lib/pgSslHint';
 import type { TableInfo, ColumnInfo, RowData, ForeignKeyInfo, IndexInfo } from '@/lib/types';
 
 // Define PostgreSQL connection config
@@ -83,9 +84,11 @@ class PgService {
       this.connected = false;
       clearActiveConnection();
 
+      const message = error instanceof Error ? error.message : "Failed to connect to PostgreSQL database";
+      const hint = pgSslHint(message, config.ssl ?? false);
       toast({
         title: "Connection Error",
-        description: error instanceof Error ? error.message : "Failed to connect to PostgreSQL database",
+        description: hint ? `${hint} (${message})` : message,
         variant: "destructive"
       });
 

@@ -301,13 +301,16 @@ export async function runApproved(ctx: ToolContext, token: string): Promise<Tool
     try {
         const results = await runApprovedStatements(ctx.db, decision.statements);
         const actualRows = results.reduce((sum, r) => sum + r.rowsAffected, 0);
+        let flushNote = '';
         try {
             await ctx.db.flushWrites();
         } catch (error) {
-            // The write is committed. Failing the call now would report a
-            // change that happened as one that did not, so log it instead: the
-            // app may not notice this write until the file is reopened.
+            // The write is committed. Failing the call would report a change
+            // that happened as one that did not. Tell the agent the app cannot
+            // see it yet — busy is not an exception from SQLite, only a flag.
+            const message = error instanceof Error ? error.message : String(error);
             console.error('Could not checkpoint after an approved write:', error);
+            flushNote = `\n\nWarning: ${message}`;
         }
 
         await record({
@@ -332,7 +335,8 @@ export async function runApproved(ctx: ToolContext, token: string): Promise<Tool
         return {
             text:
                 `Executed.\n\n${renderResults(decision.statements, results, ctx.config.maxRows)}` +
-                surprise,
+                surprise +
+                flushNote,
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

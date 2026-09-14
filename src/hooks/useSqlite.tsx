@@ -4,12 +4,13 @@ import { toast } from '@/hooks/use-toast';
 import { aiService, DatabaseSchema, TableSchema } from '@/lib/aiService';
 import { clearActiveConnection, setActiveConnection } from '@/lib/queryGate';
 import { sqliteConnectionId } from '@/lib/connectionId';
+import type { DiskSnapshot } from '@/lib/diskGuard';
 
 export interface UseSqliteReturn {
     isLoaded: boolean;
     isLoading: boolean;
     tables: TableInfo[];
-    loadDatabase: (data: ArrayBuffer | Buffer, filePath?: string) => Promise<boolean>;
+    loadDatabase: (data: ArrayBuffer | Buffer, filePath?: string, snapshot?: DiskSnapshot) => Promise<boolean>;
     getTableData: (tableName: string) => { columns: string[], rows: RowData[] };
     getTableColumns: (tableName: string) => ColumnInfo[];
     getForeignKeys: (tableName: string) => ForeignKeyInfo[];
@@ -102,7 +103,7 @@ export function useSqlite(): UseSqliteReturn {
         };
     }, []);
 
-    const loadDatabase = async (data: ArrayBuffer | Buffer, filePath?: string): Promise<boolean> => {
+    const loadDatabase = async (data: ArrayBuffer | Buffer, filePath?: string, snapshot?: DiskSnapshot): Promise<boolean> => {
         setIsLoading(true);
         setIsLoaded(false);
         setTables([]); // Clear existing tables while loading
@@ -111,7 +112,7 @@ export function useSqlite(): UseSqliteReturn {
             // Ensure sqliteService is initialized
             await sqliteService.init();
 
-            const success = await sqliteService.loadDbFromArrayBuffer(data as ArrayBuffer, filePath);
+            const success = await sqliteService.loadDbFromArrayBuffer(data as ArrayBuffer, filePath, snapshot);
 
             if (success) {
                 const tableList = sqliteService.getTables();

@@ -10,6 +10,7 @@ import { useSqlite } from '@/hooks/useSqlite';
 import { usePostgres } from '@/hooks/usePostgres';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { sqliteService, RowData, ColumnInfo } from '@/lib/sqliteService';
+import type { DiskAlert } from '@/lib/diskGuard';
 import { pgService } from '@/lib/pgService';
 import { tauriService } from '@/lib/tauri';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,16 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { ToastAction } from '@/components/ui/toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { ExportDialog } from '@/components/ExportDialog';
 import { SemanticSearch, VectorInspector, SimilarRowsModal, MockDataGenerator } from '@/components/VectorAdmin';
 
@@ -35,6 +46,8 @@ const DatabaseView = () => {
   const [tableData, setTableData] = useState<{ columns: string[], rows: RowData[] }>({ columns: [], rows: [] });
   /** Bumped whenever something writes, to force the visible rows to reload. */
   const [dataVersion, setDataVersion] = useState(0);
+  const [diskAlert, setDiskAlert] = useState<DiskAlert | null>(null);
+  const [confirmReload, setConfirmReload] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('browse');
   const [lastSaved] = useState<Date | null>(null);
@@ -196,9 +209,11 @@ const DatabaseView = () => {
 
     let mounted = true;
 
+    // No spinner here. Switching tables already shows one (handleTableSelect);
+    // a refresh after an agent's write must not, because swapping the grid
+    // for a spinner unmounts it — and an open edit dialog, the scroll
+    // position and the selection go with it.
     const loadTableData = async () => {
-      if (mounted) setLoading(true);
-
       try {
         let columns, data;
 
@@ -240,30 +255,69 @@ const DatabaseView = () => {
     // write that looks like a silent failure.
   }, [selectedTable, dataVersion]);
 
+  // A ref, not a variable inside the effect below: that effect re-subscribes
+  // on every render (`refreshSqliteTables` is a new function each time), and
+  // its cleanup cancelled the timer before the toast could show.
+  const inUseToastTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(inUseToastTimer.current), []);
+
   useEffect(() => {
+    setDiskAlert(sqliteService.diskAlert);
     const onReloaded = () => {
       refreshSqliteTables();
       setDataVersion((v) => v + 1);
     };
-    const onChangedOnDisk = () => {
-      toast({
-        title: 'File changed on disk',
-        description:
-          'Something else updated this database, so your last change was not saved — it would have overwritten theirs. Reload to load their version. Reloading discards your unsaved edit.',
-        variant: 'destructive',
-        duration: 20000,
-        action: (
-          <ToastAction altText="Reload from disk" onClick={() => void sqliteService.reloadFromDisk()}>
-            Reload
-          </ToastAction>
-        ),
-      });
+    // The service fires this once per change of state, so each toast shows
+    // once; the status bar keeps showing the state after the toast is gone.
+    const onDiskAlert = () => {
+      const alert = sqliteService.diskAlert;
+      setDiskAlert(alert);
+      if (alert === 'changed') {
+        toast({
+          title: 'File changed on disk',
+          description:
+            'Something else updated this database while you had unsaved edits. Saving would overwrite their version. Reload to load theirs — that discards every unsaved edit, not just the last one.',
+          variant: 'destructive',
+          duration: 20000,
+          action: (
+            <ToastAction altText="Reload from disk" onClick={() => setConfirmReload(true)}>
+              Reload
+            </ToastAction>
+          ),
+        });
+      } else if (alert === 'in-use') {
+        // The agent holds the file for a moment on every call, and a save
+        // that lands then is refused and retried a second later. Only speak
+        // up if it lasts; the status bar shows it either way.
+        clearTimeout(inUseToastTimer.current);
+        inUseToastTimer.current = setTimeout(() => {
+          if (sqliteService.diskAlert !== 'in-use') return;
+          toast({
+            title: 'Database in use',
+            description:
+              'Another program has this file open, so LiteDB is not saving over it — one of you would silently lose writes. Your edits are kept and saved once it closes.',
+            variant: 'destructive',
+          });
+        }, 3000);
+      } else if (alert === 'missing') {
+        toast({
+          title: 'Database file not found',
+          description: 'The file was moved or deleted. Your edits are kept in memory but cannot be saved there.',
+          variant: 'destructive',
+        });
+      } else if (alert === 'save-failed') {
+        toast({
+          title: 'Auto-save failed',
+          description: 'Could not write the database file. LiteDB keeps retrying; your edits are kept in memory.',
+          variant: 'destructive',
+        });
+      }
     };
     window.addEventListener('sqliteFileReloaded', onReloaded);
-    window.addEventListener('sqliteFileChangedOnDisk', onChangedOnDisk);
+    window.addEventListener('sqliteDiskAlert', onDiskAlert);
     return () => {
       window.removeEventListener('sqliteFileReloaded', onReloaded);
-      window.removeEventListener('sqliteFileChangedOnDisk', onChangedOnDisk);
+      window.removeEventListener('sqliteDiskAlert', onDiskAlert);
     };
   }, [refreshSqliteTables]);
 
@@ -345,7 +399,12 @@ const DatabaseView = () => {
           return false;
         }
       } else if (oldRow) {
-        return sqliteService.updateRow(selectedTable, oldRow, newRow as RowData);
+        const updated = sqliteService.updateRow(selectedTable, oldRow, newRow as RowData);
+        // Re-read the row rather than trust the dialog's copy: only the edited
+        // columns were written, and an agent may have changed the others while
+        // the dialog was open.
+        if (updated) setDataVersion((version) => version + 1);
+        return updated;
       }
       return false;
     }
@@ -353,14 +412,19 @@ const DatabaseView = () => {
 
   const handleRefresh = () => {
     if (isPostgresActive) {
-      refreshPostgresTables();
-    } else {
-      refreshSqliteTables();
+      void refreshPostgresTables();
+      setDataVersion((version) => version + 1);
+      toast({
+        title: "Refreshed",
+        description: "Table list has been refreshed",
+      });
+      return;
     }
-    toast({
-      title: "Refreshed",
-      description: "Table list has been refreshed",
-    });
+    if (sqliteService.isDirty || diskAlert) {
+      setConfirmReload(true);
+      return;
+    }
+    void sqliteService.reloadFromDisk();
   };
 
   const handleTableSelect = (tableName: string) => {
@@ -558,6 +622,7 @@ const DatabaseView = () => {
               <SchemaVisualizer
                 ref={schemaVisualizerRef}
                 tables={tables}
+                revision={dataVersion}
                 getTableColumns={getTableColumnsStable}
                 getForeignKeys={getForeignKeysStable}
                 getIndexes={getIndexesStable}
@@ -603,8 +668,32 @@ const DatabaseView = () => {
           databaseName={databaseName}
           tableCount={tables.length}
           lastSaved={lastSaved}
+          diskAlert={diskAlert}
+          onReloadFromDisk={() => setConfirmReload(true)}
         />
       </div>
+
+      <AlertDialog open={confirmReload} onOpenChange={setConfirmReload}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reload from disk?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {diskAlert === 'in-use'
+                ? 'Another program has this database open. Reloading shows the file as it is now — writes that program has not folded into the file yet will not appear — and discards every unsaved edit.'
+                : 'This replaces what is on screen with the file. Every unsaved edit will be discarded, not just the last one. This cannot be undone.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void sqliteService.reloadFromDisk()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Reload and discard edits
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <ExportDialog
         open={exportDialogOpen}

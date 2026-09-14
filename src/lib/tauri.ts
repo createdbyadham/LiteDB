@@ -1,7 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { readFile, stat, writeFile } from '@tauri-apps/plugin-fs';
+import { writeFile } from '@tauri-apps/plugin-fs';
+import type { DiskSnapshot } from '@/lib/diskGuard';
 import type { RowData } from '@/lib/types';
+
+export type SqliteSaveOutcome =
+  | { status: 'saved'; mtime: number }
+  | { status: 'changed' | 'in-use' | 'missing' };
 
 // Define types matching the Rust backend
 export interface QueryResult {
@@ -68,35 +73,29 @@ export const tauriService = {
     }
   },
 
-  // File System
-  saveDatabase: async (filePath: string, data: Uint8Array): Promise<{ success: boolean; filePath?: string; error?: string }> => {
-    try {
-      await writeFile(filePath, data);
-      return { success: true, filePath };
-    } catch (e) {
-      return { success: false, error: String(e) };
-    }
+  // SQLite files. Read, checked and saved in Rust (src-tauri/src/sqlite_file.rs)
+  // so the check and the write happen under one file handle.
+
+  sqliteDiskState: (filePath: string): Promise<DiskSnapshot> =>
+    invoke<DiskSnapshot>('sqlite_disk_state', { path: filePath }),
+
+  /** The bytes and the modified time they belong to, read together. Throws on failure. */
+  readSqliteFile: async (filePath: string): Promise<{ data: Uint8Array; snapshot: DiskSnapshot }> => {
+    const body = new Uint8Array(await invoke<ArrayBuffer>('read_sqlite_file', { path: filePath }));
+    const metaLength = new DataView(body.buffer, body.byteOffset, 4).getUint32(0, true);
+    const snapshot = JSON.parse(new TextDecoder().decode(body.subarray(4, 4 + metaLength))) as DiskSnapshot;
+    // slice, not subarray: callers take `.buffer`, which must not include the header.
+    return { data: body.slice(4 + metaLength), snapshot };
   },
 
-  readDatabase: async (filePath: string): Promise<{ success: boolean; data?: Uint8Array; filePath?: string; error?: string }> => {
-    try {
-      const data = await readFile(filePath);
-      return { success: true, data, filePath };
-    } catch (e) {
-      return { success: false, error: String(e) };
-    }
-  },
-
-  /** Milliseconds since epoch, or null if the file cannot be stat'd. */
-  getFileMtime: async (filePath: string): Promise<number | null> => {
-    try {
-      const info = await stat(filePath);
-      const mtime = info.mtime;
-      if (!mtime) return null;
-      return mtime instanceof Date ? mtime.getTime() : Number(mtime);
-    } catch {
-      return null;
-    }
+  /** Throws only for I/O errors; conflicts come back as a status. */
+  saveSqliteFile: (filePath: string, data: Uint8Array, expectedMtime: number | null): Promise<SqliteSaveOutcome> => {
+    const meta = new TextEncoder().encode(JSON.stringify({ path: filePath, expectedMtime }));
+    const body = new Uint8Array(4 + meta.length + data.length);
+    new DataView(body.buffer).setUint32(0, meta.length, true);
+    body.set(meta, 4);
+    body.set(data, 4 + meta.length);
+    return invoke<SqliteSaveOutcome>('save_sqlite_file', body);
   },
 
   exportDatabase: async (data: string, format: string): Promise<{ success: boolean; filePath?: string; error?: string }> => {
