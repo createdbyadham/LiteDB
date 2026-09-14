@@ -91,12 +91,8 @@ const UploadView = () => {
     
     setIsLoading(true);
     try {
-      const result = await tauriService.readDatabase(filePath);
-      if (!result.success || !result.data) {
-        throw new Error(result.error || 'Failed to read database file');
-      }
-      
-      const loadResult = await loadDatabase(result.data.buffer as ArrayBuffer, filePath);
+      const { data, snapshot } = await tauriService.readSqliteFile(filePath);
+      const loadResult = await loadDatabase(data.buffer as ArrayBuffer, filePath, snapshot);
       if (loadResult) {
         navigate('/database');
       }
@@ -104,7 +100,8 @@ const UploadView = () => {
       console.error('Database load error:', error);
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to process file",
+        // Tauri commands reject with a plain string, not an Error.
+        description: error instanceof Error ? error.message : String(error) || "Failed to process file",
         variant: "destructive"
       });
     } finally {

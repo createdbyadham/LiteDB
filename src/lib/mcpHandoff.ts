@@ -179,7 +179,6 @@ export function writeActiveHandoff(
     connection: HandoffConnection,
     policy: SafetyPolicy,
 ): Promise<void> {
-    if (sealed) return Promise.resolve();
     const payload: McpHandoff = {
         version: HANDOFF_VERSION,
         updatedAt: new Date().toISOString(),
@@ -200,20 +199,24 @@ export function clearHandoff(): Promise<void> {
 }
 
 /**
- * Quit path. Further writes are dropped so a racing persist cannot put the
- * Postgres password back after the file is deleted.
+ * Quit path. Writes already queued are dropped, so a connect that was
+ * mid-flight cannot put the Postgres password back after the file is deleted.
+ * Not permanent: a write requested after this — the window stayed open after
+ * all — goes through. Rust deletes the file again once the window is actually
+ * destroyed, which covers a write that lands during the close itself.
  */
 export function sealHandoff(): Promise<void> {
-    sealed = true;
+    generation++;
     return persist(null);
 }
 
 let persistChain: Promise<void> = Promise.resolve();
-let sealed = false;
+/** Bumped by sealHandoff; a write queued under an older generation is stale. */
+let generation = 0;
 
-async function persistNow(contents: string | null): Promise<void> {
+async function persistNow(contents: string | null, queuedAt: number): Promise<void> {
     if (!inTauri()) return;
-    if (sealed && contents !== null) return;
+    if (contents !== null && queuedAt !== generation) return;
     try {
         const { BaseDirectory, exists, remove, writeTextFile } = await import(
             '@tauri-apps/plugin-fs'
@@ -249,9 +252,10 @@ function notifyHandoffChanged(): void {
 }
 
 function persist(contents: string | null): Promise<void> {
+    const queuedAt = generation;
     persistChain = persistChain.then(
-        () => persistNow(contents),
-        () => persistNow(contents),
+        () => persistNow(contents, queuedAt),
+        () => persistNow(contents, queuedAt),
     );
     return persistChain;
 }

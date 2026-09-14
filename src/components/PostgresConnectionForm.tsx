@@ -213,7 +213,7 @@ export default function PostgresConnectionForm({ onConnectionSuccess }: Postgres
               setConfig(prev => ({ ...prev, ssl: checked === true }))
             } 
           />
-          <Label htmlFor="ssl">Use SSL</Label>
+          <Label htmlFor="ssl">Require SSL</Label>
         </div>
         
         <Button type="submit" className="w-full mt-4">

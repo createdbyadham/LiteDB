@@ -4,6 +4,7 @@ import { tauriService } from '@/lib/tauri';
 import { assertIdent } from '@/lib/types';
 import { assertWritable, ReadOnlyConnectionError } from '@/lib/queryGate';
 import { classifyStatement } from '@/lib/sqlClassifier';
+import { saveWouldClobber, type DiskAlert, type DiskSnapshot } from '@/lib/diskGuard';
 import type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData } from '@/lib/types';
 
 export type { TableInfo, ColumnInfo, ForeignKeyInfo, IndexInfo, RowData };
@@ -39,10 +40,21 @@ class SqliteService {
     private currentTables: TableInfo[] = [];
     private lastSavedData: Uint8Array | null = null;
     public currentFilePath: string | null = null;
-    /** mtime of the file when we last loaded it or successfully wrote it. */
-    private diskMtimeMs: number | null = null;
+    /** The file as of the last successful load or save. */
+    private lastSnapshot: DiskSnapshot | null = null;
+    /** Local writes that have not landed on disk. */
+    private dirty = false;
+    private alert: DiskAlert | null = null;
+    /** Poll-driven save retries back off so a stuck file is not re-exported every second. */
+    private saveRetryDelayMs = 0;
+    private saveRetryAt = 0;
+    /** A version of the file that failed to reload; not retried until it changes again. */
+    private unreadableMtime: number | null = null;
     /** Serializes disk reads/writes so a reload cannot race an in-flight save. */
     private ioChain: Promise<void> = Promise.resolve();
+    // ponytail: 1s poll of mtime+wal, native fs.watch if lag matters
+    private watchTimer: ReturnType<typeof setInterval> | null = null;
+    private watchQueued = false;
 
     async init() {
         if (this.SQL) {
@@ -100,7 +112,13 @@ class SqliteService {
         return this;
     }
 
-    async loadDbFromArrayBuffer(buffer: ArrayBuffer, filePath?: string) {
+    /**
+     * `snapshot` should come from the same read as `buffer`
+     * (`tauriService.readSqliteFile`). Without it the file is stat'd now, and
+     * a write between that read and this stat would be mistaken for the
+     * version on screen.
+     */
+    async loadDbFromArrayBuffer(buffer: ArrayBuffer, filePath?: string, snapshot?: DiskSnapshot) {
         try {
             if (!this.SQL) {
                 await this.init();
@@ -115,12 +133,14 @@ class SqliteService {
                 return false;
             }
 
+            this.stopWatch();
+            this.resetDiskTracking();
             if (filePath) {
                 this.currentFilePath = filePath;
-                await this.captureDiskMtime();
+                this.lastSnapshot = snapshot ?? (await tauriService.sqliteDiskState(filePath));
+                this.startWatch();
             } else {
                 this.currentFilePath = null;
-                this.diskMtimeMs = null;
             }
 
             return true;
@@ -128,7 +148,8 @@ class SqliteService {
             console.error("Failed to load database:", error);
             this.currentTables = [];
             this.currentFilePath = null;
-            this.diskMtimeMs = null;
+            this.resetDiskTracking();
+            this.stopWatch();
             toast({
                 title: "Error",
                 description: error instanceof Error ? error.message : "Failed to load database",
@@ -163,7 +184,8 @@ class SqliteService {
                 }
                 this.currentTables = [];
                 this.currentFilePath = null;
-                this.diskMtimeMs = null;
+                this.resetDiskTracking();
+                this.stopWatch();
             }
             return false;
         }
@@ -372,58 +394,138 @@ class SqliteService {
         }
     }
 
-    private async captureDiskMtime(): Promise<void> {
-        if (!this.currentFilePath) {
-            this.diskMtimeMs = null;
+    get isDirty(): boolean {
+        return this.dirty;
+    }
+
+    get diskAlert(): DiskAlert | null {
+        return this.alert;
+    }
+
+    private resetDiskTracking(): void {
+        this.lastSnapshot = null;
+        this.dirty = false;
+        this.alert = null;
+        this.saveRetryDelayMs = 0;
+        this.saveRetryAt = 0;
+        this.unreadableMtime = null;
+    }
+
+    /** One event per change of state, so the UI toasts once, not every poll. */
+    private setAlert(next: DiskAlert | null): void {
+        if (next === this.alert) return;
+        this.alert = next;
+        this.dispatchWindowEvent('sqliteDiskAlert');
+    }
+
+    private backOffSaves(): void {
+        this.saveRetryDelayMs = Math.min(Math.max(this.saveRetryDelayMs * 2, 1000), 10_000);
+        this.saveRetryAt = Date.now() + this.saveRetryDelayMs;
+    }
+
+    private startWatch(): void {
+        this.stopWatch();
+        if (!this.currentFilePath) return;
+        this.watchTimer = setInterval(() => {
+            if (this.watchQueued) return;
+            this.watchQueued = true;
+            void this.enqueueIo(async () => {
+                try {
+                    await this.pollDiskNow();
+                } finally {
+                    this.watchQueued = false;
+                }
+            });
+        }, 1000);
+    }
+
+    private stopWatch(): void {
+        if (this.watchTimer != null) {
+            clearInterval(this.watchTimer);
+            this.watchTimer = null;
+        }
+        this.watchQueued = false;
+    }
+
+    private async pollDiskNow(): Promise<void> {
+        const path = this.currentFilePath;
+        if (!path) return;
+        let current: DiskSnapshot;
+        try {
+            current = await tauriService.sqliteDiskState(path);
+        } catch (error) {
+            console.error('Could not check the database file:', error);
             return;
         }
-        this.diskMtimeMs = await tauriService.getFileMtime(this.currentFilePath);
-    }
+        if (this.currentFilePath !== path) return;
 
-    /**
-     * sql.js holds a full copy of the file. If an agent (or anything else)
-     * wrote the file since we loaded it, writing our copy back would silently
-     * undo that. Refuse, and offer a reload instead.
-     */
-    private async diskChangedUnderUs(): Promise<boolean> {
-        if (!this.currentFilePath || this.diskMtimeMs == null) return false;
-        const now = await tauriService.getFileMtime(this.currentFilePath);
-        // We had an mtime and now cannot read one: do not overwrite.
-        if (now == null) return true;
-        return now !== this.diskMtimeMs;
-    }
-
-    private offerReloadInsteadOfOverwrite(): void {
-        this.dispatchWindowEvent('sqliteFileChangedOnDisk');
+        const block = saveWouldClobber(current, this.lastSnapshot);
+        if (block === 'ok') {
+            if (this.dirty) {
+                if (Date.now() >= this.saveRetryAt) await this.saveToDiskNow();
+            } else if (this.alert !== 'save-failed') {
+                this.setAlert(null);
+            }
+            return;
+        }
+        if (block === 'changed' && !this.dirty && current.mtime !== this.unreadableMtime) {
+            await this.reloadFromDiskNow({ silent: true, mtime: current.mtime });
+            return;
+        }
+        this.setAlert(block);
     }
 
     async reloadFromDisk(): Promise<boolean> {
         return this.enqueueIo(() => this.reloadFromDiskNow());
     }
 
-    private async reloadFromDiskNow(): Promise<boolean> {
+    /**
+     * `silent` is the poll following someone else's write while nothing is
+     * unsaved: no toast, and a version that fails to load is remembered by
+     * `mtime` so it is not retried — and complained about — every second.
+     */
+    private async reloadFromDiskNow(opts?: { silent?: boolean; mtime?: number | null }): Promise<boolean> {
         if (!this.currentFilePath) return false;
         const path = this.currentFilePath;
-        const result = await tauriService.readDatabase(path);
-        if (!result.success || !result.data) {
-            toast({
-                title: "Reload failed",
-                description: result.error || "Could not re-read the database file",
-                variant: "destructive",
-            });
+        let read: Awaited<ReturnType<typeof tauriService.readSqliteFile>>;
+        try {
+            read = await tauriService.readSqliteFile(path);
+        } catch (error) {
+            if (this.currentFilePath !== path) return false;
+            if (opts?.silent) {
+                console.error('Could not reload the database file:', error);
+                this.unreadableMtime = opts.mtime ?? null;
+                this.setAlert('changed');
+            } else {
+                toast({
+                    title: "Reload failed",
+                    description: String(error) || "Could not re-read the database file",
+                    variant: "destructive",
+                });
+            }
             return false;
         }
-        const copy = new Uint8Array(result.data);
-        if (!this.swapInDatabase(copy, { keepCurrentOnFailure: true })) {
+        if (this.currentFilePath !== path) return false;
+        if (!this.swapInDatabase(read.data, { keepCurrentOnFailure: true })) {
+            this.unreadableMtime = read.snapshot.mtime;
+            this.setAlert('changed');
             return false;
         }
         this.currentFilePath = path;
-        await this.captureDiskMtime();
+        this.dirty = false;
+        this.lastSnapshot = read.snapshot;
+        this.unreadableMtime = null;
+        this.saveRetryDelayMs = 0;
+        this.saveRetryAt = 0;
+        const block = saveWouldClobber(read.snapshot, read.snapshot);
+        this.setAlert(block === 'ok' ? null : block);
         this.dispatchWindowEvent('sqliteFileReloaded');
-        toast({
-            title: "Reloaded from disk",
-            description: "Editor now matches the file, including any agent writes.",
-        });
+        if (!opts?.silent) {
+            toast({
+                title: "Reloaded from disk",
+                description: "Editor now matches the file, including any agent writes.",
+            });
+        }
         return true;
     }
 
@@ -449,32 +551,37 @@ class SqliteService {
         return this.enqueueIo(() => this.saveToDiskNow());
     }
 
+    /**
+     * The conflict checks run in Rust under the same handle as the write. A
+     * refusal leaves the edit in memory and `dirty`; the poll retries with
+     * back-off, and the UI hears about it once per change of state.
+     */
     private async saveToDiskNow(): Promise<boolean> {
         if (!this.db || !this.currentFilePath) return false;
+        const path = this.currentFilePath;
 
         try {
-            if (await this.diskChangedUnderUs()) {
-                this.offerReloadInsteadOfOverwrite();
-                return false;
-            }
+            const data = this.db.export();
+            const outcome = await tauriService.saveSqliteFile(path, data, this.lastSnapshot?.mtime ?? null);
+            if (this.currentFilePath !== path) return false;
 
-            this.lastSavedData = this.db.export();
-            const result = await tauriService.saveDatabase(this.currentFilePath, this.lastSavedData);
-
-            if (result.success) {
-                await this.captureDiskMtime();
+            if (outcome.status === 'saved') {
+                this.lastSavedData = data;
+                this.dirty = false;
+                this.lastSnapshot = { mtime: outcome.mtime, walSize: 0, inUse: false };
+                this.saveRetryDelayMs = 0;
+                this.saveRetryAt = 0;
+                this.setAlert(null);
                 return true;
-            } else {
-                console.error('Failed to auto-save database:', result.error);
-                toast({
-                    title: "Auto-save Failed",
-                    description: result.error || "Failed to save changes to disk",
-                    variant: "destructive"
-                });
-                return false;
             }
+            this.backOffSaves();
+            this.setAlert(outcome.status);
+            return false;
         } catch (error) {
-            console.error('Error during auto-save:', error);
+            console.error('Failed to auto-save database:', error);
+            if (this.currentFilePath !== path) return false;
+            this.backOffSaves();
+            this.setAlert('save-failed');
             return false;
         }
     }
@@ -506,16 +613,8 @@ class SqliteService {
             const rowsAffected =
                 classification.kind === 'read' ? 0 : this.db.getRowsModified();
 
-            // Check if this was a modification query and trigger auto-save
-            const upperSql = sql.trim().toUpperCase();
-            if (this.currentFilePath && (
-                upperSql.startsWith('INSERT') || 
-                upperSql.startsWith('UPDATE') || 
-                upperSql.startsWith('DELETE') || 
-                upperSql.startsWith('CREATE') || 
-                upperSql.startsWith('DROP') || 
-                upperSql.startsWith('ALTER')
-            )) {
+            if (classification.kind !== 'read' && this.currentFilePath) {
+                this.dirty = true;
                 void this.saveToDisk();
             }
 
@@ -610,7 +709,11 @@ class SqliteService {
 
             // Trigger auto-save if successful and we have a file path
             if (errors.length === 0 && this.currentFilePath) {
-                void this.saveToDisk();
+                const wrote = sqlStatements.some((s) => classifyStatement(s).kind !== 'read');
+                if (wrote) {
+                    this.dirty = true;
+                    void this.saveToDisk();
+                }
             }
 
             return {
@@ -657,8 +760,15 @@ class SqliteService {
                 return `'${String(v).replace(/'/g, "''")}'`;
             };
 
-            const setClause = Object.entries(newRow)
-                .filter(([column]) => column !== primaryKeyColumn.name)
+            // Only what the edit changed. The grid now refreshes under an open
+            // edit when an agent writes, and writing back every column from
+            // the dialog's copy would quietly revert the agent's other ones.
+            const changed = Object.entries(newRow).filter(
+                ([column, value]) => column !== primaryKeyColumn.name && value !== oldRow[column],
+            );
+            if (changed.length === 0) return true;
+
+            const setClause = changed
                 .map(([column, value]) => {
                     assertIdent(column, 'column');
                     return `\`${column}\` = ${escapeValue(value)}`;
@@ -673,6 +783,7 @@ class SqliteService {
 
             // Auto-save
             if (this.currentFilePath) {
+                this.dirty = true;
                 void this.saveToDisk().then(success => {
                     if (success) {
                         toast({
@@ -800,11 +911,13 @@ class SqliteService {
     }
 
     close() {
+        this.stopWatch();
+        this.currentFilePath = null;
         if (this.db) {
             this.db.close();
             this.db = null;
         }
-        this.diskMtimeMs = null;
+        this.resetDiskTracking();
     }
 }
 

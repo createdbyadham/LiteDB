@@ -22,6 +22,29 @@ export class LiveSession {
     private db: Database | null = null;
     private fingerprint = '';
     private chain: Promise<void> = Promise.resolve();
+    private inFlight = 0;
+
+    /**
+     * Run one tool call, then hand the connection back once no call is using
+     * it. Counted rather than released per call because hosts overlap calls,
+     * and a multi-statement approval holds a transaction across awaits.
+     */
+    async run<T>(work: (ctx: ToolContext) => Promise<T>): Promise<T> {
+        this.inFlight++;
+        try {
+            return await work(await this.context());
+        } finally {
+            this.inFlight--;
+            const db = this.db;
+            if (this.inFlight === 0 && db) {
+                try {
+                    await db.release();
+                } catch {
+                    // Reopened on the next call either way.
+                }
+            }
+        }
+    }
 
     async context(): Promise<ToolContext> {
         const run = this.chain.then(() => this.contextLocked(), () => this.contextLocked());

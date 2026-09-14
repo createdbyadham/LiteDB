@@ -121,7 +121,7 @@ async function main(): Promise<void> {
             inputSchema: {},
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
-        async () => guard(async () => listTables(await session.context())),
+        async () => guard(() => session.run((ctx) => listTables(ctx))),
     );
 
     server.registerTool(
@@ -146,8 +146,8 @@ async function main(): Promise<void> {
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
         async ({ table, include_sample_values }) =>
-            guard(async () =>
-                describeTable(await session.context(), table, include_sample_values ?? true),
+            guard(() =>
+                session.run((ctx) => describeTable(ctx, table, include_sample_values ?? true)),
             ),
     );
 
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
             // write half is execute_approved, annotated accordingly.
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
-        async ({ sql }) => guard(async () => runQuery(await session.context(), sql)),
+        async ({ sql }) => guard(() => session.run((ctx) => runQuery(ctx, sql))),
     );
 
     server.registerTool(
@@ -194,7 +194,7 @@ async function main(): Promise<void> {
             },
         },
         async ({ token }) =>
-            guard(async () => runApproved(await session.context(), token)),
+            guard(() => session.run((ctx) => runApproved(ctx, token))),
     );
 
     // ------------------------------------------------------------ vectors ---
@@ -209,7 +209,7 @@ async function main(): Promise<void> {
             inputSchema: {},
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
-        async () => guard(async () => listVectorColumns(await session.context())),
+        async () => guard(() => session.run((ctx) => listVectorColumns(ctx))),
     );
 
     server.registerTool(
@@ -242,15 +242,17 @@ async function main(): Promise<void> {
             annotations: { readOnlyHint: true, openWorldHint: false },
         },
         async ({ table, column, text, row_id, limit, metric }) =>
-            guard(async () =>
-                semanticSearch(await session.context(), {
-                    table,
-                    column,
-                    text,
-                    rowId: row_id,
-                    limit: limit ?? 10,
-                    metric: (metric as DistanceMetric) ?? '<=>',
-                }),
+            guard(() =>
+                session.run((ctx) =>
+                    semanticSearch(ctx, {
+                        table,
+                        column,
+                        text,
+                        rowId: row_id,
+                        limit: limit ?? 10,
+                        metric: (metric as DistanceMetric) ?? '<=>',
+                    }),
+                ),
             ),
     );
 
@@ -305,15 +307,9 @@ async function main(): Promise<void> {
         },
         async (uri) => {
             try {
-                const ctx = await session.context();
+                const text = await session.run((ctx) => renderSchema(ctx));
                 return {
-                    contents: [
-                        {
-                            uri: uri.href,
-                            mimeType: 'text/plain',
-                            text: await renderSchema(ctx),
-                        },
-                    ],
+                    contents: [{ uri: uri.href, mimeType: 'text/plain', text }],
                 };
             } catch (error) {
                 return {

@@ -10,11 +10,13 @@
 // So the assertions below check the *outcome* — did the row change? — rather
 // than checking that the right function was called.
 
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { parseLog } from '../../src/lib/auditLog';
+import { saveWouldClobber } from '../../src/lib/diskGuard';
+import { pgSslHint } from '../../src/lib/pgSslHint';
 import {
     mcpPolicyFromApp,
     parseHandoff,
@@ -27,8 +29,9 @@ import { CLAUDE_STORE_PACKAGE, windowsClaudeConfigPaths } from '../../src/lib/cl
 import * as approvals from './approvals';
 import { installAudit } from './audit';
 import { ConfigError, IN_MEMORY_MESSAGE, NO_DATABASE_MESSAGE, defaultAuditPath, loadConfig, type ServerConfig } from './config';
-import { openDatabase, ReadOnlyServerError, type Database } from './db';
+import { openDatabase, postgresConnectFailure, ReadOnlyServerError, type Database } from './db';
 import { renderTable } from './render';
+import { LiveSession } from './session';
 import { runApproved, runQuery, type ToolContext } from './tools/query';
 import { describeTable, listTables } from './tools/schema';
 
@@ -165,6 +168,59 @@ async function main(): Promise<void> {
         'defaults to read-only',
         loadConfig({ LITEDB_SQLITE_PATH: 'a.db' }).policy === 'read-only',
         'the app defaults to guarded because a person is in front of it; a server is not',
+    );
+
+    {
+        const disk = (mtime: number | null, walSize = 0, inUse = false) => ({ mtime, walSize, inUse });
+        check('a non-empty WAL blocks overwrite', saveWouldClobber(disk(1, 4096), disk(1)) === 'in-use');
+        check(
+            'SQLite elsewhere with the file open blocks overwrite',
+            saveWouldClobber(disk(1, 0, true), disk(1)) === 'in-use',
+        );
+        check('a changed mtime blocks overwrite', saveWouldClobber(disk(2), disk(1)) === 'changed');
+        check(
+            'an mtime never recorded is not taken as unchanged',
+            saveWouldClobber(disk(1), disk(null)) === 'changed' &&
+                saveWouldClobber(disk(1), null) === 'changed',
+        );
+        check('a vanished file is reported as missing', saveWouldClobber(disk(null), disk(1)) === 'missing');
+        check('an unchanged, idle file is safe to save', saveWouldClobber(disk(1), disk(1)) === 'ok');
+    }
+
+    check(
+        'an unticked "Require SSL" against a TLS-only host says to tick it',
+        pgSslHint(
+            'error returned from database: no pg_hba.conf entry for host "1.2.3.4", user "u", database "d", no encryption',
+            false,
+        )?.includes('Tick "Require SSL"') === true,
+    );
+    check(
+        'a ticked "Require SSL" against a host without TLS says to untick it',
+        pgSslHint(
+            'error occurred while attempting to establish a TLS connection: server does not support TLS',
+            true,
+        )?.includes('Untick') === true,
+    );
+    {
+        const refused = new AggregateError(
+            [
+                Object.assign(new Error('connect ECONNREFUSED ::1:5433'), { code: 'ECONNREFUSED' }),
+                Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5433'), { code: 'ECONNREFUSED' }),
+            ],
+            '',
+        );
+        const message = postgresConnectFailure('postgres://u:s3cret@localhost:5433/shop', refused);
+        check(
+            'a refused localhost connection is not a blank error',
+            message.includes('localhost:5433') && message.includes('ECONNREFUSED 127.0.0.1:5433'),
+            message,
+        );
+        check('and it does not leak the password', !message.includes('s3cret'), message);
+    }
+
+    check(
+        'a wrong password gets no SSL hint',
+        pgSslHint('error returned from database: password authentication failed for user "u"', false) === null,
     );
 
     check(
@@ -542,8 +598,140 @@ async function main(): Promise<void> {
             statSync(harness.dbPath).mtimeMs !== mtimeBefore,
             'the app spots outside writes by mtime; a write left sitting in -wal is invisible to it and gets saved over',
         );
+        check(
+            'a successful checkpoint is not reported as a warning',
+            !result.text.includes('another program'),
+        );
     } finally {
         await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
+    approvals.reset();
+    harness = buildFixture();
+    {
+        const walSetup = new DatabaseSync(harness.dbPath);
+        walSetup.exec('PRAGMA journal_mode=WAL');
+        walSetup.close();
+    }
+    config = configFor(harness, 'guarded');
+    db = await openDatabase(config);
+    ctx = { db, config };
+    installAudit({
+        connection: config.connectionId,
+        dialect: 'sqlite',
+        policy: 'guarded',
+        path: harness.auditPath,
+    });
+    try {
+        const holder = new DatabaseSync(harness.dbPath);
+        holder.exec('BEGIN');
+        holder.prepare('SELECT * FROM orders').all();
+        try {
+            const preview = await runQuery(ctx, "UPDATE orders SET status = 'held' WHERE id = 1");
+            const token = /token: ([0-9a-f-]{36})/.exec(preview.text)?.[1] ?? '';
+            const result = await runApproved(ctx, token);
+            check(
+                'a busy checkpoint is reported to the agent',
+                result.text.startsWith('Executed.') && result.text.includes('another program'),
+                result.text,
+            );
+        } finally {
+            holder.exec('ROLLBACK');
+            holder.close();
+        }
+    } finally {
+        await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
+    // ------------------------------------------- app saves between calls ---
+    process.stdout.write('\napp saves the file between tool calls\n');
+
+    // The desktop app writes a whole file image. Before connections were
+    // released per call, a WAL-mode file came out of this sequence with the
+    // app's edit reverted or "database disk image is malformed".
+    approvals.reset();
+    harness = buildFixture();
+    {
+        const walSetup = new DatabaseSync(harness.dbPath);
+        walSetup.exec('PRAGMA journal_mode=WAL');
+        walSetup.close();
+    }
+    const savedEnv = { ...process.env };
+    Object.assign(process.env, {
+        LITEDB_SQLITE_PATH: harness.dbPath,
+        LITEDB_POLICY: 'guarded',
+        LITEDB_AUDIT_PATH: harness.auditPath,
+        LITEDB_HANDOFF_PATH: join(harness.dir, 'no-handoff.json'),
+    });
+    const session = new LiveSession();
+    try {
+        const approve = async (sql: string) => {
+            const preview = await session.run((c) => runQuery(c, sql));
+            const token = /token: ([0-9a-f-]{36})/.exec(preview.text)?.[1] ?? '';
+            return session.run((c) => runApproved(c, token));
+        };
+
+        await session.run((c) => runQuery(c, 'SELECT * FROM orders'));
+        const first = await approve("UPDATE orders SET status = 'agent-1' WHERE id = 1");
+        check('the first agent write runs', first.text.startsWith('Executed.'), first.text);
+        check(
+            'no -wal is left behind once the call ends',
+            !existsSync(`${harness.dbPath}-wal`),
+            'a handle kept open between calls is what goes stale under the app',
+        );
+
+        // The app: copy the main file, edit it hard enough to split pages,
+        // write the image back over the original.
+        const appCopy = join(harness.dir, 'app-copy.sqlite');
+        writeFileSync(appCopy, readFileSync(harness.dbPath));
+        {
+            const app = new DatabaseSync(appCopy);
+            app.exec('BEGIN');
+            const insert = app.prepare(
+                "INSERT INTO orders (customer_id, status, total) VALUES (1, 'app-bulk', 1)",
+            );
+            for (let i = 0; i < 2000; i++) insert.run();
+            app.exec("UPDATE orders SET status = 'app' WHERE id = 2");
+            app.exec('COMMIT');
+            app.close();
+        }
+        writeFileSync(harness.dbPath, readFileSync(appCopy));
+
+        const seen = await session.run((c) =>
+            runQuery(c, "SELECT status FROM orders WHERE id = 2"),
+        );
+        check("the agent's next read sees the app's save", seen.text.includes('app'), seen.text);
+
+        const second = await approve("UPDATE orders SET status = 'agent-2' WHERE id = 3");
+        check('a later agent write runs', second.text.startsWith('Executed.'), second.text);
+
+        const verify = new DatabaseSync(harness.dbPath, { readOnly: true });
+        try {
+            const integrity = (verify.prepare('PRAGMA integrity_check').get() as { integrity_check: string })
+                .integrity_check;
+            check('the file is not corrupted', integrity === 'ok', integrity);
+            const statuses = verify
+                .prepare('SELECT status FROM orders WHERE id IN (1, 2, 3) ORDER BY id')
+                .all()
+                .map((r) => (r as { status: string }).status)
+                .join(',');
+            check(
+                "neither side's write is lost",
+                statuses === 'agent-1,app,agent-2',
+                statuses,
+            );
+            check(
+                "and the app's bulk insert survived",
+                countRows(harness, 'orders', "status = 'app-bulk'") === 2000,
+            );
+        } finally {
+            verify.close();
+        }
+    } finally {
+        await session.close();
+        process.env = savedEnv;
         rmSync(harness.dir, { recursive: true, force: true });
     }
 

@@ -3,13 +3,15 @@
     windows_subsystem = "windows"
 )]
 
+mod sqlite_file;
+
 use futures_util::TryStreamExt;
 use keyring::Entry;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::redirect;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
+use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions, PgRow, PgSslMode};
 use sqlx::{Column, Either, Row, ValueRef};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -59,14 +61,9 @@ async fn connect_postgres(
         pool.close().await;
     }
 
-    let url = format!(
-        "postgres://{}:{}@{}:{}/{}",
-        config.username, config.password, config.host, config.port, config.database
-    );
-
     let pool = PgPoolOptions::new()
         .max_connections(20)
-        .connect(&url)
+        .connect_with(pg_connect_options(&config))
         .await
         .map_err(|e| e.to_string())?;
 
@@ -393,10 +390,98 @@ fn delete_secret(service: String, account: String) -> Result<(), String> {
     }
 }
 
+fn pg_ssl_mode(ssl: Option<bool>) -> PgSslMode {
+    if ssl.unwrap_or(false) {
+        PgSslMode::Require
+    } else {
+        PgSslMode::Disable
+    }
+}
+
+fn pg_connect_options(config: &PgConfig) -> PgConnectOptions {
+    PgConnectOptions::new()
+        .host(&config.host)
+        .port(config.port)
+        .username(&config.username)
+        .password(&config.password)
+        .database(&config.database)
+        .ssl_mode(pg_ssl_mode(config.ssl))
+}
+
+/// Must match `HANDOFF_FILENAME` in src/lib/mcpHandoff.ts — a test holds them together.
+const MCP_HANDOFF_FILENAME: &str = "mcp-handoff.json";
+
 fn clear_mcp_handoff(app: &tauri::AppHandle) {
     if let Ok(dir) = app.path().app_local_data_dir() {
-        let _ = std::fs::remove_file(dir.join("mcp-handoff.json"));
+        let _ = std::fs::remove_file(dir.join(MCP_HANDOFF_FILENAME));
     }
+}
+
+/// The same check plugin-fs applies: only files the user opened (dialog or
+/// drop) are reachable, so these commands do not widen what the webview can
+/// touch.
+fn scoped_sqlite_path(app: &tauri::AppHandle, path: &str) -> Result<std::path::PathBuf, String> {
+    use tauri_plugin_fs::FsExt;
+    let path = std::path::PathBuf::from(path);
+    if app.fs_scope().is_allowed(&path) {
+        Ok(path)
+    } else {
+        Err("LiteDB does not have access to that file. Open it again.".into())
+    }
+}
+
+#[tauri::command]
+async fn sqlite_disk_state(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<sqlite_file::DiskState, String> {
+    let path = scoped_sqlite_path(&app, &path)?;
+    tauri::async_runtime::spawn_blocking(move || sqlite_file::disk_state(&path))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn read_sqlite_file(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let path = scoped_sqlite_path(&app, &path)?;
+    let body = tauri::async_runtime::spawn_blocking(move || {
+        let (data, state) = sqlite_file::read_consistent(&path).map_err(|e| e.to_string())?;
+        sqlite_file::encode_read(data, &state)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(body))
+}
+
+#[tauri::command]
+async fn save_sqlite_file(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<sqlite_file::SaveOutcome, String> {
+    // Raw normally; a JSON number array when IPC falls back to postMessage.
+    // plugin-fs's writeFile accepts both for the same reason.
+    let body: std::borrow::Cow<[u8]> = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => std::borrow::Cow::Borrowed(bytes),
+        tauri::ipc::InvokeBody::Json(Value::Array(values)) => std::borrow::Cow::Owned(
+            values
+                .iter()
+                .map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
+                .collect::<Option<Vec<u8>>>()
+                .ok_or("save_sqlite_file got a malformed body")?,
+        ),
+        _ => return Err("save_sqlite_file expects a binary body".into()),
+    };
+    let (meta, data) = sqlite_file::decode_save(&body)?;
+    let path = scoped_sqlite_path(&app, &meta.path)?;
+    let data = data.to_vec();
+    tauri::async_runtime::spawn_blocking(move || {
+        sqlite_file::guarded_save(&path, &data, meta.expected_mtime).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn main() {
@@ -424,7 +509,10 @@ fn main() {
             proxy_request,
             store_secret,
             get_secret,
-            delete_secret
+            delete_secret,
+            sqlite_disk_state,
+            read_sqlite_file,
+            save_sqlite_file
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
@@ -560,5 +648,35 @@ mod tests {
         assert!(is_proxy_url_allowed(&url("https://[::ffff:169.254.169.254]/latest")).is_err());
         assert!(is_proxy_url_allowed(&url("https://metadata.google.internal/")).is_err());
         assert!(is_proxy_url_allowed(&url("ftp://localhost/x")).is_err());
+    }
+
+    #[test]
+    fn handoff_filename_matches_the_app() {
+        let ts = include_str!("../../src/lib/mcpHandoff.ts");
+        let expected = format!("HANDOFF_FILENAME = '{MCP_HANDOFF_FILENAME}'");
+        assert!(
+            ts.contains(&expected),
+            "src/lib/mcpHandoff.ts no longer declares {expected}; quitting would leave the handoff behind"
+        );
+    }
+
+    #[test]
+    fn ssl_checkbox_require_or_disable() {
+        assert!(matches!(pg_ssl_mode(None), PgSslMode::Disable));
+        assert!(matches!(pg_ssl_mode(Some(false)), PgSslMode::Disable));
+        assert!(matches!(pg_ssl_mode(Some(true)), PgSslMode::Require));
+    }
+
+    #[test]
+    fn password_with_url_reserved_chars_builds() {
+        // The old URL format broke on /, ?, #, %. The options builder does not.
+        let _ = pg_connect_options(&PgConfig {
+            host: "localhost".into(),
+            port: 5432,
+            database: "shop".into(),
+            username: "user@name".into(),
+            password: r#"p/w?d#x%yy"#.into(),
+            ssl: Some(false),
+        });
     }
 }

@@ -61,6 +61,8 @@ interface SchemaVisualizerProps {
   getIndexes: (tableName: string) => IndexInfo[] | Promise<IndexInfo[]>;
   isPostgres?: boolean;
   onEditTable?: (tableName: string) => void;
+  /** Bumped on reload so column/index changes redraw even when table names do not. */
+  revision?: number;
 }
 
 export interface SchemaVisualizerRef {
@@ -343,7 +345,8 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
   getTableColumns,
   getForeignKeys,
   getIndexes,
-  onEditTable
+  onEditTable,
+  revision = 0,
 }, ref) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -351,7 +354,6 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
   const [loading, setLoading] = useState(true);
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
-  const [hasLoaded, setHasLoaded] = useState(false);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('Default');
@@ -418,22 +420,25 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
 
   // Create a stable table key to detect actual table changes
   const tableKey = useMemo(() =>
-    tables.map(t => t.name).sort().join(','),
-    [tables]
+    `${tables.map(t => t.name).sort().join(',')}@${revision}`,
+    [tables, revision]
   );
+
+  /**
+   * What was last laid out. `revision` bumps on every reload — including an
+   * agent changing rows, not tables — and re-laying out an identical schema
+   * throws away where the user dragged the tables and refits the view.
+   */
+  const laidOutSchemaRef = useRef<string | null>(null);
 
   // Load schema data
   useEffect(() => {
-    // Skip if already loaded with the same tables
-    if (hasLoaded && schemaData.length === tables.length) {
-      return;
-    }
-
     let mounted = true;
 
     const loadSchema = async () => {
       if (!mounted) return;
-      setLoading(true);
+      // Spinner only before there is a graph to keep on screen.
+      if (laidOutSchemaRef.current === null) setLoading(true);
 
       try {
         const schemaPromises = tables.map(async (table) => {
@@ -455,8 +460,10 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
 
         if (!mounted) return;
 
+        const signature = JSON.stringify(data);
+        if (signature === laidOutSchemaRef.current) return;
+        laidOutSchemaRef.current = signature;
         setSchemaData(data);
-        setHasLoaded(true);
       } catch (error) {
         console.error('Error loading schema:', error);
       } finally {

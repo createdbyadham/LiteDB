@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Server, HardDrive, Database, CheckCircle2, Clock, Eye, Flame, Plug, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Server, HardDrive, Database, CheckCircle2, Clock, Eye, Flame, Plug, ShieldCheck, ShieldOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
+import type { DiskAlert } from '@/lib/diskGuard';
 import { acknowledgeYolo, hasAcknowledgedYolo } from '@/lib/queryGate';
 import type { SafetyPolicy } from '@/lib/sqlPolicy';
 
@@ -61,6 +62,8 @@ interface StatusBarProps {
   databaseName?: string;
   tableCount?: number;
   lastSaved?: Date | null;
+  diskAlert?: DiskAlert | null;
+  onReloadFromDisk?: () => void;
 }
 
 const StatusBar = ({
@@ -68,7 +71,9 @@ const StatusBar = ({
   connectionType,
   databaseName,
   tableCount = 0,
-  lastSaved
+  lastSaved,
+  diskAlert = null,
+  onReloadFromDisk,
 }: StatusBarProps) => {
   const { connection, policy, setPolicy } = useSafetyPolicy();
   const policyUi = POLICY_UI[policy];
@@ -153,6 +158,45 @@ const StatusBar = ({
 
       {/* Right side - Safety mode, last saved & time */}
       <div className="flex items-center gap-4">
+        {diskAlert === 'changed' && (
+          <button
+            type="button"
+            onClick={onReloadFromDisk}
+            className="flex items-center gap-1.5 text-destructive hover:text-destructive/80"
+            title="The file on disk changed. Reload discards every unsaved edit."
+          >
+            <AlertTriangle className="w-3 h-3" />
+            <span>File changed</span>
+            <RefreshCw className="w-3 h-3" />
+            <span>Reload</span>
+          </button>
+        )}
+        {diskAlert === 'in-use' && (
+          <button
+            type="button"
+            onClick={onReloadFromDisk}
+            className="flex items-center gap-1.5 text-amber-600 dark:text-amber-500 hover:text-amber-500"
+            title="Another program has this database open, so saving waits until it closes. Reload shows the file as it is now and discards unsaved edits."
+          >
+            <AlertTriangle className="w-3 h-3" />
+            <span>Database in use</span>
+            <RefreshCw className="w-3 h-3" />
+            <span>Reload</span>
+          </button>
+        )}
+        {(diskAlert === 'missing' || diskAlert === 'save-failed') && (
+          <span
+            className="flex items-center gap-1.5 text-destructive"
+            title={
+              diskAlert === 'missing'
+                ? 'The database file was moved or deleted. Edits are kept in memory.'
+                : 'Writing the database file failed. LiteDB keeps retrying; edits are kept in memory.'
+            }
+          >
+            <AlertTriangle className="w-3 h-3" />
+            <span>{diskAlert === 'missing' ? 'File not found' : 'Not saved'}</span>
+          </span>
+        )}
         {connection && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
