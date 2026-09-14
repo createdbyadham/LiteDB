@@ -42,7 +42,9 @@ pub struct DiskState {
 #[derive(Serialize, Debug, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "kebab-case")]
 pub enum SaveOutcome {
-    Saved { mtime: u64 },
+    Saved {
+        mtime: u64,
+    },
     /// The file is not the one we last loaded or saved.
     Changed,
     InUse,
@@ -152,7 +154,11 @@ mod sqlite_lock {
                 handle: file.as_raw_handle(),
                 held: Vec::new(),
             };
-            for (offset, len) in [(PENDING_BYTE, 1), (RESERVED_BYTE, 1), (SHARED_FIRST, SHARED_SIZE)] {
+            for (offset, len) in [
+                (PENDING_BYTE, 1),
+                (RESERVED_BYTE, 1),
+                (SHARED_FIRST, SHARED_SIZE),
+            ] {
                 if !lock(
                     guard.handle,
                     offset,
@@ -323,21 +329,30 @@ mod tests {
     fn refuses_when_the_file_moved_on() {
         let path = temp_file("changed", b"a");
         let expected = disk_state(&path).mtime.map(|m| m - 1);
-        assert_eq!(guarded_save(&path, b"b", expected).unwrap(), SaveOutcome::Changed);
+        assert_eq!(
+            guarded_save(&path, b"b", expected).unwrap(),
+            SaveOutcome::Changed
+        );
         assert_eq!(std::fs::read(&path).unwrap(), b"a");
     }
 
     #[test]
     fn unknown_last_time_is_treated_as_changed() {
         let path = temp_file("unknown", b"a");
-        assert_eq!(guarded_save(&path, b"b", None).unwrap(), SaveOutcome::Changed);
+        assert_eq!(
+            guarded_save(&path, b"b", None).unwrap(),
+            SaveOutcome::Changed
+        );
     }
 
     #[test]
     fn missing_file() {
         let path = temp_file("missing", b"a");
         std::fs::remove_file(&path).unwrap();
-        assert_eq!(guarded_save(&path, b"b", Some(1)).unwrap(), SaveOutcome::Missing);
+        assert_eq!(
+            guarded_save(&path, b"b", Some(1)).unwrap(),
+            SaveOutcome::Missing
+        );
         assert!(!path.exists(), "a save must not recreate a deleted file");
     }
 
@@ -347,7 +362,10 @@ mod tests {
         std::fs::write(sidecar(&path, "-wal"), b"frames").unwrap();
         let expected = disk_state(&path).mtime;
         assert!(disk_state(&path).in_use);
-        assert_eq!(guarded_save(&path, b"b", expected).unwrap(), SaveOutcome::InUse);
+        assert_eq!(
+            guarded_save(&path, b"b", expected).unwrap(),
+            SaveOutcome::InUse
+        );
         assert_eq!(std::fs::read(&path).unwrap(), b"a");
     }
 
@@ -372,7 +390,10 @@ mod tests {
         let expected = disk_state(&path).mtime;
         let other = File::open(&path).unwrap();
         assert!(sqlite_lock::hold_shared(&other));
-        assert_eq!(guarded_save(&path, b"b", expected).unwrap(), SaveOutcome::InUse);
+        assert_eq!(
+            guarded_save(&path, b"b", expected).unwrap(),
+            SaveOutcome::InUse
+        );
         assert_eq!(std::fs::read(&path).unwrap(), b"a");
         drop(other); // closing the handle releases its locks
         assert!(matches!(
@@ -398,7 +419,10 @@ mod tests {
         let (request, data) = decode_save(&body).unwrap();
         assert_eq!(
             request,
-            SaveRequest { path: r"C:\x\y.db".into(), expected_mtime: Some(42) }
+            SaveRequest {
+                path: r"C:\x\y.db".into(),
+                expected_mtime: Some(42)
+            }
         );
         assert_eq!(data, b"DATA");
         assert!(decode_save(&body[..3]).is_err());
@@ -465,14 +489,20 @@ mod tests {
             if blocks {
                 assert_eq!(outcome, SaveOutcome::InUse, "{label}");
             } else {
-                assert!(matches!(outcome, SaveOutcome::Saved { .. }), "{label}: {outcome:?}");
+                assert!(
+                    matches!(outcome, SaveOutcome::Saved { .. }),
+                    "{label}: {outcome:?}"
+                );
             }
 
             child.stdin.as_mut().unwrap().write_all(b"\n").unwrap();
             child.wait().unwrap();
             let (bytes, state) = read_consistent(&path).unwrap();
             assert!(
-                matches!(guarded_save(&path, &bytes, state.mtime).unwrap(), SaveOutcome::Saved { .. }),
+                matches!(
+                    guarded_save(&path, &bytes, state.mtime).unwrap(),
+                    SaveOutcome::Saved { .. }
+                ),
                 "{label}: saves once the connection closes"
             );
         }
@@ -507,8 +537,14 @@ mod tests {
             }
         }
         let report = read_line(&mut agent);
-        assert_eq!(report, r#"{"ok":300,"fail":{}}"#, "saves={saves} refused={refused}");
-        assert!(saves > 0, "the test must actually save while the agent runs");
+        assert_eq!(
+            report, r#"{"ok":300,"fail":{}}"#,
+            "saves={saves} refused={refused}"
+        );
+        assert!(
+            saves > 0,
+            "the test must actually save while the agent runs"
+        );
 
         let mut check = node(&format!(
             "const {{DatabaseSync}}=require('node:sqlite');const d=new DatabaseSync({p:?},{{readOnly:true}});\

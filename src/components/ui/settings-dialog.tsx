@@ -158,61 +158,103 @@ export function SettingsDialog() {
     );
   };
 
-  const getLogsContent = async () => {
+  const getLogsContent = async (): Promise<
+    { ok: true; content: string } | { ok: false; error: string; empty?: boolean }
+  > => {
     try {
       const logDir = await appLogDir();
       const entries = await readDir(logDir);
-      const logFiles = entries.filter(e => e.name.endsWith('.log'));
-      
-      if (logFiles.length === 0) return null;
+      const logFiles = entries.filter((e) => e.name.endsWith('.log'));
+
+      if (logFiles.length === 0) {
+        return { ok: false, error: 'No log files exist yet.', empty: true };
+      }
 
       let allLogs = '';
       for (const file of logFiles) {
         const content = await readTextFile(`${logDir}/${file.name}`);
         allLogs += `\n--- ${file.name} ---\n${content}`;
       }
-      return allLogs;
+
+      if (!allLogs.trim()) {
+        return { ok: false, error: 'Log files are currently empty.', empty: true };
+      }
+
+      return { ok: true, content: allLogs.trimStart() };
     } catch (e) {
-      console.error("Failed to read logs:", e);
-      return null;
+      console.error('Failed to read logs:', e);
+      const message = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: `Could not read logs: ${message}` };
+    }
+  };
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await writeText(text);
+      return;
+    } catch (primaryErr) {
+      console.warn('Plugin clipboard write failed, trying navigator.clipboard:', primaryErr);
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      throw primaryErr;
     }
   };
 
   const handleCopyLogs = async () => {
-    const logs = await getLogsContent();
-    if (!logs) {
-      toast({ title: "Error", description: "No logs found or failed to read", variant: "destructive" });
+    const result = await getLogsContent();
+    if (!result.ok) {
+      toast({
+        title: result.empty ? 'No logs' : 'Error',
+        description: result.error,
+        variant: result.empty ? 'default' : 'destructive',
+      });
       return;
     }
     try {
-      await writeText(logs);
-      toast({ title: "Copied", description: "Logs copied to clipboard" });
+      await copyToClipboard(result.content);
+      toast({ title: 'Copied', description: 'Logs copied to clipboard' });
     } catch (e) {
       console.error(e);
-      toast({ title: "Error", description: "Failed to copy logs", variant: "destructive" });
+      const detail = e instanceof Error ? e.message : String(e);
+      toast({
+        title: 'Error',
+        description: `Failed to copy logs to clipboard: ${detail}`,
+        variant: 'destructive',
+      });
     }
   };
 
   const handleExportLogs = async () => {
-    const logs = await getLogsContent();
-    if (!logs) {
-      toast({ title: "Error", description: "No logs found or failed to read", variant: "destructive" });
+    const result = await getLogsContent();
+    if (!result.ok) {
+      toast({
+        title: result.empty ? 'No logs' : 'Error',
+        description: result.error,
+        variant: result.empty ? 'default' : 'destructive',
+      });
       return;
     }
 
     try {
       const path = await save({
         filters: [{ name: 'Log Files', extensions: ['log', 'txt'] }],
-        defaultPath: 'LiteDB_Logs.log'
+        defaultPath: 'LiteDB_Logs.log',
       });
-      
+
       if (path) {
-        await writeTextFile(path, logs);
-        toast({ title: "Success", description: "Logs exported successfully" });
+        await writeTextFile(path, result.content);
+        toast({ title: 'Success', description: 'Logs exported successfully' });
       }
     } catch (e) {
       console.error(e);
-      toast({ title: "Error", description: "Failed to save logs", variant: "destructive" });
+      const detail = e instanceof Error ? e.message : String(e);
+      toast({
+        title: 'Error',
+        description: `Failed to save logs: ${detail}`,
+        variant: 'destructive',
+      });
     }
   };
 
