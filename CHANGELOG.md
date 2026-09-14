@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-09-14
+
 ### Changed
 
 - **"Use SSL" is now "Require SSL", and the app obeys it.** Ticked requires an encrypted connection; unticked connects without encryption — the same as the MCP server. Previously the app ignored the box and tried TLS anyway, so a saved connection to a host that insists on TLS (Neon, RDS, most managed Postgres) worked unticked and will now fail until you tick it. The error says so.
@@ -16,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A WAL-mode SQLite file could lose the app's edit, or be corrupted, when the MCP server had written to it earlier in the session.
 - The table view reloads when an agent writes, without closing an open row edit or losing your scroll position.
+- Settings logs: distinguish empty log files from read/clipboard failures with specific error details, and fall back to the browser clipboard API if the native clipboard plugin fails.
 
 ## [2.1.0] - 2025-09-08
 
@@ -33,4 +36,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.2.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.0
 [2.1.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.1.0
