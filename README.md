@@ -4,7 +4,7 @@ A modern, fast, and user-friendly database viewer/editor built with React and Ta
 
 <div align="center">
 
-[![Download](https://img.shields.io/badge/Download-App-blue?style=for-the-badge&logo=w)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.1)
+[![Download](https://img.shields.io/badge/Download-App-blue?style=for-the-badge&logo=w)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.2)
 [![Watch Demo](https://img.shields.io/badge/Watch-Demo-red?style=for-the-badge&logo=y)](https://www.linkedin.com/feed/update/urn:li:activity:7377312579544563712/?updateEntityUrn=urn%3Ali%3Afs_feedUpdate%3A%28V2%2Curn%3Ali%3Aactivity%3A7377312579544563712%29)
 
 </div>
@@ -301,8 +301,9 @@ the config, no restart when you switch database. Quitting the app clears that
 handoff — including a stored Postgres password — so an agent cannot keep using
 the last connection. Fastest path: Settings →
 **Agents**, or the status-bar **MCP** chip. Host-by-host:
-[Connect an agent](docs/connect-an-agent.md). Needs **Node 22.5+** on the PATH
-the host uses (`node:sqlite`).
+[Connect an agent](docs/connect-an-agent.md). Requires **Node.js 22.5+** with
+`npx` on the PATH that Claude, Cursor, or VS Code uses (`node:sqlite`). LiteDB
+does not install Node.
 
 Windows (what the app copies):
 

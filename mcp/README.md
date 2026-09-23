@@ -34,7 +34,9 @@ To run exactly the statements above, call execute_approved with:
 If LiteDB is running, the server follows whatever you have open. Quitting the
 app clears the handoff (and any Postgres password in it). In the app:
 Settings → **Agents**, or the status-bar **MCP** chip. Step-by-step for each
-host: [Connect an agent](../docs/connect-an-agent.md). Node **22.5+**.
+host: [Connect an agent](../docs/connect-an-agent.md). Requires **Node.js 22.5+**
+with `npx` on the PATH that Claude, Cursor, or VS Code uses. LiteDB does not
+install Node.
 
 Windows:
 

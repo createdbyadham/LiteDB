@@ -6,7 +6,7 @@ the agent's policy (YOLO maps down to guarded). Quitting the app removes the
 handoff, including any Postgres password, so the agent cannot keep using the
 last database.
 
-You need Node 22.5+ on the PATH the host uses.
+Requires Node.js 22.5+ with `npx` on the PATH that Claude, Cursor, or VS Code uses. LiteDB does not install Node.
 
 ## In the app
 
