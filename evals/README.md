@@ -621,6 +621,5 @@ Results are written to `results/<tag>.json` and `results/<tag>.md`.
 
 - **Every pull request** runs the self-test and golden-set verification. No
   credentials, no cost.
-- **Nightly** (`eval-nightly.yml`) scores both dialects with `--provider openai`
-  (`gpt-4o-mini` unless you override). Needs repo secret `OPENAI_API_KEY`.
-  Dispatch with `openai-compatible` or `ollama` if you have the matching env.
+- Scored runs (`npm run eval` with a live provider) are local or manual only;
+  they are not scheduled in GitHub Actions.
