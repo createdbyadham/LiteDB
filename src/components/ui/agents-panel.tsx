@@ -166,9 +166,10 @@ export function AgentsPanel() {
             />
 
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-                After adding a server, restart the host. Then: “what&apos;s in this database?”, then
-                “delete the shipped orders.” A write should preview and wait — that is the whole
-                claim.
+                Requires Node.js 22.5+ with <code className="font-mono">npx</code> on the PATH that
+                Claude, Cursor, or VS Code uses. LiteDB does not install Node. After adding a
+                server, restart the host. Then: “what&apos;s in this database?”, then “delete the
+                shipped orders.” A write should preview and wait — that is the whole claim.
             </p>
         </div>
     );

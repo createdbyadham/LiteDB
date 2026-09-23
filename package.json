@@ -1,7 +1,7 @@
 {
   "name": "LiteDB",
   "private": true,
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "LiteDB - A simple and lightweight database viewer/editor for your projects",
   "repository": {
     "type": "git",
