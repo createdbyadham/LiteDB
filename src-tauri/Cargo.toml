@@ -1,6 +1,6 @@
 [package]
 name = "LiteDB"
-version = "2.2.0"
+version = "2.2.1"
 description = "LiteDB - A simple and lightweight database viewer/editor for your projects"
 authors = ["Adham Ehab"]
 edition = "2021"

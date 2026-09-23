@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-09-23
+
+### Fixed
+
+- The window close button did nothing. Closing now has permission to destroy the window after the quit handler runs.
+
 ## [2.2.0] - 2026-09-14
 
 ### Changed
@@ -36,5 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.2.1]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.1
 [2.2.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.0
 [2.1.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.1.0
