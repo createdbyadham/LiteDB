@@ -19,17 +19,11 @@ export function Toaster() {
         return (
           <Toast key={id} variant={variant} {...props}>
             <div className="flex min-w-0 items-start gap-2.5">
-              <span
-                className={
-                  destructive
-                    ? "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-400"
-                    : "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400"
-                }
-              >
+              <span className="flex h-5 shrink-0 items-center">
                 {destructive ? (
-                  <CircleAlert className="h-3 w-3" />
+                  <CircleAlert className="h-4 w-4 text-destructive" strokeWidth={1.5} />
                 ) : (
-                  <Check className="h-3 w-3" strokeWidth={3} />
+                  <Check className="h-4 w-4 text-positive" strokeWidth={1.5} />
                 )}
               </span>
               <div className="min-w-0 space-y-0.5">

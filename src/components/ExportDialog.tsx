@@ -7,6 +7,9 @@ import { toast } from '@/hooks/use-toast';
 import { sqliteService } from '@/lib/sqliteService';
 import { usePostgres } from '@/hooks/usePostgres';
 import { tauriService } from '@/lib/tauri';
+import { csvRow, rowsToJson } from '@/lib/exportFormat';
+import { buildXlsx } from '@/lib/xlsx';
+import { pgService } from '@/lib/pgService';
 
 type ExportFormat = 'csv' | 'json' | 'xlsx' | 'png' | 'svg';
 
@@ -24,7 +27,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
   const [exportableTables, setExportableTables] = useState<string[]>([]);
   const [selectedTable, setSelectedTable] = useState<string>('');
 
-  const { tables: postgresTables, executeQuery: executePgQuery } = usePostgres();
+  const { tables: postgresTables } = usePostgres();
 
   // Reset format when mode changes
   useEffect(() => {
@@ -54,8 +57,8 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         return;
       }
 
-      let exportData = '';  // Initialize with empty string
-      let exportFormat = format;
+      let exportData: string | Uint8Array = '';
+      const exportFormat = format;
 
       if (isPostgres) {
         // For PostgreSQL we need to export the selected table
@@ -68,9 +71,10 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
           return;
         }
 
-        // Get the table data
-        const result = await executePgQuery(`SELECT * FROM "${selectedTable}"`);
-        if (!result) {
+        // Every row, with pgvector columns read as text (SELECT * returns
+        // them as binary the driver cannot decode).
+        const result = await pgService.getTableData(selectedTable, -1);
+        if (!result || result.columns.length === 0) {
           toast({
             title: "Error",
             description: "Failed to fetch table data for export",
@@ -82,36 +86,25 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
         // Format data based on the selected format
         if (format === 'json') {
           // JSON format
-          exportData = JSON.stringify(result.rows, null, 2);
+          exportData = JSON.stringify(rowsToJson(result.rows), null, 2);
         } else if (format === 'csv') {
           // CSV format
-          const header = result.columns.join(',');
+          const header = csvRow(result.columns);
           const rows = result.rows.map((row) =>
-            result.columns.map(col => {
-              const value = (row as unknown as Record<string, unknown>)[col];
-              // Handle strings with commas by wrapping in quotes
-              return typeof value === 'string' && value.includes(',')
-                ? `"${value.replace(/"/g, '""')}"`
-                : value === null ? '' : String(value);
-            }).join(',')
+            csvRow(result.columns.map(col => (row as unknown as Record<string, unknown>)[col]))
           );
-          exportData = [header, ...rows].join('\n');
+          exportData = [header, ...rows].join('\n') + '\n';
         } else {
-          // XLSX format not directly supported for PostgreSQL in this implementation
-          // We'll use JSON as a fallback
-          toast({
-            title: "Warning",
-            description: "Excel export not supported for PostgreSQL. Using JSON format instead.",
-          });
-          exportData = JSON.stringify(result.rows, null, 2);
-          exportFormat = 'json';
+          exportData = buildXlsx([{ name: selectedTable, columns: result.columns, rows: result.rows }]);
         }
       } else {
         // Get data in selected format for SQLite
         const sqliteData =
           format === 'png' || format === 'svg'
             ? null
-            : sqliteService.exportToFormat(format);
+            : format === 'xlsx'
+              ? sqliteService.exportToXlsx()
+              : sqliteService.exportToFormat(format);
         if (!sqliteData) {
           toast({
             title: "Error",
@@ -204,7 +197,7 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
                   <>
                     <SelectItem value="csv">CSV</SelectItem>
                     <SelectItem value="json">JSON</SelectItem>
-                    {!isPostgres && <SelectItem value="xlsx">Excel</SelectItem>}
+                    <SelectItem value="xlsx">Excel</SelectItem>
                   </>
                 ) : (
                   <>

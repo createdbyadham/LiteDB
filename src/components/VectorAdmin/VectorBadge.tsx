@@ -51,7 +51,7 @@ export const VectorBadge = ({ value, dimensions, onClick, className }: VectorBad
           <Badge
             variant={getBadgeVariant()}
             className={cn(
-              "cursor-pointer transition-all font-mono text-xs gap-1",
+              "cursor-pointer transition-colors font-mono text-xs gap-1",
               isHovered && "ring-2 ring-primary/50",
               className
             )}
@@ -75,7 +75,7 @@ export const VectorBadge = ({ value, dimensions, onClick, className }: VectorBad
                 [{previewValues.map(formatNum).join(', ')}
                 {vector.length > 3 ? ', ...' : ''}]
               </div>
-              <div className="text-muted-foreground text-[10px] mt-1">
+              <div className="text-muted-foreground text-[11px] mt-1">
                 Click to inspect
               </div>
             </div>

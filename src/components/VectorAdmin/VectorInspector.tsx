@@ -84,11 +84,11 @@ const HistogramBar = ({
   return (
     <div className="flex flex-col items-center gap-1">
       <div 
-        className="w-6 bg-primary/80 rounded-t transition-all hover:bg-primary"
+        className="w-6 bg-primary/80 rounded-t transition-colors hover:bg-primary"
         style={{ height: `${barHeight}px` }}
         title={`${height.toFixed(1)}%`}
       />
-      <span className="text-[9px] text-muted-foreground">{label}</span>
+      <span className="text-[11px] text-muted-foreground">{label}</span>
     </div>
   );
 };
@@ -179,7 +179,7 @@ export const VectorInspector = ({
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted-foreground">Dimensions</h3>
               <div className="flex items-center gap-3">
-                <span className="text-3xl font-bold">{stats.dimensions}</span>
+                <span className="text-3xl font-medium tabular-nums">{stats.dimensions}</span>
                 <Badge variant="secondary" className="text-xs">
                   {getDimensionLabel(stats.dimensions)}
                 </Badge>

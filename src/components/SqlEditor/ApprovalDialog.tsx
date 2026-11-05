@@ -44,8 +44,8 @@ interface ApprovalDialogProps {
 const KIND_STYLE: Record<StatementKind, string> = {
     read: 'bg-muted text-muted-foreground',
     session: 'bg-muted text-muted-foreground',
-    ddl: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
-    write: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+    ddl: 'bg-secondary text-foreground',
+    write: 'bg-warning/15 text-warning',
     destructive: 'bg-destructive/15 text-destructive',
     unknown: 'bg-destructive/15 text-destructive',
 };
@@ -165,7 +165,7 @@ export function ApprovalDialog({
                                     <div className="flex items-center gap-2">
                                         <Badge
                                             variant="outline"
-                                            className={`text-[10px] uppercase tracking-wide border-0 ${KIND_STYLE[statement.kind]}`}
+                                            className={`font-mono text-[11px] font-normal border-0 ${KIND_STYLE[statement.kind]}`}
                                         >
                                             {statement.kind}
                                         </Badge>
@@ -208,7 +208,7 @@ export function ApprovalDialog({
                                                 Query plan
                                             </button>
                                             {expandedPlan === index && (
-                                                <pre className="mt-1 text-[10px] font-mono text-muted-foreground bg-muted/30 rounded px-2 py-1.5 overflow-x-auto">
+                                                <pre className="mt-1 text-[11px] font-mono text-muted-foreground bg-muted/30 rounded px-2 py-1.5 overflow-x-auto">
                                                     {preview.plan}
                                                 </pre>
                                             )}

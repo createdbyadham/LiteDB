@@ -168,33 +168,33 @@ const UploadView = () => {
   };
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center p-6 bg-gradient-to-b from-background to-background/70 animate-fade-in">
-      <Card className="w-full max-w-md mx-auto glass animate-scale-in">
+    <div className="absolute inset-0 flex items-center justify-center p-6 bg-background">
+      <Card className="w-full max-w-md mx-auto rounded-2xl bg-card animate-fade-in">
         <CardHeader className="space-y-1 text-center">
           <div className="mx-auto w-10 h-10 flex items-center justify-center">
-            <img src={icon} alt="App Icon" className="w-auto h-auto" />
+            <img src={icon} alt="LiteDB" className="w-10 h-10" />
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <Tabs defaultValue="sqlite" className="w-full">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="sqlite">SQLite</TabsTrigger>
-              <TabsTrigger value="postgres">PostgreSQL</TabsTrigger>
+              <TabsTrigger value="sqlite" className="outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0">SQLite</TabsTrigger>
+              <TabsTrigger value="postgres" className="outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0">PostgreSQL</TabsTrigger>
             </TabsList>
 
             <TabsContent value="sqlite" className="space-y-4 mt-4">
               <div
-                className={`border-2 border-dashed rounded-lg px-8 py-[40px] transition-all duration-200 ease-in-out ${isDragging
-                ? 'border-primary/80 bg-primary/5'
-                : 'border-border hover:border-primary/40 hover:bg-primary/5'
+                className={`border border-dashed rounded-xl px-8 py-10 transition-colors duration-150 ${isDragging
+                ? 'border-key/70 bg-key/5'
+                : 'border-foreground/15 hover:border-foreground/30 hover:bg-foreground/[0.02]'
                 }`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
               >
                 <div className="flex flex-col items-center justify-center space-y-3 text-center">
-                  <div className="mb-2 p-3 rounded-full bg-primary/10">
-                    <Upload className={`w-6 h-6 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <div className="mb-2 p-3 rounded-lg bg-secondary">
+                    <Upload strokeWidth={1.5} className={`w-5 h-5 ${isDragging ? 'text-key' : 'text-muted-foreground'}`} />
                   </div>
                   <div className="text-sm">
                     <span className="font-medium">Drag and drop</span> your SQLite database here
@@ -206,19 +206,19 @@ const UploadView = () => {
               </div>
 
               <Button
-                className="w-full transition-all"
+                className="w-full"
                 onClick={handleButtonClick}
                 disabled={isLoading}
               >
                 {isLoading ? (
                   <div className="flex items-center space-x-2">
                     <div className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                    <span>Loading...</span>
+                    <span>Opening</span>
                   </div>
                 ) : (
                   <div className="flex items-center space-x-2">
-                    <FileUp className="w-4 h-4" />
-                    <span>Browse Files</span>
+                    <FileUp strokeWidth={1.5} className="w-4 h-4" />
+                    <span>Browse files</span>
                   </div>
                 )}
               </Button>
@@ -231,7 +231,7 @@ const UploadView = () => {
         </CardContent>
         <CardFooter>
           <div className="text-xs text-center w-full text-muted-foreground">
-            Your data remains local and is not uploaded to any server
+            Your database stays on this machine and is never uploaded
           </div>
         </CardFooter>
       </Card>

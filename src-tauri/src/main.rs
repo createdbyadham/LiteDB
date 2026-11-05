@@ -153,7 +153,16 @@ fn pg_row_to_json(row: &PgRow) -> Map<String, Value> {
         if let Ok(v) = row.try_get::<String, _>(i) {
             json_row.insert(col_name.to_string(), Value::String(v));
         } else if let Ok(v) = row.try_get::<i64, _>(i) {
-            json_row.insert(col_name.to_string(), Value::Number(v.into()));
+            // JavaScript numbers are exact only up to 2^53 - 1. A bigint key
+            // above that used to arrive rounded, so an edit or delete aimed
+            // at it matched a neighbouring id or nothing. Send it as a string;
+            // Postgres casts the quoted literal back to bigint in a WHERE.
+            const MAX_SAFE: i64 = (1 << 53) - 1;
+            if (-MAX_SAFE..=MAX_SAFE).contains(&v) {
+                json_row.insert(col_name.to_string(), Value::Number(v.into()));
+            } else {
+                json_row.insert(col_name.to_string(), Value::String(v.to_string()));
+            }
         } else if let Ok(v) = row.try_get::<i32, _>(i) {
             json_row.insert(col_name.to_string(), Value::Number(v.into()));
         } else if let Ok(v) = row.try_get::<i16, _>(i) {

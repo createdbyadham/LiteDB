@@ -20,7 +20,7 @@ import {
   CheckCircle2,
   Download,
   Plus,
-  Sparkles,
+  Dices,
   Database
 } from 'lucide-react';
 import { VectorColumnInfo, pgService } from '@/lib/pgService';
@@ -213,9 +213,9 @@ export const MockDataGenerator = ({
       {/* Left Panel - Configuration */}
       <aside className="w-80 h-full bg-background border-r flex flex-col shrink-0">
         <div className="p-4 border-b">
-          <h2 className="font-semibold flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-primary" />
-            Mock Data Generator
+          <h2 className="font-medium flex items-center gap-2">
+            <Dices className="w-4 h-4 text-muted-foreground" />
+            Mock data
           </h2>
           <p className="text-xs text-muted-foreground mt-1">
             Generate embeddings and insert rows
@@ -261,7 +261,7 @@ export const MockDataGenerator = ({
                     <SelectItem key={model.id} value={model.id}>
                       <div className="flex items-center gap-2">
                         <span>{model.name}</span>
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-[11px]">
                           {model.dimensions}d
                         </Badge>
                       </div>
@@ -286,9 +286,9 @@ export const MockDataGenerator = ({
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span className="text-xs">Loading...</span>
+                    <span className="text-xs">Loading</span>
                   </div>
-                  <p className="text-[10px] text-muted-foreground truncate">
+                  <p className="text-[11px] text-muted-foreground truncate">
                     {modelProgress}
                   </p>
                 </div>
@@ -357,9 +357,9 @@ export const MockDataGenerator = ({
                             {isGenerating ? (
                               <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
                             ) : (
-                              <Sparkles className="w-3.5 h-3.5 mr-2" />
+                              <Dices className="w-3.5 h-3.5 mr-2" />
                             )}
-                            Generate Embedding
+                            Generate embedding
                           </Button>
 
                           {formData[col.name] && (
@@ -381,7 +381,7 @@ export const MockDataGenerator = ({
                     <div key={col.name} className="space-y-2">
                       <Label className="flex items-center gap-2">
                         {col.name}
-                        {isPk && <Badge variant="outline" className="text-[10px]">PK</Badge>}
+                        {isPk && <Badge variant="outline" className="text-[11px]">PK</Badge>}
                         <span className="text-xs text-muted-foreground font-normal">({col.type})</span>
                       </Label>
                       <Input

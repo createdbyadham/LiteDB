@@ -35,7 +35,7 @@ class ErrorBoundary extends Component<Props, State> {
             </div>
             
             <div className="space-y-2">
-              <h1 className="text-2xl font-bold tracking-tight">Something went wrong</h1>
+              <h1 className="text-2xl font-medium">Something went wrong</h1>
               <p className="text-muted-foreground">
                 The application encountered an unexpected error.
               </p>

@@ -70,7 +70,7 @@ const SimilarityBar = ({ score }: { score: number }) => {
     <div className="flex items-center gap-2 min-w-[100px]">
       <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
         <div 
-          className={cn("h-full transition-all", getColorClass())}
+          className={cn("h-full", getColorClass())}
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -215,7 +215,7 @@ export const SimilarRowsModal = ({
                       <div className="flex items-center gap-2">
                         <Box className="w-3 h-3" />
                         {col.columnName}
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-[11px]">
                           {col.dimensions}d
                         </Badge>
                       </div>

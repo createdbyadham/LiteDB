@@ -1,8 +1,6 @@
-@import '@fontsource/inter/300.css';
 @import '@fontsource/inter/400.css';
 @import '@fontsource/inter/500.css';
 @import '@fontsource/inter/600.css';
-@import '@fontsource/inter/700.css';
 
 @tailwind base;
 @tailwind components;
@@ -10,44 +8,50 @@
 
 @layer base {
   :root {
-    --background: 224 71% 4%;
-    --foreground: 213 31% 91%;
+    /* Graphite ramp. Surfaces stay neutral; colour lives in the data. */
+    --background: 240 2% 8%;        /* #141415 page */
+    --foreground: 0 0% 93%;         /* #ededed primary text */
 
-    --card: 224 71% 4%;
-    --card-foreground: 213 31% 91%;
+    --card: 240 4% 10%;             /* #19191b */
+    --card-foreground: 0 0% 93%;
 
-    --popover: 224 71% 4%;
-    --popover-foreground: 213 31% 91%;
+    --popover: 240 4% 10%;
+    --popover-foreground: 0 0% 93%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 0 0% 93%;            /* off-white primary button, dark text */
+    --primary-foreground: 240 2% 8%;
 
-    --secondary: 222.2 47.4% 11.2%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 240 3% 14%;        /* #232325 raised */
+    --secondary-foreground: 0 0% 93%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 240 3% 14%;
+    --muted-foreground: 240 3% 64%; /* #a1a1a6 secondary text */
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 240 3% 14%;           /* hover / active surface step */
+    --accent-foreground: 0 0% 93%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 358 75% 59%;     /* #e5484d */
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border: 240 3% 16%;           /* hairline, ~8% of primary text */
+    --input: 240 3% 18%;
+    --ring: 240 3% 53%;
 
-    --radius: 0.75rem;
+    /* Signature: the amber key. Primary/foreign keys and selection only. */
+    --key: 38 92% 58%;
+    --warning: 24 85% 60%;
+    --positive: 151 50% 53%;        /* #4cc38a */
 
-    --sidebar-background: 222.2 84% 4.9%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 217.2 91.2% 59.8%;
-    --sidebar-primary-foreground: 222.2 47.4% 11.2%;
-    --sidebar-accent: 217.2 32.6% 17.5%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217.2 32.6% 17.5%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --radius: 0.625rem;
+
+    --sidebar-background: 240 3% 6%; /* #0f0f10 deepest */
+    --sidebar-foreground: 0 0% 93%;
+    --sidebar-primary: 38 92% 58%;
+    --sidebar-primary-foreground: 240 2% 8%;
+    --sidebar-accent: 240 3% 14%;
+    --sidebar-accent-foreground: 0 0% 93%;
+    --sidebar-border: 240 3% 16%;
+    --sidebar-ring: 240 3% 53%;
 
     --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   }
@@ -77,17 +81,6 @@
     font-feature-settings: "ss01", "ss02", "cv01", "cv02", "cv03";
   }
 
-  .glass {
-    @apply bg-white/5 backdrop-blur-lg border border-white/10 rounded-lg shadow-lg;
-  }
-
-  .neo-glass {
-    @apply bg-black/30 backdrop-blur-xl border border-white/5 rounded-lg shadow-xl;
-  }
-
-  .text-gradient {
-    @apply bg-gradient-to-br from-white via-white/90 to-white/70 bg-clip-text text-transparent;
-  }
 
   /* Make the title bar draggable */
   .app-drag-handle {
@@ -114,22 +107,21 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: hsl(var(--muted));
-  border-radius: 4px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground));
+  background: hsl(var(--foreground) / 0.12);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--primary));
+  background: hsl(var(--foreground) / 0.24);
 }
 
 /* Corner where scrollbars meet */
 ::-webkit-scrollbar-corner {
-  background: hsl(var(--muted));
+  background: transparent;
 }
 
 /* React Flow Custom Styles */
@@ -152,7 +144,6 @@
   background: hsl(var(--card)) !important;
   border: 1px solid hsl(var(--border)) !important;
   border-radius: 8px !important;
-  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1) !important;
 }
 
 .react-flow__controls-button {
@@ -175,17 +166,17 @@
 }
 
 .react-flow__edge-path {
-  stroke: #ffffff !important;
-  stroke-width: 2px !important;
+  stroke: hsl(var(--muted-foreground) / 0.6) !important;
+  stroke-width: 1.5px !important;
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #fbbf24 !important;
-  stroke-width: 3px !important;
+  stroke: hsl(var(--key)) !important;
+  stroke-width: 2px !important;
 }
 
 .react-flow__edge-text {
-  fill: #ffffff !important;
+  fill: hsl(var(--muted-foreground)) !important;
 }
 
 .react-flow__edge-textbg {
@@ -214,21 +205,6 @@
   cursor: grabbing !important;
 }
 
-/* Animation for edges */
-.react-flow__edge.animated path {
-  stroke-dasharray: 5 !important;
-  animation: dashdraw 0.5s linear infinite !important;
-}
-
-@keyframes dashdraw {
-  from {
-    stroke-dashoffset: 10;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
 /* Attribution hiding */
 .react-flow__attribution {
   display: none !important;
@@ -236,8 +212,8 @@
 
 /* Sidebar animation utilities */
 .sidebar-transition {
-  transition-property: width, opacity, transform;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-property: opacity, transform;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
   transition-duration: 200ms;
 }
 

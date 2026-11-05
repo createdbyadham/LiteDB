@@ -1,7 +1,10 @@
 // This service handles SQLite database operations
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
-import { assertIdent } from '@/lib/types';
+import { quoteIdent, primaryKeyColumns, escapeLike, ROW_LOCATOR } from '@/lib/types';
+import type { TableQuery, TablePage } from '@/lib/types';
+import { csvRow, rowsToJson } from '@/lib/exportFormat';
+import { buildXlsx } from '@/lib/xlsx';
 import { assertWritable, ReadOnlyConnectionError } from '@/lib/queryGate';
 import { classifyStatement } from '@/lib/sqlClassifier';
 import { saveWouldClobber, type DiskAlert, type DiskSnapshot } from '@/lib/diskGuard';
@@ -14,7 +17,7 @@ interface SqlJs {
 }
 
 interface Database {
-    exec(sql: string): QueryResults[];
+    exec(sql: string, params?: (string | number | null)[]): QueryResults[];
     close(): void;
     export(): Uint8Array;
     /** Rows changed by the most recent statement. sql.js wraps sqlite3_changes. */
@@ -205,7 +208,7 @@ class SqliteService {
 
         try {
             const tables = this.db.exec(
-                "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                "SELECT name, sql, type FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name"
             );
 
             if (tables.length === 0 || !tables[0].values) {
@@ -214,7 +217,8 @@ class SqliteService {
 
             this.currentTables = tables[0].values.map((row) => ({
                 name: row[0] as string,
-                sql: row[1] as string
+                sql: row[1] as string,
+                type: row[2] === 'view' ? 'view' as const : 'table' as const
             }));
 
             return this.currentTables;
@@ -235,8 +239,7 @@ class SqliteService {
         }
 
         try {
-            assertIdent(tableName, 'table');
-            const pragmaResult = this.db.exec(`PRAGMA table_info('${tableName}')`);
+            const pragmaResult = this.db.exec(`PRAGMA table_info(${quoteIdent(tableName, 'table')})`);
 
             if (pragmaResult.length === 0 || !pragmaResult[0].values) {
                 return [];
@@ -266,8 +269,7 @@ class SqliteService {
         }
 
         try {
-            assertIdent(tableName, 'table');
-            const pragmaResult = this.db.exec(`PRAGMA foreign_key_list('${tableName}')`);
+            const pragmaResult = this.db.exec(`PRAGMA foreign_key_list(${quoteIdent(tableName, 'table')})`);
 
             if (pragmaResult.length === 0 || !pragmaResult[0].values) {
                 return [];
@@ -295,8 +297,7 @@ class SqliteService {
         }
 
         try {
-            assertIdent(tableName, 'table');
-            const indexListResult = this.db.exec(`PRAGMA index_list('${tableName}')`);
+            const indexListResult = this.db.exec(`PRAGMA index_list(${quoteIdent(tableName, 'table')})`);
 
             if (indexListResult.length === 0 || !indexListResult[0].values) {
                 return [];
@@ -309,7 +310,7 @@ class SqliteService {
                 const unique = row[2] === 1;
 
                 // Get columns for this index
-                const indexInfoResult = this.db.exec(`PRAGMA index_info('${indexName}')`);
+                const indexInfoResult = this.db.exec(`PRAGMA index_info(${quoteIdent(indexName)})`);
                 const columns: string[] = [];
 
                 if (indexInfoResult.length > 0 && indexInfoResult[0].values) {
@@ -352,21 +353,86 @@ class SqliteService {
         };
     }
 
+    /**
+     * One page of a table with the search and sort applied in SQL, plus the
+     * matching row count. The grid used to load the first 1000 rows and page,
+     * search and sort only those, so anything past row 1000 was unreachable.
+     */
+    queryTable(tableName: string, q: TableQuery): TablePage {
+        if (!this.db) return { columns: [], rows: [], total: 0 };
+
+        try {
+            const columnInfo = this.getTableColumns(tableName);
+            const columnNames = columnInfo.map(col => col.name);
+            if (columnNames.length === 0) return { columns: [], rows: [], total: 0 };
+            const from = quoteIdent(tableName, 'table');
+            const readOnly = this.isView(tableName);
+            // No primary key: carry the rowid so single rows can still be addressed.
+            const useRowid = !readOnly && primaryKeyColumns(columnInfo).length === 0 && this.hasRowid(tableName);
+
+            const params: string[] = [];
+            let where = '';
+            const search = q.search?.trim();
+            if (search) {
+                const pattern = `%${escapeLike(search)}%`;
+                where = ' WHERE ' + columnNames
+                    .map(name => {
+                        params.push(pattern);
+                        return `CAST(${quoteIdent(name, 'column')} AS TEXT) LIKE ? ESCAPE '\\'`;
+                    })
+                    .join(' OR ');
+            }
+
+            let order = '';
+            if (q.sortColumn && columnNames.includes(q.sortColumn)) {
+                order = ` ORDER BY ${quoteIdent(q.sortColumn, 'column')} ${q.sortDirection === 'desc' ? 'DESC' : 'ASC'}`;
+            }
+
+            const countResult = this.db.exec(`SELECT COUNT(*) FROM ${from}${where}`, params);
+            const total = Number(countResult[0]?.values?.[0]?.[0] ?? 0);
+
+            const limit = Math.max(1, Math.trunc(q.limit));
+            const offset = Math.max(0, Math.trunc(q.offset));
+            const result = this.db.exec(
+                `SELECT ${columnNames.map(name => quoteIdent(name, 'column')).join(', ')}${useRowid ? `, rowid AS ${quoteIdent(ROW_LOCATOR)}` : ''} FROM ${from}${where}${order} LIMIT ${limit} OFFSET ${offset}`,
+                params,
+            );
+
+            const rows = (result[0]?.values ?? []).map(row => {
+                const rowData: RowData = {};
+                columnNames.forEach((colName, index) => {
+                    rowData[colName] = row[index];
+                });
+                if (useRowid) rowData[ROW_LOCATOR] = row[columnNames.length];
+                return rowData;
+            });
+
+            return { columns: columnNames, rows, total, readOnly, rowLocator: useRowid ? ROW_LOCATOR : undefined };
+        } catch (error) {
+            console.error(`Error querying ${tableName}:`, error);
+            toast({
+                title: "Error",
+                description: `Failed to retrieve data for table ${tableName}`,
+                variant: "destructive"
+            });
+            return { columns: [], rows: [], total: 0 };
+        }
+    }
+
     getTableData(tableName: string, limit = 1000, offset = 0): { columns: string[], rows: RowData[] } {
         if (!this.db) {
             return { columns: [], rows: [] };
         }
 
         try {
-            assertIdent(tableName, 'table');
             // First get the column information
             const columns = this.getTableColumns(tableName);
             const columnNames = columns.map(col => col.name);
-            columnNames.forEach(n => assertIdent(n, 'column'));
 
-            // Execute the query with proper column names
+            // Execute the query with proper column names. A negative limit
+            // means every row (SQLite treats LIMIT -1 as no limit).
             const result = this.db.exec(
-                `SELECT ${columnNames.map(name => `\`${name}\``).join(', ')} FROM \`${tableName}\` LIMIT ${limit} OFFSET ${offset}`
+                `SELECT ${columnNames.map(name => quoteIdent(name, 'column')).join(', ')} FROM ${quoteIdent(tableName, 'table')} LIMIT ${Math.trunc(limit)} OFFSET ${Math.max(0, Math.trunc(offset))}`
             );
 
             if (result.length === 0 || !result[0].values) {
@@ -741,72 +807,142 @@ class SqliteService {
         }
     }
 
+    /** SQL literal for a cell value, matching how sql.js hands values back. */
+    private sqlValue(v: unknown): string {
+        if (v === null || v === undefined) return 'NULL';
+        if (typeof v === 'number' && Number.isFinite(v)) return v.toString();
+        if (typeof v === 'bigint') return v.toString();
+        if (typeof v === 'boolean') return v ? '1' : '0';
+        if (v instanceof Uint8Array) {
+            return `X'${Array.from(v, b => b.toString(16).padStart(2, '0')).join('')}'`;
+        }
+        return `'${String(v).replace(/'/g, "''")}'`;
+    }
+
+    /**
+     * WHERE clause naming exactly one row by its whole primary key.
+     *
+     * Edits and deletes used only the first key column, so on a table keyed by
+     * (EmployeeID, TerritoryID) editing one row rewrote every row that shared
+     * its EmployeeID.
+     */
+    private keyWhere(keyColumns: ColumnInfo[], row: RowData): string {
+        if (keyColumns.length === 0) {
+            const rowid = row[ROW_LOCATOR];
+            if (typeof rowid !== 'number') {
+                throw new Error('This table has no primary key or rowid, so a single row cannot be addressed. Use the SQL editor');
+            }
+            return `rowid = ${rowid}`;
+        }
+        return keyColumns
+            .map(col => {
+                const value = row[col.name];
+                if (value === undefined) throw new Error(`Row is missing its key column ${col.name}`);
+                return value === null
+                    ? `${quoteIdent(col.name, 'column')} IS NULL`
+                    : `${quoteIdent(col.name, 'column')} = ${this.sqlValue(value)}`;
+            })
+            .join(' AND ');
+    }
+
+    private isView(tableName: string): boolean {
+        return this.currentTables.some(t => t.name === tableName && t.type === 'view');
+    }
+
+    /** False for WITHOUT ROWID tables, which always have a primary key anyway. */
+    private hasRowid(tableName: string): boolean {
+        try {
+            this.db?.exec(`SELECT rowid FROM ${quoteIdent(tableName, 'table')} LIMIT 0`);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    private assertTableWritable(tableName: string): void {
+        if (this.isView(tableName)) throw new Error(`${tableName} is a view, so it is read-only`);
+    }
+
+    private autoSave(message: string): void {
+        if (!this.currentFilePath) return;
+        this.dirty = true;
+        void this.saveToDisk().then(success => {
+            if (success) {
+                toast({ title: "Saved", description: message });
+            }
+        });
+    }
+
+    private reportWriteError(error: unknown, fallback: string): void {
+        console.error(fallback, error);
+        // A refusal is not a malfunction, and silently returning false leaves
+        // the user watching their edit revert with no explanation.
+        toast({
+            title: error instanceof ReadOnlyConnectionError ? "Read-only connection" : fallback,
+            description: error instanceof Error ? error.message : String(error),
+            variant: "destructive"
+        });
+    }
+
     updateRow(tableName: string, oldRow: RowData, newRow: RowData): boolean {
         if (!this.db) return false;
 
         try {
             assertWritable(`the edit to ${tableName}`);
-            assertIdent(tableName, 'table');
-            // Get primary key column
-            const primaryKeyColumn = this.getTableColumns(tableName).find(col => col.pk === 1);
-            if (!primaryKeyColumn) {
-                throw new Error('Table has no primary key');
-            }
-
-            const escapeValue = (v: unknown): string => {
-                if (v === null || v === undefined) return 'NULL';
-                if (typeof v === 'number' && Number.isFinite(v)) return v.toString();
-                if (typeof v === 'boolean') return v ? '1' : '0';
-                return `'${String(v).replace(/'/g, "''")}'`;
-            };
+            this.assertTableWritable(tableName);
+            const keyColumns = primaryKeyColumns(this.getTableColumns(tableName));
 
             // Only what the edit changed. The grid now refreshes under an open
             // edit when an agent writes, and writing back every column from
             // the dialog's copy would quietly revert the agent's other ones.
             const changed = Object.entries(newRow).filter(
-                ([column, value]) => column !== primaryKeyColumn.name && value !== oldRow[column],
+                ([column, value]) => column !== ROW_LOCATOR && value !== oldRow[column],
             );
             if (changed.length === 0) return true;
 
             const setClause = changed
-                .map(([column, value]) => {
-                    assertIdent(column, 'column');
-                    return `\`${column}\` = ${escapeValue(value)}`;
-                })
+                .map(([column, value]) => `${quoteIdent(column, 'column')} = ${this.sqlValue(value)}`)
                 .join(', ');
 
-            assertIdent(primaryKeyColumn.name, 'column');
-            const whereClause = `\`${primaryKeyColumn.name}\` = ${escapeValue(oldRow[primaryKeyColumn.name])}`;
-
-            const sql = `UPDATE \`${tableName}\` SET ${setClause} WHERE ${whereClause}`;
-            this.db.exec(sql);
-
-            // Auto-save
-            if (this.currentFilePath) {
-                this.dirty = true;
-                void this.saveToDisk().then(success => {
-                    if (success) {
-                        toast({
-                            title: "Success",
-                            description: "Changes saved to database file"
-                        });
-                    }
-                });
+            this.db.exec(`UPDATE ${quoteIdent(tableName, 'table')} SET ${setClause} WHERE ${this.keyWhere(keyColumns, oldRow)}`);
+            if (this.db.getRowsModified() === 0) {
+                throw new Error('The row no longer exists. It may have been changed or deleted elsewhere');
             }
 
+            this.autoSave('Row saved to the database file');
             return true;
         } catch (error) {
-            console.error('Error updating row:', error);
-            // A refusal is not a malfunction, and silently returning false
-            // leaves the user watching their edit revert with no explanation.
-            // Say which rule stopped it.
-            if (error instanceof ReadOnlyConnectionError) {
-                toast({
-                    title: "Read-only connection",
-                    description: error.message,
-                    variant: "destructive"
-                });
+            this.reportWriteError(error, 'Row not updated');
+            return false;
+        }
+    }
+
+    /** Delete the given rows, each named by its whole primary key. */
+    deleteRows(tableName: string, rows: RowData[]): boolean {
+        if (!this.db) return false;
+        if (rows.length === 0) return true;
+
+        try {
+            assertWritable(`the row deletion from ${tableName}`);
+            this.assertTableWritable(tableName);
+            const keyColumns = primaryKeyColumns(this.getTableColumns(tableName));
+
+            const table = quoteIdent(tableName, 'table');
+            this.db.exec('BEGIN');
+            try {
+                for (const row of rows) {
+                    this.db.exec(`DELETE FROM ${table} WHERE ${this.keyWhere(keyColumns, row)}`);
+                }
+                this.db.exec('COMMIT');
+            } catch (error) {
+                this.db.exec('ROLLBACK');
+                throw error;
             }
+
+            this.autoSave(`${rows.length} ${rows.length === 1 ? 'row' : 'rows'} deleted`);
+            return true;
+        } catch (error) {
+            this.reportWriteError(error, 'Rows not deleted');
             return false;
         }
     }
@@ -820,7 +956,16 @@ class SqliteService {
     }
 
     // Export database to different formats
-    exportToFormat(format: 'csv' | 'json' | 'xlsx'): string | null {
+    /** Every table and view as one worksheet each, with every row. */
+    exportToXlsx(): Uint8Array | null {
+        if (!this.db) return null;
+        return buildXlsx(this.getTables().map(table => {
+            const data = this.getTableData(table.name, -1);
+            return { name: table.name, columns: data.columns, rows: data.rows };
+        }));
+    }
+
+    exportToFormat(format: 'csv' | 'json'): string | null {
         if (!this.db) return null;
 
         // Get all tables
@@ -831,8 +976,9 @@ class SqliteService {
             const result: Record<string, RowData[]> = {};
 
             for (const table of tables) {
-                const data = this.getTableData(table.name);
-                result[table.name] = data.rows;
+                // -1: every row. The default page size (1000) silently cut exports short.
+                const data = this.getTableData(table.name, -1);
+                result[table.name] = rowsToJson(data.rows);
             }
 
             return JSON.stringify(result, null, 2);
@@ -843,29 +989,17 @@ class SqliteService {
             let result = '';
 
             for (const table of tables) {
-                const data = this.getTableData(table.name);
+                const data = this.getTableData(table.name, -1);
 
                 // Add table name as header
                 result += `Table: ${table.name}\n`;
 
                 // Add column headers
-                result += data.columns.join(',') + '\n';
+                result += csvRow(data.columns) + '\n';
 
                 // Add rows
                 for (const row of data.rows) {
-                    const values = data.columns.map(col => {
-                        const value = row[col];
-                        if (value === null) return '';
-                        if (typeof value === 'string') {
-                            // Escape quotes and wrap in quotes if contains comma
-                            if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-                                return `"${value.replace(/"/g, '""')}"`;
-                            }
-                            return value;
-                        }
-                        return String(value);
-                    });
-                    result += values.join(',') + '\n';
+                    result += csvRow(data.columns.map(col => row[col])) + '\n';
                 }
 
                 // Add separator between tables
@@ -873,22 +1007,6 @@ class SqliteService {
             }
 
             return result;
-        }
-
-        if (format === 'xlsx') {
-            // For Excel, we'll return a JSON representation that the frontend can convert
-            // using a library like xlsx or exceljs
-            const result: Record<string, { columns: string[]; rows: RowData[] }> = {};
-
-            for (const table of tables) {
-                const data = this.getTableData(table.name);
-                result[table.name] = {
-                    columns: data.columns,
-                    rows: data.rows
-                };
-            }
-
-            return JSON.stringify(result);
         }
 
         return null;

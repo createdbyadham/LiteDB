@@ -19,8 +19,8 @@ import type { StatementKind } from '@/lib/sqlClassifier';
 const KIND_STYLE: Record<StatementKind, string> = {
     read: 'bg-muted text-muted-foreground',
     session: 'bg-muted text-muted-foreground',
-    ddl: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
-    write: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+    ddl: 'bg-secondary text-foreground',
+    write: 'bg-warning/15 text-warning',
     destructive: 'bg-destructive/15 text-destructive',
     unknown: 'bg-destructive/15 text-destructive',
 };
@@ -93,7 +93,7 @@ export function AuditLogView() {
                                     {entry.provenance === 'ai' ? (
                                         <Badge
                                             variant="outline"
-                                            className="text-[10px] gap-1 border-0 bg-violet-500/15 text-violet-600 dark:text-violet-400"
+                                            className="text-[11px] font-normal gap-1 border-0 bg-secondary text-foreground"
                                         >
                                             <Bot className="h-3 w-3" />
                                             {entry.model ?? 'model'}
@@ -101,7 +101,7 @@ export function AuditLogView() {
                                     ) : (
                                         <Badge
                                             variant="outline"
-                                            className="text-[10px] gap-1 border-0 bg-muted text-muted-foreground"
+                                            className="text-[11px] font-normal gap-1 border-0 bg-muted text-muted-foreground"
                                         >
                                             <User className="h-3 w-3" />
                                             you
@@ -109,7 +109,7 @@ export function AuditLogView() {
                                     )}
                                     <Badge
                                         variant="outline"
-                                        className={`text-[10px] uppercase tracking-wide border-0 ${KIND_STYLE[entry.kind]}`}
+                                        className={`font-mono text-[11px] font-normal border-0 ${KIND_STYLE[entry.kind]}`}
                                     >
                                         {entry.kind}
                                     </Badge>
@@ -122,7 +122,7 @@ export function AuditLogView() {
                                 </div>
 
                                 {entry.prompt && (
-                                    <p className="text-[11px] text-muted-foreground italic">
+                                    <p className="text-[11px] text-muted-foreground">
                                         &ldquo;{entry.prompt}&rdquo;
                                     </p>
                                 )}

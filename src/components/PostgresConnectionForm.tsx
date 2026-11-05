@@ -139,7 +139,7 @@ export default function PostgresConnectionForm({ onConnectionSuccess }: Postgres
           </div>
           <div className="flex items-center gap-2 pt-1">
             <div className="h-px flex-1 bg-border" />
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               or connect to a new one
             </span>
             <div className="h-px flex-1 bg-border" />

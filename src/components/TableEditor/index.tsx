@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { ArrowUpDown, Search, Info, Database, ChevronLeft, ChevronRight, ScanSearch, KeyRound } from 'lucide-react';
 import { ColumnInfo, RowData } from '@/lib/sqliteService';
+import { primaryKeyColumns, type TableQuery } from '@/lib/types';
 import { VectorColumnInfo } from '@/lib/pgService';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
@@ -25,103 +25,86 @@ interface TableViewProps {
   tableName: string;
   columns: string[];
   columnInfo: ColumnInfo[];
+  /** The current page only. Paging, search and sort run in SQL. */
   rows: RowData[];
+  /** Rows matching the search across every page. */
+  totalRows: number;
+  query: TableQuery;
+  onQueryChange: (query: TableQuery) => void;
+  /** Hidden column that addresses rows when the table has no primary key. */
+  rowLocator?: string;
+  /** Views: rows can be read, not edited or deleted. */
+  readOnly?: boolean;
   onUpdateRow?: (oldRow: RowData, newRow: RowData) => Promise<boolean>;
+  onDeleteRows?: (rows: RowData[]) => Promise<boolean>;
   // Vector support
   vectorColumns?: VectorColumnInfo[];
   onInspectVector?: (value: unknown, columnName: string, rowId?: string | number, tableName?: string) => void;
   onFindSimilar?: (row: RowData) => void;
 }
 
-const TableEditor = ({ 
-  tableName, 
-  columns, 
-  columnInfo, 
-  rows, 
+/** True while focus is in something you type into, where Delete edits text. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+}
+
+const TableEditor = ({
+  tableName,
+  columns,
+  columnInfo,
+  rows,
+  totalRows,
+  query,
+  onQueryChange,
+  rowLocator,
+  readOnly = false,
   onUpdateRow,
+  onDeleteRows,
   vectorColumns = [],
   onInspectVector,
   onFindSimilar
 }: TableViewProps) => {
-  const [filteredRows, setFilteredRows] = useState<RowData[]>([]);
-  const [sortColumn, setSortColumn] = useState<string | null>(null);
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [searchInput, setSearchInput] = useState(query.search ?? '');
   const [editingRow, setEditingRow] = useState<RowData | null>(null);
-  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  /** Selected rows by key, kept across pages so a delete can span them. */
+  const [selectedRows, setSelectedRows] = useState<Map<string, RowData>>(new Map());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const rowsPerPage = 100;
 
-  // Reset state when table changes
+  const sortColumn = query.sortColumn ?? null;
+  const sortDirection = query.sortDirection ?? 'asc';
+  const currentPage = Math.floor(query.offset / query.limit) + 1;
+  const totalPages = Math.max(1, Math.ceil(totalRows / query.limit));
+  const paginatedRows = rows;
+
+  // Search runs a query per keystroke otherwise; wait for a short pause.
   useEffect(() => {
-    setFilteredRows([]);
-    setSortColumn(null);
-    setSortDirection('asc');
-    setSearchQuery('');
-    setCurrentPage(1);
-  }, [tableName]);
-
-  // Update filtered rows when data changes
-  useEffect(() => {
-    let result = [...rows];
-
-    // Apply search filter
-    if (searchQuery) {
-      const lowerQuery = searchQuery.toLowerCase();
-      result = result.filter(row =>
-        Object.entries(row).some(([_, value]) =>
-          String(value).toLowerCase().includes(lowerQuery)
-        )
-      );
-    }
-
-    // Apply sorting
-    if (sortColumn) {
-      result.sort((a, b) => {
-        const valueA = a[sortColumn];
-        const valueB = b[sortColumn];
-
-        // Handle null values
-        if (valueA === null && valueB === null) return 0;
-        if (valueA === null) return sortDirection === 'asc' ? -1 : 1;
-        if (valueB === null) return sortDirection === 'asc' ? 1 : -1;
-
-        // Check if values are numbers
-        const numA = Number(valueA);
-        const numB = Number(valueB);
-
-        if (!isNaN(numA) && !isNaN(numB)) {
-          return sortDirection === 'asc' ? numA - numB : numB - numA;
-        }
-
-        // Otherwise sort as strings
-        const strA = String(valueA);
-        const strB = String(valueB);
-
-        return sortDirection === 'asc'
-          ? strA.localeCompare(strB)
-          : strB.localeCompare(strA);
-      });
-    }
-
-    setFilteredRows(result);
-  }, [rows, searchQuery, sortColumn, sortDirection]);
+    if (searchInput === (query.search ?? '')) return;
+    const timer = setTimeout(() => {
+      onQueryChange({ ...query, search: searchInput, offset: 0 });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchInput, query, onQueryChange]);
 
   const handleSort = (column: string) => {
-    if (sortColumn === column) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
+    const direction = sortColumn === column && sortDirection === 'asc' ? 'desc' : 'asc';
+    onQueryChange({ ...query, sortColumn: column, sortDirection: direction, offset: 0 });
   };
 
-  const totalPages = Math.ceil(filteredRows.length / rowsPerPage);
-  const paginatedRows = filteredRows.slice(
-    (currentPage - 1) * rowsPerPage,
-    currentPage * rowsPerPage
+  const goToPage = (page: number) => {
+    const clamped = Math.min(Math.max(page, 1), totalPages);
+    onQueryChange({ ...query, offset: (clamped - 1) * query.limit });
+  };
+
+  // Every key column, so tables keyed by two columns address one row.
+  const keyColumns = useMemo(() => primaryKeyColumns(columnInfo), [columnInfo]);
+  const rowKey = useCallback(
+    (row: RowData) => keyColumns.length > 0
+      ? JSON.stringify(keyColumns.map(col => row[col.name] ?? null))
+      : JSON.stringify(rowLocator ? row[rowLocator] ?? null : null),
+    [keyColumns, rowLocator],
   );
+  const canAddressRows = !readOnly && (keyColumns.length > 0 || !!rowLocator);
 
   // Map column names to their info
   const columnInfoMap = columnInfo.reduce((acc, info) => {
@@ -129,8 +112,8 @@ const TableEditor = ({
     return acc;
   }, {} as Record<string, ColumnInfo>);
 
-  // Get the primary key column (if any)
-  const primaryKeyColumn = columnInfo.find(col => col.pk === 1)?.name;
+  // First key column, for the vector tools that take a single row id.
+  const primaryKeyColumn = keyColumns[0]?.name;
 
   // Check if a column is a vector column
   const getVectorColumnInfo = (columnName: string): VectorColumnInfo | undefined => {
@@ -171,16 +154,16 @@ const TableEditor = ({
     const badges = [];
 
     if (info.pk) {
-      badges.push(<Badge key="pk" variant="destructive" className="ml-1">PK</Badge>);
+      badges.push(<span key="pk" className="ml-2 inline-flex items-center gap-1 text-key"><KeyRound className="h-3 w-3" />primary key</span>);
     }
 
     if (info.notnull) {
-      badges.push(<Badge key="nn" variant="outline" className="ml-1">NOT NULL</Badge>);
+      badges.push(<span key="nn" className="ml-2 text-muted-foreground">not null</span>);
     }
 
     return (
       <div className="flex items-center text-xs">
-        <span className="text-muted-foreground">{label}</span>
+        <span className="font-mono text-muted-foreground">{label}</span>
         {badges}
       </div>
     );
@@ -188,14 +171,25 @@ const TableEditor = ({
 
   const handleRowDoubleClick = (row: RowData) => {
     if (!onUpdateRow) return;
+    if (!canAddressRows) {
+      toast({
+        title: "Row can't be edited here",
+        description: readOnly
+          ? `${tableName} is a view, so it is read-only`
+          : "This table has no primary key, so a single row cannot be addressed. Use the SQL editor",
+      });
+      return;
+    }
     // Create a copy of the row data to avoid reference issues
     setEditingRow({ ...row });
   };
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Delete' && selectedRows.size > 0) {
-      setShowDeleteDialog(true);
-    }
+    // Delete in the search box, a dialog or the SQL editor edits text; it must
+    // not offer to delete the rows that happen to be ticked.
+    if (e.key !== 'Delete' || selectedRows.size === 0) return;
+    if (isTypingTarget(e.target) || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+    setShowDeleteDialog(true);
   }, [selectedRows]);
 
   useEffect(() => {
@@ -203,32 +197,33 @@ const TableEditor = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  const toggleRow = (row: RowData, checked: boolean) => {
+    setSelectedRows(prev => {
+      const next = new Map(prev);
+      if (checked) next.set(rowKey(row), row);
+      else next.delete(rowKey(row));
+      return next;
+    });
+  };
+
   const handleDeleteRows = async () => {
     try {
-      if (!primaryKeyColumn) {
-        throw new Error("No primary key found for this table");
+      if (!canAddressRows) {
+        throw new Error("This table has no primary key, so rows cannot be addressed. Use the SQL editor");
       }
-
-      const rowIds = Array.from(selectedRows);
-      const success = await onUpdateRow?.(null as unknown as RowData, { type: 'delete', rowIds, primaryKeyColumn });
-
+      const count = selectedRows.size;
+      const success = await onDeleteRows?.(Array.from(selectedRows.values()));
       if (success) {
-        // Update the UI state
-        const newRows = filteredRows.filter(row => {
-          const rowId = String(row[primaryKeyColumn]);
-          return !selectedRows.has(rowId);
-        });
-        setFilteredRows(newRows);
-        setSelectedRows(new Set());
+        setSelectedRows(new Map());
         toast({
-          title: "Success",
-          description: `${selectedRows.size} row(s) deleted successfully`,
+          title: "Deleted",
+          description: `${count.toLocaleString()} ${count === 1 ? 'row' : 'rows'} deleted`,
         });
       }
     } catch (error) {
       console.error('Delete error:', error);
       toast({
-        title: "Error",
+        title: "Rows not deleted",
         description: error instanceof Error ? error.message : "Failed to delete rows",
         variant: "destructive"
       });
@@ -239,31 +234,9 @@ const TableEditor = ({
 
   const handleRowUpdate = async (updatedRow: RowData) => {
     if (!editingRow || !onUpdateRow) return;
-
     try {
-      const success = await onUpdateRow(editingRow, updatedRow);
-      if (success) {
-        toast({
-          title: "Success",
-          description: "Row updated successfully",
-        });
-        // Update the local state
-        setFilteredRows(prev =>
-          prev.map(row => {
-            const primaryKey = columnInfo.find(col => col.pk === 1)?.name;
-            if (primaryKey && row[primaryKey] === editingRow[primaryKey]) {
-              return updatedRow;
-            }
-            return row;
-          })
-        );
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update row",
-        variant: "destructive"
-      });
+      // The parent re-reads the page after a successful write.
+      await onUpdateRow(editingRow, updatedRow);
     } finally {
       setEditingRow(null);
     }
@@ -271,23 +244,24 @@ const TableEditor = ({
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
-      <div className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center justify-between px-4 h-[52px]">
+      <div className="sticky top-0 z-40 border-b bg-background">
+        <div className="flex items-center justify-between px-4 h-12">
           <div className="flex items-center space-x-2">
-            <Database className="h-4 w-4 text-primary/80" />
-            <h1 className="text-sm font-semibold tracking-tight">{tableName}</h1>
-            <Badge variant="outline" className="ml-2 text-xs font-normal">
-              {filteredRows.length} {filteredRows.length === 1 ? 'row' : 'rows'}
-            </Badge>
+            <Database strokeWidth={1.5} className="h-4 w-4 text-muted-foreground" />
+            <h1 className="text-sm font-medium">{tableName}</h1>
+            {readOnly && <span className="text-xs text-muted-foreground">view · read-only</span>}
+            <span className="ml-2 font-mono text-xs text-muted-foreground tabular-nums">
+              {totalRows.toLocaleString()} {totalRows === 1 ? 'row' : 'rows'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
             <div className="relative w-64">
               <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search table..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search rows"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-8 h-8 text-xs"
               />
             </div>
@@ -303,21 +277,9 @@ const TableEditor = ({
                 <TableHead className="w-[40px] px-4 sticky top-0 bg-background z-40">
                   <div className="flex items-center h-full ml-2">
                     <Checkbox
-                      checked={paginatedRows.length > 0 && paginatedRows.every(row =>
-                        selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))
-                      )}
-                      onCheckedChange={(checked) => {
-                        const newSelected = new Set(selectedRows);
-                        paginatedRows.forEach(row => {
-                          const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
-                          if (checked) {
-                            newSelected.add(rowId);
-                          } else {
-                            newSelected.delete(rowId);
-                          }
-                        });
-                        setSelectedRows(newSelected);
-                      }}
+                      disabled={!canAddressRows}
+                      checked={canAddressRows && paginatedRows.length > 0 && paginatedRows.every(row => selectedRows.has(rowKey(row)))}
+                      onCheckedChange={(checked) => paginatedRows.forEach(row => toggleRow(row, checked === true))}
                       className="translate-y-[2px]"
                     />
                   </div>
@@ -329,8 +291,11 @@ const TableEditor = ({
                         variant="ghost"
                         size="sm"
                         onClick={() => handleSort(column)}
-                        className="h-8 px-2 text-left font-medium"
+                        className="h-8 px-2 text-left font-medium text-muted-foreground hover:text-foreground"
                       >
+                        {columnInfoMap[column]?.pk ? (
+                          <KeyRound className="mr-1.5 h-3.5 w-3.5 text-key" aria-label="Primary key" />
+                        ) : null}
                         {column}
                         {sortColumn === column && (
                           <ArrowUpDown
@@ -362,7 +327,7 @@ const TableEditor = ({
             <TableBody>
               {paginatedRows.length > 0 ? (
                 paginatedRows.map((row, rowIndex) => (
-                  <ContextMenu key={primaryKeyColumn && row[primaryKeyColumn] ? String(row[primaryKeyColumn]) : rowIndex}>
+                  <ContextMenu key={canAddressRows ? rowKey(row) : rowIndex}>
                     <ContextMenuTrigger asChild>
                       <TableRow
                         className="hover:bg-muted/30 cursor-pointer"
@@ -371,22 +336,14 @@ const TableEditor = ({
                         <TableCell className="px-4 py-2">
                           <div className="flex items-center h-full ml-2">
                             <Checkbox
-                              checked={selectedRows.has(primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row))}
-                              onCheckedChange={(checked) => {
-                                const newSelected = new Set(selectedRows);
-                                const rowId = primaryKeyColumn ? String(row[primaryKeyColumn]) : String(row);
-                                if (checked) {
-                                  newSelected.add(rowId);
-                                } else {
-                                  newSelected.delete(rowId);
-                                }
-                                setSelectedRows(newSelected);
-                              }}
+                              disabled={!canAddressRows}
+                              checked={selectedRows.has(rowKey(row))}
+                              onCheckedChange={(checked) => toggleRow(row, checked === true)}
                             />
                           </div>
                         </TableCell>
                         {columns.map((column) => (
-                          <TableCell key={column} className="whitespace-nowrap pl-[24px]">
+                          <TableCell key={column} className="whitespace-nowrap pl-6 tabular-nums">
                             {formatCellValue(row[column], column, row)}
                           </TableCell>
                         ))}
@@ -394,14 +351,14 @@ const TableEditor = ({
                     </ContextMenuTrigger>
                     <ContextMenuContent>
                       <ContextMenuItem onClick={() => handleRowDoubleClick(row)}>
-                        Edit Row
+                        Edit row
                       </ContextMenuItem>
                       {hasVectorColumns && onFindSimilar && (
                         <>
                           <ContextMenuSeparator />
                           <ContextMenuItem onClick={() => onFindSimilar(row)}>
-                            <Sparkles className="w-4 h-4 mr-2" />
-                            Find Similar Rows
+                            <ScanSearch className="w-4 h-4 mr-2" />
+                            Find similar rows
                           </ContextMenuItem>
                         </>
                       )}
@@ -426,15 +383,18 @@ const TableEditor = ({
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-4 py-2 border-t bg-background">
           <div className="text-sm text-muted-foreground">
-            Page {currentPage} of {totalPages}
+            <span className="tabular-nums">
+              {totalRows === 0 ? 0 : (query.offset + 1).toLocaleString()}–{Math.min(query.offset + query.limit, totalRows).toLocaleString()} of {totalRows.toLocaleString()}
+            </span>
+            <span className="ml-3 text-muted-foreground/70 tabular-nums">Page {currentPage.toLocaleString()} of {totalPages.toLocaleString()}</span>
           </div>
 
           <div className="flex items-center space-x-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage <= 1}
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
@@ -442,8 +402,8 @@ const TableEditor = ({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={currentPage >= totalPages}
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
@@ -463,9 +423,9 @@ const TableEditor = ({
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogTitle>Delete {selectedRows.size.toLocaleString()} {selectedRows.size === 1 ? 'row' : 'rows'}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action will delete {selectedRows.size} selected row(s). This action cannot be undone.
+              They are removed from {tableName}. This can't be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

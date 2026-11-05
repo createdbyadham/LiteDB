@@ -33,7 +33,7 @@ export function Sidebar({
   items,
   selectedId,
   stats,
-  searchPlaceholder = "Search...",
+  searchPlaceholder = "Search",
   className
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -47,15 +47,15 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        "h-full bg-background border-r transition-all duration-200 ease-out flex flex-col shrink-0",
-        collapsed ? "w-12" : "w-64",
+        "h-full bg-background border-r flex flex-col shrink-0",
+        collapsed ? "w-12" : "w-60",
         className
       )}
     >
       {/* Sidebar Header */}
       <div className="flex items-center justify-between p-3 border-b">
         {!collapsed && (
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          <span className="text-xs font-medium text-muted-foreground">
             {title}
           </span>
         )}
@@ -91,7 +91,7 @@ export function Sidebar({
           {/* Search */}
           <div className="p-3 border-b">
             <div className="relative">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Search strokeWidth={1.5} className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder={searchPlaceholder}
                 value={searchQuery}
@@ -102,7 +102,7 @@ export function Sidebar({
           </div>
 
           {/* Items List */}
-          <ScrollArea className="flex-1">
+          <ScrollArea className="flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
             <div className="p-2">
               {filteredItems.length > 0 ? (
                 filteredItems.map((item) => (
@@ -110,12 +110,12 @@ export function Sidebar({
                     key={item.id}
                     onClick={item.onClick}
                     className={cn(
-                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
-                      "hover:bg-muted/50 flex items-center justify-between group",
-                      selectedId === item.id && "bg-muted"
+                      "w-full text-left h-9 px-3 rounded-md text-sm transition-colors",
+                      "hover:bg-muted/50 flex items-center justify-between gap-3 group",
+                      selectedId === item.id && "bg-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
                     )}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       {item.icon && <span className="text-muted-foreground shrink-0 [&>svg]:w-4 [&>svg]:h-4">{item.icon}</span>}
                       <span className="truncate">{item.label}</span>
                     </div>
@@ -156,7 +156,7 @@ export function Sidebar({
                   >
                     <span className={cn(
                       "flex items-center justify-center [&>svg]:w-4 [&>svg]:h-4",
-                      selectedId === item.id ? "text-primary" : "text-muted-foreground"
+                      selectedId === item.id ? "text-foreground" : "text-muted-foreground"
                     )}>
                       {item.icon}
                     </span>

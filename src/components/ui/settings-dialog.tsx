@@ -72,13 +72,12 @@ export function SettingsDialog() {
       window.dispatchEvent(new Event('aiSettingsChanged'));
       toast({
         title: "Settings saved",
-        description: "Your AI provider settings have been saved successfully.",
       });
     } catch (error) {
       console.error('Failed to save settings:', error);
       toast({
         title: "Error",
-        description: "Failed to save settings. Please try again.",
+        description: "Settings were not saved. Try again",
         variant: "destructive",
       });
     }
@@ -245,7 +244,7 @@ export function SettingsDialog() {
 
       if (path) {
         await writeTextFile(path, result.content);
-        toast({ title: 'Success', description: 'Logs exported successfully' });
+        toast({ title: 'Logs exported', description: path });
       }
     } catch (e) {
       console.error(e);
@@ -269,14 +268,14 @@ export function SettingsDialog() {
         <DialogHeader className="space-y-1 px-6 pb-4 pt-6">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Provider credentials, agents, and logging.
+            AI provider, connected agents and logs
           </DialogDescription>
         </DialogHeader>
         
         <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 w-full flex-1 flex-col">
           <div className="px-6">
             <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="ai">AI Provider</TabsTrigger>
+              <TabsTrigger value="ai">AI provider</TabsTrigger>
               <TabsTrigger value="agents">Agents</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
             </TabsList>
@@ -308,7 +307,7 @@ export function SettingsDialog() {
             {settings.activeProvider !== 'ollama' && (
               <div className="space-y-1.5">
                 <Label htmlFor="apiKey">
-                  {settings.activeProvider === 'openai-compatible' ? 'API Key (optional)' : 'API Key'}
+                  {settings.activeProvider === 'openai-compatible' ? 'API key (optional)' : 'API key'}
                 </Label>
                 <Input
                   id="apiKey"
@@ -456,7 +455,7 @@ export function SettingsDialog() {
                   </span>
                 )}
                 {test.status === 'ok' && (
-                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 leading-snug">
+                  <span className="text-[11px] text-positive flex items-center gap-1 leading-snug">
                     <Check className="h-3.5 w-3.5 shrink-0" />
                     {test.model} responded
                   </span>
@@ -470,7 +469,7 @@ export function SettingsDialog() {
               </div>
             </div>
 
-            <div className="flex items-start gap-3 rounded-md border border-border/80 px-3 py-2.5">
+            <div className="flex items-start gap-3 rounded-lg border px-4 py-3">
               <Switch
                 id="sampleValues"
                 className="mt-0.5"
@@ -499,18 +498,18 @@ export function SettingsDialog() {
           </TabsContent>
 
           <TabsContent value="logs" className="mt-0 min-h-0 overflow-y-auto px-6 py-5">
-            <div className="rounded-md border border-border/80 p-4">
+            <div className="rounded-lg border p-4">
               <h4 className="mb-1.5 text-sm font-medium">Export error logs</h4>
               <p className="mb-4 text-xs text-muted-foreground leading-relaxed">
                 Attach these to a bug report if something is going wrong.
               </p>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={handleCopyLogs} className="flex-1">
-                  <Copy className="mr-2 h-4 w-4" />
+                  <Copy className="h-4 w-4" strokeWidth={1.5} />
                   Copy
                 </Button>
                 <Button variant="outline" size="sm" onClick={handleExportLogs} className="flex-1">
-                  <Download className="mr-2 h-4 w-4" />
+                  <Download className="h-4 w-4" strokeWidth={1.5} />
                   Export
                 </Button>
               </div>
