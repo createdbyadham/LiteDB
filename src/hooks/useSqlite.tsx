@@ -51,7 +51,7 @@ export function useSqlite(): UseSqliteReturn {
                     columns: cols.map(c => ({
                         name: c.name,
                         type: c.type,
-                        isPrimaryKey: c.pk === 1,
+                        isPrimaryKey: c.pk > 0,
                         isNotNull: c.notnull === 1
                     }))
                 };

@@ -10,6 +10,7 @@ import { useSqlite } from '@/hooks/useSqlite';
 import { usePostgres } from '@/hooks/usePostgres';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { sqliteService, RowData, ColumnInfo } from '@/lib/sqliteService';
+import type { TablePage, TableQuery } from '@/lib/types';
 import type { DiskAlert } from '@/lib/diskGuard';
 import { pgService } from '@/lib/pgService';
 import { tauriService } from '@/lib/tauri';
@@ -23,6 +24,7 @@ import {
   TableOfContents,
   RefreshCw,
   Box,
+  Eye,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { ToastAction } from '@/components/ui/toast';
@@ -39,11 +41,15 @@ import {
 import { ExportDialog } from '@/components/ExportDialog';
 import { SemanticSearch, VectorInspector, SimilarRowsModal, MockDataGenerator } from '@/components/VectorAdmin';
 
+const DEFAULT_QUERY: TableQuery = { limit: 100, offset: 0, search: '', sortColumn: null, sortDirection: 'asc' };
+
 const DatabaseView = () => {
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [tableColumns, setTableColumns] = useState<ColumnInfo[]>([]);
-  const [tableData, setTableData] = useState<{ columns: string[], rows: RowData[] }>({ columns: [], rows: [] });
+  const [tableData, setTableData] = useState<TablePage>({ columns: [], rows: [], total: 0 });
+  /** The page, search and sort the grid shows. Run in SQL, so every row is reachable. */
+  const [tableQuery, setTableQuery] = useState<TableQuery>(DEFAULT_QUERY);
   /** Bumped whenever something writes, to force the visible rows to reload. */
   const [dataVersion, setDataVersion] = useState(0);
   const [diskAlert, setDiskAlert] = useState<DiskAlert | null>(null);
@@ -215,16 +221,24 @@ const DatabaseView = () => {
     // position and the selection go with it.
     const loadTableData = async () => {
       try {
-        let columns, data;
+        let columns: ColumnInfo[], data: TablePage;
 
         if (isPostgresActiveRef.current) {
           [columns, data] = await Promise.all([
             postgresFuncsRef.current.getTableColumns(selectedTable),
-            postgresFuncsRef.current.getTableData(selectedTable),
+            pgService.queryTable(selectedTable, tableQuery),
           ]);
         } else {
           columns = sqliteFuncsRef.current.getTableColumns(selectedTable);
-          data = sqliteFuncsRef.current.getTableData(selectedTable);
+          data = sqliteService.queryTable(selectedTable, tableQuery);
+        }
+
+        // A delete or a narrower search can leave the current page past the
+        // end. Step back to the last page that has rows instead of showing none.
+        if (data.rows.length === 0 && data.total > 0 && tableQuery.offset > 0) {
+          const lastOffset = Math.floor((data.total - 1) / tableQuery.limit) * tableQuery.limit;
+          if (mounted) setTableQuery(q => ({ ...q, offset: lastOffset }));
+          return;
         }
 
         if (!mounted) return;
@@ -253,7 +267,7 @@ const DatabaseView = () => {
     // Without it this only ran on a table *change*, so after running an UPDATE
     // in the SQL editor the grid kept showing pre-write values — a successful
     // write that looks like a silent failure.
-  }, [selectedTable, dataVersion]);
+  }, [selectedTable, dataVersion, tableQuery]);
 
   // A ref, not a variable inside the effect below: that effect re-subscribes
   // on every render (`refreshSqliteTables` is a new function each time), and
@@ -344,70 +358,25 @@ const DatabaseView = () => {
     navigate('/', { replace: true });
   };
 
-  interface DeleteOperation {
-    type: 'delete';
-    rowIds: string[];
-    primaryKeyColumn: string;
-  }
-
-  function isDeleteOperation(value: unknown): value is DeleteOperation {
-    if (value === null || typeof value !== 'object') return false;
-    const obj = value as Record<string, unknown>;
-    return obj.type === 'delete' && Array.isArray(obj.rowIds) && typeof obj.primaryKeyColumn === 'string';
-  }
-
-  const handleUpdateRow = async (oldRow: RowData | null, newRow: RowData | DeleteOperation): Promise<boolean> => {
+  // Both write paths re-read the page afterwards rather than trust the
+  // dialog's copy: only the edited columns were written, and an agent may
+  // have changed the others while the dialog was open.
+  const handleUpdateRow = async (oldRow: RowData, newRow: RowData): Promise<boolean> => {
     if (!selectedTable) return false;
+    const updated = isPostgresActive
+      ? await pgService.updateRow(selectedTable, oldRow, newRow)
+      : sqliteService.updateRow(selectedTable, oldRow, newRow);
+    if (updated) setDataVersion((version) => version + 1);
+    return updated;
+  };
 
-    if (isPostgresActive) {
-      try {
-        if (isDeleteOperation(newRow)) {
-          return await pgService.deleteRows(selectedTable, newRow.primaryKeyColumn, newRow.rowIds);
-        } else if (oldRow) {
-          return await pgService.updateRow(selectedTable, oldRow, newRow as RowData);
-        }
-        return false;
-      } catch (error) {
-        toast({
-          title: "Error",
-          description: "Failed to update/delete PostgreSQL row(s)",
-          variant: "destructive"
-        });
-        return false;
-      }
-    } else {
-      if (isDeleteOperation(newRow)) {
-        try {
-          const sql = `DELETE FROM ${selectedTable} WHERE ${newRow.primaryKeyColumn} IN (${newRow.rowIds.map(id => `'${id}'`).join(',')})`;
-          const result = sqliteService.executeBatchOperations([sql]);
-
-          if (!result.success && result.errors.length > 0) {
-            toast({
-              title: "Delete Error",
-              description: result.errors.join('\n'),
-              variant: "destructive"
-            });
-          }
-
-          return result.success;
-        } catch (error) {
-          toast({
-            title: "Delete Error",
-            description: error instanceof Error ? error.message : "Failed to delete rows",
-            variant: "destructive"
-          });
-          return false;
-        }
-      } else if (oldRow) {
-        const updated = sqliteService.updateRow(selectedTable, oldRow, newRow as RowData);
-        // Re-read the row rather than trust the dialog's copy: only the edited
-        // columns were written, and an agent may have changed the others while
-        // the dialog was open.
-        if (updated) setDataVersion((version) => version + 1);
-        return updated;
-      }
-      return false;
-    }
+  const handleDeleteRows = async (rows: RowData[]): Promise<boolean> => {
+    if (!selectedTable) return false;
+    const deleted = isPostgresActive
+      ? await pgService.deleteRows(selectedTable, rows)
+      : sqliteService.deleteRows(selectedTable, rows);
+    if (deleted) setDataVersion((version) => version + 1);
+    return deleted;
   };
 
   const handleRefresh = () => {
@@ -430,7 +399,8 @@ const DatabaseView = () => {
   const handleTableSelect = (tableName: string) => {
     if (tableName === selectedTable) return;
     setTableColumns([]);
-    setTableData({ columns: [], rows: [] });
+    setTableData({ columns: [], rows: [], total: 0 });
+    setTableQuery(DEFAULT_QUERY);
     setLoading(true);
     setTimeout(() => setSelectedTable(tableName), 0);
   };
@@ -471,8 +441,8 @@ const DatabaseView = () => {
     return tables.map(table => ({
       id: table.name,
       label: table.name,
-      icon: <TableOfContents />,
-      tooltip: table.name,
+      icon: table.type === 'view' ? <Eye /> : <TableOfContents />,
+      tooltip: table.type === 'view' ? `${table.name} (view, read-only)` : table.name,
       onClick: () => handleTableSelect(table.name)
     }));
   }, [tables, selectedTable]);
@@ -489,7 +459,7 @@ const DatabaseView = () => {
       <AppLayout isConnected={false}>
         <div className="flex items-center justify-center h-full">
           <div className="text-center space-y-4">
-            <Database className="w-16 h-16 text-muted-foreground/50 mx-auto animate-pulse" />
+            <Database strokeWidth={1.5} className="w-12 h-12 text-muted-foreground/50 mx-auto" />
             <h2 className="text-xl font-medium">Loading database...</h2>
           </div>
         </div>
@@ -582,7 +552,7 @@ const DatabaseView = () => {
               items={sidebarItems}
               selectedId={selectedTable}
               stats={sidebarStats}
-              searchPlaceholder="Search tables..."
+              searchPlaceholder="Search tables"
               className="animate-fade-in"
             />
           )}
@@ -601,8 +571,14 @@ const DatabaseView = () => {
                     tableName={selectedTable}
                     columns={tableData.columns}
                     rows={tableData.rows}
+                    totalRows={tableData.total}
+                    query={tableQuery}
+                    onQueryChange={setTableQuery}
+                    rowLocator={tableData.rowLocator}
+                    readOnly={tableData.readOnly}
                     columnInfo={tableColumns}
                     onUpdateRow={handleUpdateRow}
+                    onDeleteRows={handleDeleteRows}
                     vectorColumns={isPostgresActive ? vectorColumns : []}
                     onInspectVector={isPostgresActive && hasPgVector ? handleInspectVector : undefined}
                     onFindSimilar={isPostgresActive && hasPgVector ? handleFindSimilar : undefined}

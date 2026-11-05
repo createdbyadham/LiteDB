@@ -17,7 +17,7 @@ const getColumnIcon = (
   foreignKeys: ForeignKeyInfo[],
   indexes: IndexInfo[]
 ) => {
-  const isPrimaryKey = column.pk === 1;
+  const isPrimaryKey = column.pk > 0;
   const isForeignKey = foreignKeys.some(fk => fk.from === column.name);
   const isUnique = indexes.some(idx => idx.unique && idx.columns.includes(column.name) && idx.columns.length === 1);
   const isNullable = column.notnull === 0;
@@ -25,18 +25,18 @@ const getColumnIcon = (
   if (isPrimaryKey) {
     return (
       <div className="flex items-center gap-1">
-        <Key className="w-3 h-3 text-amber-400" />
-        {isForeignKey && <Link2 className="w-3 h-3 text-amber-400" />}
+        <Key className="w-3 h-3 text-key" />
+        {isForeignKey && <Link2 className="w-3 h-3 text-key" />}
       </div>
     );
   }
 
   if (isForeignKey) {
-    return <Link2 className="w-3 h-3 text-amber-400" />;
+    return <Link2 className="w-3 h-3 text-key" />;
   }
 
   if (isUnique) {
-    return <Hash className="w-3 h-3 text-blue-400" />;
+    return <Hash className="w-3 h-3 text-muted-foreground" />;
   }
 
   if (isNullable) {
@@ -89,15 +89,15 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
   return (
     <div
       className={cn(
-        "bg-card border rounded-lg shadow-lg min-w-[220px] max-w-[280px] overflow-hidden",
-        "transition-all duration-200",
-        selected ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-muted-foreground/50"
+        "bg-card border rounded-lg shadow-md min-w-[220px] max-w-[280px] overflow-hidden",
+        "transition-colors duration-150",
+        selected ? "border-key/60" : "border-border hover:border-muted-foreground/50"
       )}
     >
       {/* Table Header */}
       <div className="bg-muted/50 px-3 py-2 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500" />
+          <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50" />
           <span className="font-medium text-sm text-foreground truncate">{name}</span>
         </div>
         <button
@@ -119,7 +119,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
       {/* Columns List */}
       <div className="divide-y divide-border/50">
         {columns.map((column) => {
-          const isPk = column.pk === 1;
+          const isPk = column.pk > 0;
           const isFk = fkColumnNames.has(column.name);
 
           return (
@@ -136,7 +136,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
                   type="target"
                   position={Position.Left}
                   id={`${name}-${column.name}-target`}
-                  className="!w-2 !h-2 !bg-amber-400 !border-amber-500"
+                  className="!w-2 !h-2 !bg-key !border-key"
                   style={{ left: -4 }}
                 />
               )}
@@ -147,7 +147,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
                   type="source"
                   position={Position.Right}
                   id={`${name}-${column.name}-source`}
-                  className="!w-2 !h-2 !bg-amber-400 !border-amber-500"
+                  className="!w-2 !h-2 !bg-key !border-key"
                   style={{ right: -4 }}
                 />
               )}
@@ -162,7 +162,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
                 </span>
               </div>
 
-              <span className="text-muted-foreground/70 ml-2 shrink-0 font-mono text-[10px]">
+              <span className="text-muted-foreground/70 ml-2 shrink-0 font-mono text-[11px]">
                 {formatType(column.type)}
               </span>
             </div>
@@ -172,7 +172,7 @@ const TableNode = ({ data, selected }: NodeProps<TableNodeData>) => {
 
       {/* Footer showing count */}
       {columns.length > 10 && (
-        <div className="px-3 py-1 bg-muted/30 text-[10px] text-muted-foreground text-center border-t border-border/50">
+        <div className="px-3 py-1 bg-muted/30 text-[11px] text-muted-foreground text-center border-t border-border/50">
           {columns.length} columns
         </div>
       )}

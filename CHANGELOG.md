@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-05
+
+### Added
+
+- **Every row is reachable.** The table grid pages, searches and sorts in SQL instead of over the first 1,000 rows. The header shows the real row count, and search matches `%` and `_` literally.
+- **Excel export** writes a real `.xlsx` (one sheet per table, bold frozen header, numbers as numbers), for SQLite and now PostgreSQL. It used to write JSON into a `.xlsx` file.
+- Tables without a primary key can be edited and deleted row by row (SQLite `rowid`, PostgreSQL `ctid`).
+- SQLite views are listed in the sidebar, read-only. PostgreSQL views are read-only too.
+
+### Changed
+
+- New look: neutral graphite surfaces, an amber key mark for primary and foreign keys, sentence-case labels, and calmer dialogs, toasts, settings and safety-policy menu.
+- The edit dialog checks values when you save, so you can type `-3.5` or clear a required field to retype it. BLOB columns are shown as their size and left untouched.
+
+### Fixed
+
+- **Edits and deletes on tables with a composite primary key used only the first key column**, so editing one row of a table keyed by `(EmployeeID, TerritoryID)` rewrote every row with that `EmployeeID`. They now use the whole key.
+- Tables and columns whose names contain spaces, dashes or quotes (such as `Order Details`) failed to load. PostgreSQL tables with capital letters failed to load their columns.
+- CSV and JSON exports stopped at 1,000 rows per table. CSV escaping is now RFC 4180, and BLOBs export as base64.
+- SVG schema export wrote a `data:` URL instead of SVG. PNG export had a white background; it is now transparent at 2x.
+- Deleting rows in SQLite broke on key values containing `'`.
+- Pressing Delete while typing in the search box or the SQL editor offered to delete the ticked rows.
+- An edit to a row someone else had already changed or deleted reported success.
+- PostgreSQL two-column foreign keys appeared as four relations, index columns showed as `{a,b}`, and same-named tables in other schemas leaked their indexes.
+- PostgreSQL `bigint` values above 2^53 were rounded, so an edit or delete could miss the row.
+- User tables named like `sqlite1data` were hidden as if they were system tables.
+- The schema sidebar overflowed its right edge and its counts did not line up.
+
 ## [2.2.2] - 2026-09-23
 
 ### Changed
@@ -48,6 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.3.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.3.0
 [2.2.2]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.2
 [2.2.1]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.1
 [2.2.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.0

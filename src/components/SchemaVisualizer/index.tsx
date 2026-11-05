@@ -97,7 +97,7 @@ const calculateLayout = (
         target: fk.table,
         targetHandle: `${fk.table}-${fk.to}-target`,
         type: 'smoothstep',
-        animated: true,
+        animated: false,
         style: edgeStyle,
         label: fk.from,
         labelStyle: { fill: '#ffffff', fontSize: 10 },
@@ -383,8 +383,9 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
 
       const transform = `translate(${-nodesBounds.x + padding}px, ${-nodesBounds.y + padding}px) scale(1)`;
 
+      // No backgroundColor: the PNG keeps a transparent background.
       const options = {
-        backgroundColor: '#ffffff',
+        pixelRatio: format === 'png' ? 2 : 1,
         width: width,
         height: height,
         style: {
@@ -555,11 +556,13 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
       icon: <TableOfContents />,
       tooltip: `${table.name} (${table.columns.length} columns)`,
       extra: (
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-1.5 font-mono text-xs text-muted-foreground tabular-nums">
           <span>{table.columns.length}</span>
-          {table.foreignKeys.length > 0 && (
-            <Link2 className="w-3 h-3 text-amber-400" />
-          )}
+          <span className="flex w-3 justify-center">
+            {table.foreignKeys.length > 0 && (
+              <Link2 className="w-3 h-3 text-key" aria-label="Has relations" />
+            )}
+          </span>
         </div>
       ),
       onClick: () => focusTable(table.name)
@@ -583,7 +586,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center space-y-4">
-          <Database className="w-16 h-16 text-muted-foreground/50 mx-auto animate-pulse" />
+          <Database strokeWidth={1.5} className="w-12 h-12 text-muted-foreground/50 mx-auto" />
           <h2 className="text-xl font-medium">Loading schema...</h2>
         </div>
       </div>
@@ -613,7 +616,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
         items={sidebarItems}
         selectedId={selectedTable}
         stats={statsContent}
-        searchPlaceholder="Search tables..."
+        searchPlaceholder="Search tables"
       />
 
       {/* Main Canvas */}
@@ -633,7 +636,7 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
           maxZoom={2}
           defaultEdgeOptions={{
             type: 'smoothstep',
-            animated: true,
+            animated: false,
             style: edgeStyle,
           }}
           proOptions={{ hideAttribution: true }}
@@ -704,11 +707,11 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
             <div className="text-xs space-y-2">
               <div className="font-medium text-foreground mb-2">Legend</div>
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Key className="w-3 h-3 text-amber-400" />
+                <Key className="w-3 h-3 text-key" />
                 <span>Primary Key</span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
-                <Link2 className="w-3 h-3 text-amber-400" />
+                <Link2 className="w-3 h-3 text-key" />
                 <span>Foreign Key</span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">

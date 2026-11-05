@@ -98,7 +98,7 @@ export const tauriService = {
     return invoke<SqliteSaveOutcome>('save_sqlite_file', body);
   },
 
-  exportDatabase: async (data: string, format: string): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+  exportDatabase: async (data: string | Uint8Array, format: string): Promise<{ success: boolean; filePath?: string; error?: string }> => {
     try {
       const filePath = await save({
         filters: [{
@@ -111,14 +111,27 @@ export const tauriService = {
 
       // Handle data writing based on format (similar to Electron implementation)
       // If it's base64 image data
-      if (['png', 'jpg', 'jpeg'].includes(format.toLowerCase()) && data.startsWith('data:')) {
+      if (data instanceof Uint8Array) {
+        // Binary formats built in memory, such as .xlsx.
+        await writeFile(filePath, data);
+      } else if (['png', 'jpg', 'jpeg'].includes(format.toLowerCase()) && data.startsWith('data:')) {
         const base64Data = data.replace(/^data:image\/\w+;base64,/, '');
         const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
         await writeFile(filePath, binaryData);
       } else {
-        // Text data (SVG, SQL, JSON, CSV)
+        // Text data (SVG, SQL, JSON, CSV). An SVG arrives as a data URL from
+        // html-to-image; writing that string as-is produced a file no viewer
+        // could open, so unwrap it to the markup first.
+        let text = data;
+        const svgUrl = /^data:image\/svg\+xml(;charset=[^;,]+)?(;base64)?,/i.exec(data);
+        if (svgUrl) {
+          const payload = data.slice(svgUrl[0].length);
+          text = svgUrl[2]
+            ? new TextDecoder().decode(Uint8Array.from(atob(payload), c => c.charCodeAt(0)))
+            : decodeURIComponent(payload);
+        }
         const encoder = new TextEncoder();
-        await writeFile(filePath, encoder.encode(data));
+        await writeFile(filePath, encoder.encode(text));
       }
 
       return { success: true, filePath };

@@ -14,7 +14,7 @@ import {
   ChevronRight,
   ArrowLeft,
   Box,
-  Sparkles
+  Dices
 } from 'lucide-react';
 import icon from '/titlebaricon2.png';
 
@@ -65,7 +65,7 @@ const AppLayout = ({
     {
       id: 'back',
       label: 'Back',
-      icon: <ArrowLeft className="w-5 h-5" />,
+      icon: <ArrowLeft className="w-4 h-4" />,
       onClick: () => navigate('/'),
     },
   ];
@@ -74,19 +74,19 @@ const AppLayout = ({
     {
       id: 'browse',
       label: 'Table Editor',
-      icon: <Table2 className="w-5 h-5" />,
+      icon: <Table2 className="w-4 h-4" />,
       onClick: () => onTabChange?.('browse'),
     },
     {
       id: 'schema',
       label: 'Schema Visualizer',
-      icon: <GitBranch className="w-5 h-5" />,
+      icon: <GitBranch className="w-4 h-4" />,
       onClick: () => onTabChange?.('schema'),
     },
     {
       id: 'query',
       label: 'SQL Editor',
-      icon: <Terminal className="w-5 h-5" />,
+      icon: <Terminal className="w-4 h-4" />,
       onClick: () => onTabChange?.('query'),
     },
     // Only show Vectors tab for PostgreSQL with pgvector
@@ -94,14 +94,14 @@ const AppLayout = ({
       {
         id: 'vectors',
         label: 'Vector Search',
-        icon: <Box className="w-5 h-5" />,
+        icon: <Box className="w-4 h-4" />,
         onClick: () => onTabChange?.('vectors'),
       },
       // Easter egg: Mock Data Generator (Ctrl+Shift+M)
       ...(showMockData || activeTab === 'mock' ? [{
         id: 'mock',
         label: 'Mock Data',
-        icon: <Sparkles className="w-5 h-5" />,
+        icon: <Dices className="w-4 h-4" />,
         onClick: () => onTabChange?.('mock'),
       }] : [])
     ] : []),
@@ -112,10 +112,10 @@ const AppLayout = ({
       <Button
         variant="ghost"
         className={cn(
-          "w-full justify-start gap-3 h-10 px-3 transition-all",
+          "w-full justify-start gap-2.5 h-9 px-3 transition-colors [&_svg]:size-4",
           sidebarCollapsed && "justify-center px-0",
           isActive 
-            ? "bg-accent text-accent-foreground font-medium" 
+            ? "bg-accent text-accent-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]" 
             : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
         )}
         onClick={item.onClick}
@@ -146,8 +146,8 @@ const AppLayout = ({
       {/* Sidebar */}
       <aside 
         className={cn(
-          "flex flex-col h-full bg-sidebar border-r border-sidebar-border transition-all duration-200 ease-out shrink-0",
-          sidebarCollapsed ? "w-14" : "w-56"
+          "flex flex-col h-full bg-sidebar border-r border-sidebar-border shrink-0",
+          sidebarCollapsed ? "w-14" : "w-60"
         )}
       >
         {/* Sidebar Header */}
@@ -157,18 +157,18 @@ const AppLayout = ({
         )}>
           {!sidebarCollapsed && (
             <div className="flex items-center gap-2">
-              <img src={icon} alt="App Icon" className="w-6 h-6" />
-              <span className="font-semibold text-sm">LiteDB</span>
+              <img src={icon} alt="" className="w-6 h-6" />
+              <span className="font-medium text-[15px]">LiteDB</span>
             </div>
           )}
           {sidebarCollapsed && (
-            <img src={icon} alt="App Icon" className="w-6 h-6" />
+            <img src={icon} alt="LiteDB" className="w-6 h-6" />
           )}
         </div>
 
         {/* Navigation */}
         <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
+          <div className="p-2 space-y-0.5">
             {/* Main Nav */}
             {mainNavItems.map((item) => renderNavItem(item, location.pathname === '/'))}
             

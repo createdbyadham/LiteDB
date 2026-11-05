@@ -90,7 +90,7 @@ const SimilarityBar = ({ score, isDistance = false }: { score: number; isDistanc
     <div className="flex items-center gap-2 min-w-[120px]">
       <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
         <div 
-          className={cn("h-full transition-all", getColorClass())}
+          className={cn("h-full", getColorClass())}
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -358,13 +358,13 @@ export const SemanticSearch = ({
     <div className="flex h-full">
       {/* Left Panel - Controls */}
       <aside className={cn(
-        "h-full bg-background border-r transition-all duration-200 ease-out flex flex-col shrink-0",
+        "h-full bg-background border-r flex flex-col shrink-0",
         sidebarCollapsed ? "w-12" : "w-72"
       )}>
         {/* Sidebar Header */}
         <div className="flex items-center justify-between p-3 border-b">
           {!sidebarCollapsed && (
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <span className="text-xs font-medium text-muted-foreground">
               Search
             </span>
           )}
@@ -427,7 +427,7 @@ export const SemanticSearch = ({
                       <div className="flex items-center gap-2">
                         <Box className="w-3.5 h-3.5" />
                         {col.columnName}
-                        <Badge variant="outline" className="text-[10px] ml-1">
+                        <Badge variant="outline" className="text-[11px] ml-1">
                           {col.dimensions}d
                         </Badge>
                       </div>
@@ -469,12 +469,12 @@ export const SemanticSearch = ({
               <div className="space-y-2">
                 <Label className="text-xs">Row ID</Label>
                 <Input
-                  placeholder="Enter row ID..."
+                  placeholder="Row ID"
                   value={rowIdInput}
                   onChange={(e) => setRowIdInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 />
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-[11px] text-muted-foreground">
                   Find rows similar to this row's vector
                 </p>
               </div>
@@ -504,7 +504,7 @@ export const SemanticSearch = ({
                         <SelectItem key={model.id} value={model.id}>
                           <div className="flex items-center gap-2">
                             <span>{model.name}</span>
-                            <Badge variant="outline" className="text-[10px]">
+                            <Badge variant="outline" className="text-[11px]">
                               {model.dimensions}d
                             </Badge>
                           </div>
@@ -515,7 +515,7 @@ export const SemanticSearch = ({
 
                   {/* Model Info */}
                   {selectedModel && (
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[11px] text-muted-foreground">
                       {selectedModel.description} • {selectedModel.size}
                     </p>
                   )}
@@ -538,7 +538,7 @@ export const SemanticSearch = ({
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         <span className="text-xs">Loading {selectedModel?.name}...</span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground truncate">
+                      <p className="text-[11px] text-muted-foreground truncate">
                         {modelProgress}
                       </p>
                     </div>
@@ -548,7 +548,7 @@ export const SemanticSearch = ({
                     <div className="flex items-center gap-2 text-green-600">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       <span className="text-xs">{localEmbeddings.currentModel.name} ready</span>
-                      <Badge variant="outline" className="text-[10px] ml-auto">
+                      <Badge variant="outline" className="text-[11px] ml-auto">
                         {localEmbeddings.currentModel.dimensions}d
                       </Badge>
                     </div>
@@ -560,7 +560,7 @@ export const SemanticSearch = ({
                         <AlertCircle className="w-3.5 h-3.5" />
                         <span className="text-xs">Failed to load</span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground">{modelProgress}</p>
+                      <p className="text-[11px] text-muted-foreground">{modelProgress}</p>
                       <Button 
                         size="sm" 
                         variant="outline" 
@@ -585,13 +585,13 @@ export const SemanticSearch = ({
                   />
                   {selectedColumnInfo && localEmbeddings.currentModel && 
                    selectedColumnInfo.dimensions !== localEmbeddings.currentModel.dimensions && (
-                    <p className="text-[10px] text-amber-500">
+                    <p className="text-[11px] text-warning">
                       ⚠️ Dimension mismatch: column has {selectedColumnInfo.dimensions}d, 
                       model produces {localEmbeddings.currentModel.dimensions}d
                     </p>
                   )}
                   {selectedColumnInfo && !localEmbeddings.currentModel && (
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[11px] text-muted-foreground">
                       💡 Pick a model with {selectedColumnInfo.dimensions}d for best results
                     </p>
                   )}

@@ -1,7 +1,8 @@
 // This service handles PostgreSQL database operations
 import { toast } from "@/hooks/use-toast";
 import { tauriService } from '@/lib/tauri';
-import { assertIdent } from '@/lib/types';
+import { quoteIdent, quoteLiteral, primaryKeyColumns, escapeLike, ROW_LOCATOR } from '@/lib/types';
+import type { TableQuery, TablePage } from '@/lib/types';
 import { assertWritable, clearActiveConnection } from '@/lib/queryGate';
 import { classifyStatement } from '@/lib/sqlClassifier';
 import { pgSslHint } from '@/lib/pgSslHint';
@@ -106,6 +107,7 @@ class PgService {
         query: `
           SELECT 
             table_name as name,
+            table_type,
             'CREATE TABLE ' || table_name || ' (...)' as sql 
           FROM 
             information_schema.tables 
@@ -122,7 +124,8 @@ class PgService {
 
       this.currentTables = result.rows.map((row) => ({
         name: cell(row, 'name'),
-        sql: cell(row, 'sql')
+        sql: cell(row, 'sql'),
+        type: cell(row, 'table_type') === 'VIEW' ? 'view' as const : 'table' as const
       }));
 
       return this.currentTables;
@@ -143,7 +146,6 @@ class PgService {
     }
 
     try {
-      assertIdent(tableName, 'table');
       const result = await tauriService.executePostgresQuery({
         query: `
           SELECT 
@@ -157,7 +159,7 @@ class PgService {
           LEFT JOIN 
             pg_constraint p ON p.conrelid = a.attrelid AND a.attnum = ANY(p.conkey) AND p.contype = 'p'
           WHERE 
-            a.attrelid = '${tableName}'::regclass
+            a.attrelid = ${quoteLiteral(quoteIdent(tableName))}::regclass
             AND a.attnum > 0
             AND NOT a.attisdropped
           ORDER BY 
@@ -187,28 +189,91 @@ class PgService {
     }
   }
 
+  /**
+   * One page of a table with search and sort done by the server, plus the
+   * matching row count. The grid used to fetch the first 1000 rows and page,
+   * search and sort only those.
+   */
+  async queryTable(tableName: string, q: TableQuery): Promise<TablePage> {
+    if (!this.connected) return { columns: [], rows: [], total: 0 };
+
+    try {
+      const columns = await this.getTableColumns(tableName);
+      if (columns.length === 0) return { columns: [], rows: [], total: 0 };
+      const from = quoteIdent(tableName, 'table');
+      const names = columns.map(c => c.name);
+      const readOnly = this.isView(tableName);
+      // No primary key: carry the ctid so single rows can still be addressed.
+      const useCtid = !readOnly && primaryKeyColumns(columns).length === 0;
+
+      // pgvector columns come back as binary sqlx cannot decode; read them as text.
+      const selectClause = columns
+        .map(col => (col.type.startsWith('vector') ? `${quoteIdent(col.name)}::text AS ${quoteIdent(col.name)}` : quoteIdent(col.name)))
+        .join(', ');
+
+      let where = '';
+      const search = q.search?.trim();
+      if (search) {
+        const pattern = quoteLiteral(`%${escapeLike(search)}%`);
+        where = ' WHERE ' + names.map(n => `${quoteIdent(n)}::text ILIKE ${pattern} ESCAPE '\\'`).join(' OR ');
+      }
+
+      let order = '';
+      if (q.sortColumn && names.includes(q.sortColumn)) {
+        order = q.sortDirection === 'desc'
+          ? ` ORDER BY ${quoteIdent(q.sortColumn)} DESC NULLS LAST`
+          : ` ORDER BY ${quoteIdent(q.sortColumn)} ASC NULLS FIRST`;
+      }
+
+      const limit = Math.max(1, Math.trunc(q.limit));
+      const offset = Math.max(0, Math.trunc(q.offset));
+      const [count, page] = await Promise.all([
+        tauriService.executePostgresQuery({ query: `SELECT COUNT(*)::bigint AS n FROM ${from}${where};` }),
+        tauriService.executePostgresQuery({ query: `SELECT ${selectClause}${useCtid ? `, ctid::text AS ${quoteIdent(ROW_LOCATOR)}` : ''} FROM ${from}${where}${order} LIMIT ${limit} OFFSET ${offset};` }),
+      ]);
+      if (!page?.success) throw new Error(page?.error || 'Failed to retrieve table data');
+      if (!count?.success) throw new Error(count?.error || 'Failed to count rows');
+
+      return {
+        columns: names,
+        rows: page.rows || [],
+        total: Number(cell(count.rows[0] ?? {}, 'n')) || 0,
+        readOnly,
+        rowLocator: useCtid ? ROW_LOCATOR : undefined,
+      };
+    } catch (error) {
+      console.error(`Error querying ${tableName}:`, error);
+      toast({
+        title: "Error",
+        description: `Failed to retrieve data for table ${tableName}`,
+        variant: "destructive"
+      });
+      return { columns: [], rows: [], total: 0 };
+    }
+  }
+
   async getTableData(tableName: string, limit = 1000, offset = 0): Promise<{ columns: string[], rows: RowData[] }> {
     if (!this.connected) {
       return { columns: [], rows: [] };
     }
 
     try {
-      assertIdent(tableName, 'table');
       // SELECT * returns pgvector columns as raw binary which sqlx can't decode to string,
       // so we try to introspect columns and cast vector columns to text. Falls back to *.
-      let query = `SELECT * FROM "${tableName}" LIMIT ${limit} OFFSET ${offset};`;
+      // A negative limit means every row (exports).
+      const page = limit < 0 ? '' : ` LIMIT ${Math.trunc(limit)} OFFSET ${Math.max(0, Math.trunc(offset))}`;
+      let query = `SELECT * FROM ${quoteIdent(tableName)}${page};`;
 
       try {
         const columns = await this.getTableColumns(tableName);
         if (columns.length > 0) {
           const selectClause = columns.map(col => {
-            assertIdent(col.name, 'column');
             if (col.type.startsWith('vector')) {
-              return `"${col.name}"::text`;
+              return `${quoteIdent(col.name)}::text AS ${quoteIdent(col.name)}`;
             }
-            return `"${col.name}"`;
+            return `${quoteIdent(col.name)}`;
           }).join(', ');
-          query = `SELECT ${selectClause} FROM "${tableName}" LIMIT ${limit} OFFSET ${offset};`;
+          query = `SELECT ${selectClause} FROM ${quoteIdent(tableName)}${page};`;
         }
       } catch {
         // Failed to fetch columns for smart select, falling back to SELECT *
@@ -243,30 +308,31 @@ class PgService {
     }
 
     try {
-      assertIdent(tableName, 'table');
+      // pg_catalog, not information_schema: joining key_column_usage to
+      // constraint_column_usage pairs every column of a composite key with
+      // every other (a 2-column FK came back as 4 relations), and
+      // constraint_column_usage only shows tables the current role owns.
       const result = await tauriService.executePostgresQuery({
         query: `
           SELECT
-            tc.constraint_name,
-            kcu.column_name as from_column,
-            ccu.table_name AS to_table,
-            ccu.column_name AS to_column,
-            rc.update_rule,
-            rc.delete_rule
-          FROM 
-            information_schema.table_constraints AS tc 
-            JOIN information_schema.key_column_usage AS kcu
-              ON tc.constraint_name = kcu.constraint_name
-              AND tc.table_schema = kcu.table_schema
-            JOIN information_schema.constraint_column_usage AS ccu
-              ON ccu.constraint_name = tc.constraint_name
-              AND ccu.table_schema = tc.table_schema
-            JOIN information_schema.referential_constraints AS rc
-              ON tc.constraint_name = rc.constraint_name
-              AND tc.table_schema = rc.constraint_schema
-          WHERE tc.constraint_type = 'FOREIGN KEY' 
-            AND tc.table_name = '${tableName}'
-            AND tc.table_schema = 'public';
+            c.conname AS constraint_name,
+            a.attname AS from_column,
+            rt.relname AS to_table,
+            ra.attname AS to_column,
+            c.confupdtype AS update_code,
+            c.confdeltype AS delete_code,
+            k.ord AS seq
+          FROM pg_constraint c
+          JOIN pg_class t ON t.oid = c.conrelid
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+          JOIN pg_class rt ON rt.oid = c.confrelid
+          CROSS JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS k(attnum, refattnum, ord)
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+          JOIN pg_attribute ra ON ra.attrelid = c.confrelid AND ra.attnum = k.refattnum
+          WHERE c.contype = 'f'
+            AND n.nspname = 'public'
+            AND t.relname = ${quoteLiteral(tableName)}
+          ORDER BY c.conname, k.ord;
         `
       });
 
@@ -274,16 +340,24 @@ class PgService {
         return [];
       }
 
-      return result.rows.map((row, index) => ({
-        id: index,
-        seq: 0,
-        table: cell(row, 'to_table'),
-        from: cell(row, 'from_column'),
-        to: cell(row, 'to_column'),
-        on_update: cell(row, 'update_rule') || 'NO ACTION',
-        on_delete: cell(row, 'delete_rule') || 'NO ACTION',
-        match: 'NONE'
-      }));
+      const action = (code: string) =>
+        ({ a: 'NO ACTION', r: 'RESTRICT', c: 'CASCADE', n: 'SET NULL', d: 'SET DEFAULT' } as Record<string, string>)[code] ?? 'NO ACTION';
+      const ids = new Map<string, number>();
+
+      return result.rows.map((row) => {
+        const name = cell(row, 'constraint_name');
+        if (!ids.has(name)) ids.set(name, ids.size);
+        return {
+          id: ids.get(name)!,
+          seq: Number(cell(row, 'seq')) - 1,
+          table: cell(row, 'to_table'),
+          from: cell(row, 'from_column'),
+          to: cell(row, 'to_column'),
+          on_update: action(cell(row, 'update_code')),
+          on_delete: action(cell(row, 'delete_code')),
+          match: 'NONE'
+        };
+      });
     } catch (error) {
       console.error(`Error fetching foreign keys for ${tableName}:`, error);
       return [];
@@ -296,23 +370,27 @@ class PgService {
     }
 
     try {
-      assertIdent(tableName, 'table');
+      // Arrays reach us as Postgres text ("{a,b}"), so the column list is sent
+      // as JSON. Limited to the public schema like the table list, so a table
+      // of the same name elsewhere does not lend its indexes.
       const result = await tauriService.executePostgresQuery({
         query: `
           SELECT
-            i.relname as index_name,
-            ix.indisunique as is_unique,
-            array_agg(a.attname ORDER BY array_position(ix.indkey, a.attnum)) as columns
-          FROM
-            pg_class t
-            JOIN pg_index ix ON t.oid = ix.indrelid
-            JOIN pg_class i ON i.oid = ix.indexrelid
-            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
-          WHERE
-            t.relname = '${tableName}'
-            AND t.relkind = 'r'
-          GROUP BY
-            i.relname, ix.indisunique;
+            i.relname AS index_name,
+            ix.indisunique AS is_unique,
+            COALESCE((
+              SELECT json_agg(a.attname ORDER BY k.ord)
+              FROM unnest(ix.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
+              JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+            ), '[]'::json)::text AS columns
+          FROM pg_class t
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+          JOIN pg_index ix ON ix.indrelid = t.oid
+          JOIN pg_class i ON i.oid = ix.indexrelid
+          WHERE n.nspname = 'public'
+            AND t.relname = ${quoteLiteral(tableName)}
+            AND t.relkind IN ('r', 'p')
+          ORDER BY i.relname;
         `
       });
 
@@ -320,10 +398,20 @@ class PgService {
         return [];
       }
 
+      const parseColumns = (raw: unknown): string[] => {
+        if (Array.isArray(raw)) return raw.map(String);
+        try {
+          const parsed = JSON.parse(String(raw ?? '[]'));
+          return Array.isArray(parsed) ? parsed.map(String) : [];
+        } catch {
+          return [];
+        }
+      };
+
       return result.rows.map((row) => ({
         name: cell(row, 'index_name'),
-        unique: Boolean(row.is_unique),
-        columns: Array.isArray(row.columns) ? row.columns.map(String) : [cell(row, 'columns')]
+        unique: row.is_unique === true || row.is_unique === 't' || row.is_unique === 'true',
+        columns: parseColumns(row.columns)
       }));
     } catch (error) {
       console.error(`Error fetching indexes for ${tableName}:`, error);
@@ -408,7 +496,6 @@ class PgService {
 
     try {
       assertWritable(`the insert into ${tableName}`);
-      assertIdent(tableName, 'table');
       const columns = Object.keys(rowData);
       const values = Object.values(rowData);
 
@@ -416,12 +503,11 @@ class PgService {
         return false;
       }
 
-      columns.forEach(c => assertIdent(c, 'column'));
-      const columnNames = columns.map(c => `"${c}"`).join(', ');
+      const columnNames = columns.map(c => `${quoteIdent(c)}`).join(', ');
       const valuePlaceholders = values.map(v => this.formatValueForSQL(v)).join(', ');
 
       const sql = `
-        INSERT INTO "${tableName}" (${columnNames})
+        INSERT INTO ${quoteIdent(tableName)} (${columnNames})
         VALUES (${valuePlaceholders});
       `;
 
@@ -445,6 +531,36 @@ class PgService {
     }
   }
 
+  /**
+   * WHERE clause naming exactly one row by its whole primary key. Using only
+   * the first key column rewrote or deleted every row sharing that value.
+   */
+  private isView(tableName: string): boolean {
+    return this.currentTables.some(t => t.name === tableName && t.type === 'view');
+  }
+
+  private keyWhere(keyColumns: { name: string }[], row: RowData): string {
+    if (keyColumns.length === 0) {
+      // ctid is the row's physical address. It changes when the row is
+      // updated, so an edit to a row someone else just changed matches
+      // nothing and is reported, instead of hitting a different row.
+      const ctid = row[ROW_LOCATOR];
+      if (typeof ctid !== 'string') {
+        throw new Error('This table has no primary key, so a single row cannot be addressed. Use the SQL editor');
+      }
+      return `ctid = ${quoteLiteral(ctid)}::tid`;
+    }
+    return keyColumns
+      .map(col => {
+        const value = row[col.name];
+        if (value === undefined) throw new Error(`Row is missing its key column ${col.name}`);
+        return value === null
+          ? `${quoteIdent(col.name)} IS NULL`
+          : `${quoteIdent(col.name)} = ${this.formatValueForSQL(value)}`;
+      })
+      .join(' AND ');
+  }
+
   async updateRow(tableName: string, oldRow: RowData, newRow: RowData): Promise<boolean> {
     if (!this.connected) {
       toast({
@@ -457,70 +573,28 @@ class PgService {
 
     try {
       assertWritable(`the edit to ${tableName}`);
-      assertIdent(tableName, 'table');
-      const columns = await this.getTableColumns(tableName);
+      if (this.isView(tableName)) throw new Error(`${tableName} is a view, so it is read-only`);
+      const keyColumns = primaryKeyColumns(await this.getTableColumns(tableName));
 
-      // Find the primary key column
-      const primaryKeyColumn = columns.find(col => col.pk === 1);
-      if (!primaryKeyColumn) {
-        throw new Error(`Cannot update row: Table ${tableName} has no primary key`);
-      }
+      const changes = Object.entries(newRow).filter(([column, value]) => column !== ROW_LOCATOR && oldRow[column] !== value);
+      if (changes.length === 0) return true;
 
-      const pkName = primaryKeyColumn.name;
-      const pkValue = oldRow[pkName];
+      const setClauses = changes.map(([column, value]) => `${quoteIdent(column)} = ${this.formatValueForSQL(value)}`);
+      const sql = `UPDATE ${quoteIdent(tableName)} SET ${setClauses.join(', ')} WHERE ${this.keyWhere(keyColumns, oldRow)};`;
 
-      if (pkValue === undefined) {
-        throw new Error(`Primary key value not found in row data`);
-      }
-
-      // Let's try a completely different approach to avoid parameter index issues
-      // Instead of using $1, $2, etc. parameterized queries, we'll use a safer manual approach
-
-      // Check if any changes are needed
-      const changes = Object.entries(newRow)
-        .filter(([column, value]) => {
-          return column !== pkName && oldRow[column] !== value;
-        });
-
-      if (changes.length === 0) {
-        toast({
-          title: "No Changes",
-          description: "No changes were made to the row",
-        });
-        return true; // No changes needed
-      }
-
-      // Manually construct the SET part with proper escaping
-      const setClauses = changes.map(([column, value]) => {
-        assertIdent(column, 'column');
-        const escapedValue = this.formatValueForSQL(value);
-        return `"${column}" = ${escapedValue}`;
-      });
-
-      // Format the primary key value for the WHERE clause
-      const escapedPkValue = this.formatValueForSQL(pkValue);
-
-      // Build and execute the UPDATE statement without parameters
-      const sql = `
-        UPDATE "${tableName}"
-        SET ${setClauses.join(', ')}
-        WHERE "${pkName}" = ${escapedPkValue};
-      `;
-
-      // Execute the query without using parameterized style
-      const result = await tauriService.executePostgresQuery({
-        query: sql
-      });
-
+      const result = await tauriService.executePostgresQuery({ query: sql });
       if (!result || !result.success) {
         throw new Error(result?.error || "Failed to update row");
+      }
+      if (result.rows_affected === 0) {
+        throw new Error('The row no longer exists. It may have been changed or deleted elsewhere');
       }
 
       return true;
     } catch (error) {
       console.error("Update row error:", error);
       toast({
-        title: "Update Error",
+        title: "Row not updated",
         description: error instanceof Error ? error.message : "Failed to update row",
         variant: "destructive"
       });
@@ -666,13 +740,11 @@ class PgService {
     if (!this.connected || !this.hasPgVector) return null;
 
     try {
-      assertIdent(tableName, 'table');
-      assertIdent(columnName, 'column');
       const result = await tauriService.executePostgresQuery({
         query: `
-          SELECT "${columnName}"::text as vector_text
-          FROM "${tableName}"
-          WHERE "${columnName}" IS NOT NULL
+          SELECT ${quoteIdent(columnName)}::text as vector_text
+          FROM ${quoteIdent(tableName)}
+          WHERE ${quoteIdent(columnName)} IS NOT NULL
           LIMIT ${sampleSize};
         `
       });
@@ -732,9 +804,6 @@ class PgService {
     if (!this.connected || !this.hasPgVector) return [];
 
     try {
-      assertIdent(tableName, 'table');
-      assertIdent(vectorColumn, 'column');
-      assertIdent(primaryKeyColumn, 'column');
       // Build the query based on the distance metric
       let distanceExpr: string;
       let orderExpr: string;
@@ -742,18 +811,18 @@ class PgService {
 
       switch (distanceMetric) {
         case '<->': // L2 distance
-          distanceExpr = `t."${vectorColumn}" <-> source."${vectorColumn}"`;
+          distanceExpr = `t.${quoteIdent(vectorColumn)} <-> source.${quoteIdent(vectorColumn)}`;
           orderExpr = distanceExpr;
           similarityExpr = `1.0 / (1.0 + ${distanceExpr})`;
           break;
         case '<#>': // Inner product (negative)
-          distanceExpr = `t."${vectorColumn}" <#> source."${vectorColumn}"`;
+          distanceExpr = `t.${quoteIdent(vectorColumn)} <#> source.${quoteIdent(vectorColumn)}`;
           orderExpr = distanceExpr;
           similarityExpr = `-(${distanceExpr})`; // Higher is more similar
           break;
         case '<=>': // Cosine distance
         default:
-          distanceExpr = `t."${vectorColumn}" <=> source."${vectorColumn}"`;
+          distanceExpr = `t.${quoteIdent(vectorColumn)} <=> source.${quoteIdent(vectorColumn)}`;
           orderExpr = distanceExpr;
           similarityExpr = `1.0 - (${distanceExpr})`; // Convert to similarity
           break;
@@ -767,14 +836,14 @@ class PgService {
             t.*,
             ${distanceExpr} as distance,
             ${similarityExpr} as similarity
-          FROM "${tableName}" t
+          FROM ${quoteIdent(tableName)} t
           CROSS JOIN (
-            SELECT "${vectorColumn}" 
-            FROM "${tableName}" 
-            WHERE "${primaryKeyColumn}" = ${escapedRowId}
+            SELECT ${quoteIdent(vectorColumn)} 
+            FROM ${quoteIdent(tableName)} 
+            WHERE ${quoteIdent(primaryKeyColumn)} = ${escapedRowId}
           ) source
-          WHERE t."${primaryKeyColumn}" != ${escapedRowId}
-            AND t."${vectorColumn}" IS NOT NULL
+          WHERE t.${quoteIdent(primaryKeyColumn)} != ${escapedRowId}
+            AND t.${quoteIdent(vectorColumn)} IS NOT NULL
           ORDER BY ${orderExpr}
           LIMIT ${limit};
         `
@@ -809,8 +878,6 @@ class PgService {
     if (!this.connected || !this.hasPgVector) return [];
 
     try {
-      assertIdent(tableName, 'table');
-      assertIdent(vectorColumn, 'column');
       const vectorStr = `[${queryVector.join(',')}]`;
       
       let distanceExpr: string;
@@ -819,18 +886,18 @@ class PgService {
 
       switch (distanceMetric) {
         case '<->':
-          distanceExpr = `"${vectorColumn}" <-> '${vectorStr}'::vector`;
+          distanceExpr = `${quoteIdent(vectorColumn)} <-> '${vectorStr}'::vector`;
           orderExpr = distanceExpr;
           similarityExpr = `1.0 / (1.0 + ${distanceExpr})`;
           break;
         case '<#>':
-          distanceExpr = `"${vectorColumn}" <#> '${vectorStr}'::vector`;
+          distanceExpr = `${quoteIdent(vectorColumn)} <#> '${vectorStr}'::vector`;
           orderExpr = distanceExpr;
           similarityExpr = `-(${distanceExpr})`;
           break;
         case '<=>':
         default:
-          distanceExpr = `"${vectorColumn}" <=> '${vectorStr}'::vector`;
+          distanceExpr = `${quoteIdent(vectorColumn)} <=> '${vectorStr}'::vector`;
           orderExpr = distanceExpr;
           similarityExpr = `1.0 - (${distanceExpr})`;
           break;
@@ -842,8 +909,8 @@ class PgService {
             *,
             ${distanceExpr} as distance,
             ${similarityExpr} as similarity
-          FROM "${tableName}"
-          WHERE "${vectorColumn}" IS NOT NULL
+          FROM ${quoteIdent(tableName)}
+          WHERE ${quoteIdent(vectorColumn)} IS NOT NULL
           ORDER BY ${orderExpr}
           LIMIT ${limit};
         `
@@ -872,14 +939,17 @@ class PgService {
     return [...new Set(this.vectorColumns.map(vc => vc.tableName))];
   }
 
-  async deleteRows(tableName: string, primaryKeyColumn: string, rowIds: string[]): Promise<boolean> {
+  /** Delete the given rows, each named by its whole primary key, in one transaction. */
+  async deleteRows(tableName: string, rows: RowData[]): Promise<boolean> {
     if (!this.connected) return false;
+    if (rows.length === 0) return true;
 
     try {
       assertWritable(`the row deletion from ${tableName}`);
-      assertIdent(tableName, 'table');
-      assertIdent(primaryKeyColumn, 'column');
-      const sql = `DELETE FROM "${tableName}" WHERE "${primaryKeyColumn}" IN (${rowIds.map(id => this.formatValueForSQL(id)).join(',')})`;
+      if (this.isView(tableName)) throw new Error(`${tableName} is a view, so it is read-only`);
+      const keyColumns = primaryKeyColumns(await this.getTableColumns(tableName));
+      const where = rows.map(row => `(${this.keyWhere(keyColumns, row)})`).join(' OR ');
+      const sql = `DELETE FROM ${quoteIdent(tableName)} WHERE ${where}`;
       const result = await tauriService.executePostgresQuery({ query: sql });
 
       if (!result || !result.success) {
@@ -890,7 +960,7 @@ class PgService {
     } catch (error) {
       console.error("Delete rows error:", error);
       toast({
-        title: "Delete Error",
+        title: "Rows not deleted",
         description: error instanceof Error ? error.message : "Failed to delete rows",
         variant: "destructive"
       });

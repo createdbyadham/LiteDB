@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { sqliteService } from '@/lib/sqliteService';
 import { pgService } from '@/lib/pgService';
 import { toast } from '@/hooks/use-toast';
-import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, Sparkles, Download } from 'lucide-react';
+import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, MessageSquareCode, Download } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { AiQueryDialog } from './AiQueryDialog';
@@ -674,7 +674,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => setIsAiDialogOpen(true)} className="h-8 text-xs">
-                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  <MessageSquareCode strokeWidth={1.5} className="mr-1.5 h-3.5 w-3.5" />
                   Text to SQL
                 </Button>
                 <div className="flex items-center space-x-2">
@@ -706,8 +706,8 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
               <Textarea
                 ref={textareaRef}
                 placeholder={isPostgres ?
-                  "Enter PostgreSQL statements (each statement must end with a semicolon)..." :
-                  "Enter SQL statements separated by semicolons (;)..."
+                  "Enter PostgreSQL statements (each statement must end with a semicolon)" :
+                  "Enter SQL statements separated by semicolons (;)"
                 }
                 className="flex-1 font-mono text-sm min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 value={sqlScript}
@@ -774,7 +774,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
                                       <th
                                         key={idx}
                                         scope="col"
-                                        className="px-3 py-2 text-left text-xs font-medium text-muted-foreground tracking-wider"
+                                        className="px-3 py-2 text-left text-xs font-medium text-muted-foreground"
                                       >
                                         {column}
                                       </th>

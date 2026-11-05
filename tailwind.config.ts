@@ -20,10 +20,14 @@ export default {
 		},
 		extend: {
 			fontFamily: {
-				sans: ['Inter var', 'sans-serif'],
+				sans: ['Inter', 'system-ui', 'sans-serif'],
+				mono: ['ui-monospace', 'Cascadia Mono', 'SFMono-Regular', 'Consolas', 'monospace'],
 			},
 			colors: {
 				border: 'hsl(var(--border))',
+				key: 'hsl(var(--key))',
+				warning: 'hsl(var(--warning))',
+				positive: 'hsl(var(--positive))',
 				input: 'hsl(var(--input))',
 				ring: 'hsl(var(--ring))',
 				background: 'hsl(var(--background))',

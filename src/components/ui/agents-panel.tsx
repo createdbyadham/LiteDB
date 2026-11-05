@@ -117,7 +117,7 @@ export function AgentsPanel() {
         <div className="space-y-4">
             <div className="rounded-md border border-border/80 px-3 py-2.5 flex items-start gap-2.5">
                 {live ? (
-                    <Plug className="h-4 w-4 mt-0.5 text-emerald-500 shrink-0" />
+                    <Plug className="h-4 w-4 mt-0.5 text-positive shrink-0" />
                 ) : (
                     <Unplug className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
                 )}
