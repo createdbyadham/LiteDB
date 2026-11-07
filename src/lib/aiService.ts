@@ -4,6 +4,7 @@ import { loadAllApiKeys, adoptLegacyApiKeys, markLegacyApiKeysMigrated } from '.
 import { buildRepairMessages, buildTextToSqlMessages, stripSqlFences } from './promptBuilder';
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
 import type { DatabaseSchema } from './schemaTypes';
+import { FEW_SHOT, REPLY_TOKENS, knownContextWindow, withoutSampleValues } from './contextBudget';
 
 export type { ColumnSchema, DatabaseSchema, SqlDialect, TableSchema } from './schemaTypes';
 
@@ -320,9 +321,105 @@ let client = createClient();
 // Hold current schema context in-memory. It's ephemeral and recomputed on connection/load.
 let currentSchema: DatabaseSchema | null = null;
 
+/** Size of the active model's context window, and where that number came from. */
+export interface ContextWindow {
+  tokens: number | null;
+  /** Shown under the meter, so an assumed number is never presented as measured. */
+  source: string;
+  /** For Ollama: the most the model itself supports, when it is more than the window in use. */
+  modelMax?: number;
+}
+
+const windowCache = new Map<string, ContextWindow>();
+
+/** GET or POST through the Tauri proxy, as the OpenAI client does. Null on any failure. */
+async function proxyJson(url: string, method: 'GET' | 'POST', body?: unknown): Promise<Record<string, unknown> | null> {
+  try {
+    const response = await tauriInvoke<{ status: number; body: string }>('proxy_request', {
+      url,
+      method,
+      headers: { 'Content-Type': 'application/json', Origin: 'http://localhost' },
+      body: body === undefined ? null : JSON.stringify(body),
+    });
+    if (response.status < 200 || response.status >= 300) return null;
+    return JSON.parse(response.body) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ollama's window is a runtime setting (num_ctx), not a property of the
+ * model, and a prompt longer than it is cut from the start — which drops the
+ * schema first. Ask the server rather than assume: a loaded model reports
+ * the window it runs with, and a Modelfile may set num_ctx.
+ */
+async function ollamaWindow(endpoint: string, model: string): Promise<ContextWindow> {
+  const base = endpoint.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+  const wanted = model.includes(':') ? model : `${model}:latest`;
+
+  let modelMax: number | undefined;
+  const show = await proxyJson(`${base}/api/show`, 'POST', { model, name: model });
+  if (show) {
+    const info = (show.model_info ?? {}) as Record<string, unknown>;
+    const max = Object.entries(info).find(([key]) => key.endsWith('.context_length'))?.[1];
+    if (typeof max === 'number') modelMax = max;
+  }
+
+  const ps = await proxyJson(`${base}/api/ps`, 'GET');
+  const loaded = Array.isArray(ps?.models)
+    ? (ps.models as Record<string, unknown>[]).find(m => m.name === wanted || m.model === wanted)
+    : undefined;
+  if (typeof loaded?.context_length === 'number') {
+    return { tokens: loaded.context_length, source: 'as loaded in Ollama', modelMax };
+  }
+
+  const numCtx = /(?:^|\n)\s*num_ctx\s+(\d+)/.exec(String(show?.parameters ?? ''));
+  if (numCtx) return { tokens: Number(numCtx[1]), source: 'num_ctx in its Modelfile', modelMax };
+
+  return { tokens: 4096, source: 'assumed Ollama default', modelMax };
+}
+
 export const aiService = {
   setSchema(schema: DatabaseSchema) {
     currentSchema = schema;
+  },
+  /** The schema the next request will send, for measuring it. */
+  getSchema(): DatabaseSchema | null {
+    return currentSchema;
+  },
+  /** The active provider and the model that will actually run. */
+  activeModel(): { provider: AIProvider; model: string } {
+    const settings = getSettings();
+    const config = settings.configs[settings.activeProvider];
+    return { provider: settings.activeProvider, model: config.modelName || defaultModelFor(settings.activeProvider) };
+  },
+  /**
+   * The active model's context window. Asked of Ollama, looked up by name
+   * otherwise, and null when unknown — the meter then shows usage without
+   * inventing a limit to warn about.
+   */
+  async contextWindow(): Promise<ContextWindow> {
+    const settings = getSettings();
+    const provider = settings.activeProvider;
+    const config = settings.configs[provider];
+    const model = config.modelName || defaultModelFor(provider);
+    const key = `${provider}|${config.endpoint ?? ''}|${model}`;
+    const cached = windowCache.get(key);
+    if (cached) return cached;
+
+    let result: ContextWindow;
+    if (provider === 'ollama' && config.endpoint) {
+      result = await ollamaWindow(config.endpoint, model);
+    } else {
+      const known = knownContextWindow(model);
+      result = known
+        ? { tokens: known, source: 'published limit' }
+        : { tokens: null, source: 'window unknown for this model' };
+    }
+    // An assumed Ollama default may change once the model is loaded; ask again next time.
+    if (result.source !== 'assumed Ollama default') windowCache.set(key, result);
+    return result;
   },
   /**
    * The model currently configured to generate SQL.
@@ -412,6 +509,7 @@ export const aiService = {
   async generateSqlQuery(
     prompt: string,
     validate?: (sql: string) => Promise<string | null>,
+    options: { compact?: boolean } = {},
   ): Promise<string> {
     try {
       const settings = getSettings();
@@ -426,7 +524,10 @@ export const aiService = {
       // scored identically for more tokens and latency. Costs a strong model
       // ~31% more prompt tokens for no gain, which is a routing decision
       // rather than a reason to withhold it from everyone.
-      let messages = buildTextToSqlMessages(prompt, currentSchema, { fewShot: 3 });
+      // Compact (chosen in the dialog's context meter) drops the sample values
+      // and the examples so the request fits a small window.
+      const schema = options.compact && currentSchema ? withoutSampleValues(currentSchema) : currentSchema;
+      let messages = buildTextToSqlMessages(prompt, schema, { fewShot: options.compact ? 0 : FEW_SHOT });
 
       // One extra round at most: a second failure means the model is not
       // converging, and a third request is latency the user pays for nothing.
@@ -438,7 +539,7 @@ export const aiService = {
           messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
           temperature: 0,
           top_p: 1.0,
-          max_tokens: 1000,
+          max_tokens: REPLY_TOKENS,
           model: modelName
         });
 

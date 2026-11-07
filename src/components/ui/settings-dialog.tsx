@@ -19,6 +19,7 @@ import { aiService, AIProvider, AISettings, defaultSettings, loadAISettingsAsync
 import { storeAllApiKeys } from "@/lib/secretStorage"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs"
 import { AgentsPanel } from "./agents-panel"
+import { StarSettings } from "@/components/Mascot/StarSettings"
 import { appLogDir } from '@tauri-apps/api/path'
 import { readDir, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
@@ -268,15 +269,16 @@ export function SettingsDialog() {
         <DialogHeader className="space-y-1 px-6 pb-4 pt-6">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            AI provider, connected agents and logs
+            AI provider, connected agents, Star and logs
           </DialogDescription>
         </DialogHeader>
         
         <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 w-full flex-1 flex-col">
           <div className="px-6">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="ai">AI provider</TabsTrigger>
               <TabsTrigger value="agents">Agents</TabsTrigger>
+              <TabsTrigger value="star">Star</TabsTrigger>
               <TabsTrigger value="logs">Logs</TabsTrigger>
             </TabsList>
           </div>
@@ -495,6 +497,10 @@ export function SettingsDialog() {
 
           <TabsContent value="agents" className="mt-0 min-h-0 overflow-y-auto px-6 py-5">
             <AgentsPanel />
+          </TabsContent>
+
+          <TabsContent value="star" className="mt-0 min-h-0 overflow-y-auto px-6 py-5">
+            <StarSettings />
           </TabsContent>
 
           <TabsContent value="logs" className="mt-0 min-h-0 overflow-y-auto px-6 py-5">

@@ -227,3 +227,30 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* Star, the Text-to-SQL mascot (components/Mascot). Motion is spring
+   physics in motion.ts; only the resting breath is CSS, so it runs on the
+   compositor and the frame loop can sleep. */
+.star-breathe { transform-origin: 50% 100%; }
+.star-breathe.is-breathing { animation: star-breathe 4.8s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+.star-breathe.is-breathing.is-drowsy { animation-duration: 7s; }
+@keyframes star-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.008, 1.024); }
+}
+
+/* Fingertips hold the edge; --grip (0..1) is set by the spring loop. */
+.star-hand {
+  position: absolute;
+  width: 9px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--star-body, #ededed);
+  border: 1px solid var(--star-line, rgba(16, 16, 18, 0.3));
+  transform-origin: 50% 100%;
+  transform: scale(calc(0.6 + 0.4 * var(--grip, 1)), var(--grip, 1));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .star-breathe.is-breathing { animation: none; }
+}
