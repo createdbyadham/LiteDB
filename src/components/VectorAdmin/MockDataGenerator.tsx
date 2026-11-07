@@ -23,18 +23,22 @@ import {
   Dices,
   Database
 } from 'lucide-react';
-import { VectorColumnInfo, pgService } from '@/lib/pgService';
+import type { VectorColumnInfo } from '@/lib/db/pgClient';
+import type { RowData } from '@/lib/types';
 import { localEmbeddings, setProgressCallback, AVAILABLE_MODELS } from '@/lib/localEmbeddings';
 
 interface MockDataGeneratorProps {
   vectorColumns: VectorColumnInfo[];
   getTableColumns: (tableName: string) => Promise<{ name: string; pk: number; type: string }[]>;
+  /** Inserts through the connection's client, so the safety mode applies. */
+  insertRow: (tableName: string, values: RowData) => Promise<boolean>;
   onInsertComplete?: () => void;
 }
 
 export const MockDataGenerator = ({
   vectorColumns,
   getTableColumns,
+  insertRow,
   onInsertComplete
 }: MockDataGeneratorProps) => {
   const [selectedTable, setSelectedTable] = useState<string>('');
@@ -183,7 +187,7 @@ export const MockDataGenerator = ({
     try {
       // Filter out empty values (unless they are explicitly empty strings that are allowed)
       // For simplicity, we'll send all keys in formData
-      const success = await pgService.insertRow(selectedTable, formData);
+      const success = await insertRow(selectedTable, formData);
       
       if (success) {
         toast({

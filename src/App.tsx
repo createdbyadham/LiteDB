@@ -1,26 +1,31 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { HashRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "next-themes";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider } from "@/contexts/SidebarContext";
 import DatabaseView from "./components/DatabaseView";
-import UploadView from '@/components/UploadView';
+import ConnectionsView from '@/components/Connections/ConnectionsView';
 import TitleBar from '@/components/TitleBar';
+import { CommandPalette } from '@/components/CommandPalette';
 import { useEffect } from 'react';
 import { check } from '@tauri-apps/plugin-updater';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { sealHandoff } from '@/lib/mcpHandoff';
+import { inTauri } from '@/lib/db/native';
+import { THEME_STORAGE_KEY } from '@/lib/theme';
 
 const App = () => {
   useEffect(() => {
+    if (!inTauri()) return;
     const checkForAppUpdates = async () => {
       try {
         const update = await check();
         if (update) {
           const wantsToUpdate = await ask(
-            `LiteDB ${update.version} is available!\n\nRelease notes: ${update.body}\n\nDo you want to install it now?`, 
+            `LiteDB ${update.version} is available!\n\nRelease notes: ${update.body}\n\nDo you want to install it now?`,
             {
               title: 'Update Available',
               kind: 'info',
@@ -58,23 +63,26 @@ const App = () => {
   }, []);
 
   return (
-  <SidebarProvider>
-    <TooltipProvider>
-      <div className="flex flex-col h-screen overflow-hidden">
-        <TitleBar />
-        <div className="flex-1 overflow-hidden">
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem storageKey={THEME_STORAGE_KEY} disableTransitionOnChange>
+      <SidebarProvider>
+        <TooltipProvider>
           <HashRouter>
-            <Routes>
-              <Route path="/" element={<UploadView />} />
-              <Route path="/database" element={<DatabaseView />} />
-            </Routes>
+            <div className="flex flex-col h-screen overflow-hidden">
+              <TitleBar />
+              <div className="flex-1 overflow-hidden relative">
+                <Routes>
+                  <Route path="/" element={<ConnectionsView />} />
+                  <Route path="/database" element={<DatabaseView />} />
+                </Routes>
+              </div>
+            </div>
+            <CommandPalette />
           </HashRouter>
-        </div>
-      </div>
-      <Toaster />
-      <Sonner />
-    </TooltipProvider>
-  </SidebarProvider>
+          <Toaster />
+          <Sonner />
+        </TooltipProvider>
+      </SidebarProvider>
+    </ThemeProvider>
   );
 };
 

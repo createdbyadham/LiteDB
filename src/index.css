@@ -8,6 +8,72 @@
 
 @layer base {
   :root {
+    /* Light: paper surfaces, the same neutral ramp inverted. The amber key
+       darkens so it still reads against white. */
+    --background: 0 0% 100%;
+    --foreground: 240 6% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 6% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 6% 10%;
+
+    --primary: 240 6% 10%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 40%;
+
+    --accent: 240 5% 93%;
+    --accent-foreground: 240 6% 10%;
+
+    --destructive: 358 70% 50%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 6% 89%;
+    --input: 240 6% 86%;
+    --ring: 240 5% 60%;
+
+    --key: 32 92% 40%;
+    --warning: 22 88% 44%;
+    --positive: 151 60% 33%;
+
+    --radius: 0.625rem;
+
+    --sidebar-background: 240 5% 97%;
+    --sidebar-foreground: 240 6% 10%;
+    --sidebar-primary: 32 92% 40%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 92%;
+    --sidebar-accent-foreground: 240 6% 10%;
+    --sidebar-border: 240 6% 89%;
+    --sidebar-ring: 240 5% 60%;
+
+    /* SQL syntax colours, used by the editor's highlight style. */
+    --sql-keyword: 262 58% 47%;
+    --sql-string: 145 55% 30%;
+    --sql-number: 24 85% 40%;
+    --sql-comment: 240 5% 52%;
+    --sql-function: 210 75% 40%;
+    --sql-type: 186 70% 30%;
+
+    color-scheme: light;
+
+    --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  }
+
+  .dark {
+    color-scheme: dark;
+    --sql-keyword: 262 80% 76%;
+    --sql-string: 140 45% 63%;
+    --sql-number: 30 90% 66%;
+    --sql-comment: 240 4% 50%;
+    --sql-function: 205 85% 70%;
+    --sql-type: 180 55% 62%;
     /* Graphite ramp. Surfaces stay neutral; colour lives in the data. */
     --background: 240 2% 8%;        /* #141415 page */
     --foreground: 0 0% 93%;         /* #ededed primary text */
@@ -52,8 +118,6 @@
     --sidebar-accent-foreground: 0 0% 93%;
     --sidebar-border: 240 3% 16%;
     --sidebar-ring: 240 3% 53%;
-
-    --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
   }
 
   html, body {
@@ -98,6 +162,14 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* Horizontal strips (title-bar tabs) that scroll without showing a bar. */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
 }
 
 /* Global Scrollbar */

@@ -22,6 +22,8 @@ interface SidebarProps {
   items: SidebarItem[];
   selectedId: string | null;
   stats?: React.ReactNode;
+  /** Controls above the search box, such as a schema picker. */
+  toolbar?: React.ReactNode;
   searchPlaceholder?: string;
   className?: string;
 }
@@ -33,6 +35,7 @@ export function Sidebar({
   items,
   selectedId,
   stats,
+  toolbar,
   searchPlaceholder = "Search",
   className
 }: SidebarProps) {
@@ -88,6 +91,8 @@ export function Sidebar({
             </div>
           )}
 
+          {toolbar && <div className="px-3 pt-3">{toolbar}</div>}
+
           {/* Search */}
           <div className="p-3 border-b">
             <div className="relative">
@@ -112,7 +117,7 @@ export function Sidebar({
                     className={cn(
                       "w-full text-left h-9 px-3 rounded-md text-sm transition-colors",
                       "hover:bg-muted/50 flex items-center justify-between gap-3 group",
-                      selectedId === item.id && "bg-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                      selectedId === item.id && "bg-muted"
                     )}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">

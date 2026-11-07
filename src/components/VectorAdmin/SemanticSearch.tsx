@@ -37,7 +37,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { VectorColumnInfo, SimilarityResult } from '@/lib/pgService';
+import type { VectorColumnInfo, SimilarityResult } from '@/lib/db/pgClient';
 import { VectorBadge } from './VectorBadge';
 import { localEmbeddings, setProgressCallback, AVAILABLE_MODELS } from '@/lib/localEmbeddings';
 import { useSidebar } from '@/contexts/SidebarContext';

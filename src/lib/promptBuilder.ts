@@ -200,3 +200,85 @@ export function buildRepairMessages(
         },
     ];
 }
+
+/**
+ * Messages asking the model to repair SQL the user ran, from the engine's
+ * own error. Same schema context as Text to SQL, so it fixes names against
+ * what exists rather than guessing.
+ */
+export function buildFixMessages(sql: string, errorMessage: string, schema: DatabaseSchema | null): ChatMessage[] {
+    const messages: ChatMessage[] = [
+        {
+            role: 'system',
+            content: `<system_instructions>
+  <role>SQL Expert Assistant</role>
+  <task>Fix a SQL query that failed to run.</task>
+  <constraints>
+    <constraint>Return only the corrected SQL, raw, with no explanation and no code fences.</constraint>
+    <constraint>Change as little as possible: keep the user's intent, formatting and aliases.</constraint>
+    <constraint>Use only tables and columns that exist in the schema.</constraint>
+  </constraints>
+</system_instructions>`,
+        },
+    ];
+    if (schema) {
+        messages.push({
+            role: 'system',
+            content: `<database_context>
+  <dialect>${schema.dialect}</dialect>
+  <schema>
+${serializeSchema(schema)}
+  </schema>
+</database_context>`,
+        });
+    }
+    messages.push({
+        role: 'user',
+        content: `<failed_query>
+${sql}
+</failed_query>
+<error>${errorMessage}</error>`,
+    });
+    return messages;
+}
+
+/**
+ * Messages asking for a plain-language explanation of a query, with the
+ * planner's output when there is one. The plan comes from plain EXPLAIN —
+ * never ANALYZE — so asking for an explanation never runs the statement.
+ */
+export function buildExplainMessages(sql: string, plan: string | null, schema: DatabaseSchema | null): ChatMessage[] {
+    const messages: ChatMessage[] = [
+        {
+            role: 'system',
+            content: `<system_instructions>
+  <role>Database engineer explaining SQL to a colleague</role>
+  <format>
+    Start with one or two sentences on what the query returns or changes.
+    Then a short bullet list of what matters: joins and what they match on, filters, grouping, ordering,
+    and anything risky or slow — an UPDATE or DELETE without a WHERE, a full table scan in the plan,
+    a missing index, a join that can multiply rows, implicit casts.
+    Plain language. Markdown: short paragraphs, "- " bullets, \`inline code\`. No headings. Under 200 words.
+  </format>
+</system_instructions>`,
+        },
+    ];
+    if (schema) {
+        messages.push({
+            role: 'system',
+            content: `<database_context>
+  <dialect>${schema.dialect}</dialect>
+  <schema>
+${serializeSchema(schema)}
+  </schema>
+</database_context>`,
+        });
+    }
+    messages.push({
+        role: 'user',
+        content: `<query>
+${sql}
+</query>${plan ? `\n<plan>\n${plan}\n</plan>` : ''}`,
+    });
+    return messages;
+}
