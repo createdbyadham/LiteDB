@@ -5,13 +5,11 @@ import { AT_REST, makeStar } from './art';
 
 const COLORS: [StarLook['color'], string][] = [
   ['white', 'White'],
-  ['amber', 'Amber'],
   ['graphite', 'Graphite'],
 ];
 const EYES: [StarLook['eyes'], string][] = [
   ['cutout', 'Cutout'],
   ['bubble', 'Glossy'],
-  ['dots', 'Dots'],
   ['lines', 'Lines'],
   ['none', 'None'],
 ];
