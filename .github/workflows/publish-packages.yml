@@ -1,0 +1,203 @@
+name: Publish packages
+
+# Runs when a draft release is published. Each store gets its own job.
+# A missing token fails that store and leaves the others running.
+#
+# Secrets:
+#   HOMEBREW_GITHUB_TOKEN   PAT that can fork homebrew/homebrew-cask and open a PR
+#   WINGET_TOKEN            PAT that can fork microsoft/winget-pkgs (public_repo)
+#   SCOOP_TOKEN             PAT that can fork ScoopInstaller/Extras and open a PR
+#   AUR_SSH_PRIVATE_KEY     SSH key registered on aur.archlinux.org for litedb-bin
+#   AUR_USERNAME
+#   AUR_EMAIL               the address registered on the AUR account
+#   FLATHUB_TOKEN           PAT that can fork flathub/com.adhamehab.litedb
+# The Flathub repo does not exist until the app is accepted. The job still
+# builds the manifest and uploads it as an artifact for the first submission:
+# https://github.com/flathub/flathub/wiki/App-Submission
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (v2.4.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG:-$INPUT_TAG}"
+          version="${tag#v}"
+          if [ -z "$tag" ] || [ "$tag" != "v${version}" ]; then
+            echo "::error::Refusing tag '${tag}'. Package URLs use v<version>, the same tag as the README."
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  homebrew:
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+      - name: Require token
+        env:
+          HOMEBREW_GITHUB_TOKEN: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_GITHUB_TOKEN" ]; then
+            echo "::error::HOMEBREW_GITHUB_TOKEN is not set."
+            exit 1
+          fi
+      - name: Open cask pull request
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: bash packaging/publish/homebrew.sh "$TAG"
+
+  winget:
+    needs: guard
+    runs-on: windows-latest
+    steps:
+      - name: Require token
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::error::WINGET_TOKEN is not set."
+            exit 1
+          fi
+      - uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: AdhamEhab.LiteDB
+          installers-regex: 'LiteDB_.+_x64-setup\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}
+          release-tag: ${{ needs.guard.outputs.tag }}
+
+  scoop:
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+      - name: Require token
+        env:
+          SCOOP_TOKEN: ${{ secrets.SCOOP_TOKEN }}
+        run: |
+          if [ -z "$SCOOP_TOKEN" ]; then
+            echo "::error::SCOOP_TOKEN is not set."
+            exit 1
+          fi
+      - name: Open extras pull request
+        env:
+          GH_TOKEN: ${{ secrets.SCOOP_TOKEN }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: bash packaging/publish/scoop.sh "$TAG"
+
+  aur:
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+      - name: Require AUR credentials
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+        run: |
+          missing=()
+          for name in AUR_SSH_PRIVATE_KEY AUR_USERNAME AUR_EMAIL; do
+            if [ -z "${!name}" ]; then missing+=("$name"); fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing ${missing[*]}."
+            exit 1
+          fi
+      - name: Set package version
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
+          sed -i 's/^pkgrel=.*/pkgrel=1/' packaging/aur/PKGBUILD
+      - name: Publish litedb-bin
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        with:
+          pkgname: litedb-bin
+          pkgbuild: packaging/aur/PKGBUILD
+          updpkgsums: true
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ needs.guard.outputs.version }}"
+
+  flathub:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.tag }}
+      - name: Require token
+        env:
+          FLATHUB_TOKEN: ${{ secrets.FLATHUB_TOKEN }}
+        run: |
+          if [ -z "$FLATHUB_TOKEN" ]; then
+            echo "::error::FLATHUB_TOKEN is not set."
+            exit 1
+          fi
+      - name: Install generators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-venv
+          git clone --depth 1 https://github.com/flatpak/flatpak-builder-tools.git "$RUNNER_TEMP/flatpak-builder-tools"
+          python3 -m venv "$RUNNER_TEMP/flatpak-venv"
+          "$RUNNER_TEMP/flatpak-venv/bin/pip" install -r "$RUNNER_TEMP/flatpak-builder-tools/node/requirements.txt"
+          "$RUNNER_TEMP/flatpak-venv/bin/pip" install -r "$RUNNER_TEMP/flatpak-builder-tools/cargo/requirements.txt"
+      - name: Vendor npm and cargo sources
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          py="$RUNNER_TEMP/flatpak-venv/bin/python"
+          "$py" "$RUNNER_TEMP/flatpak-builder-tools/node/flatpak-node-generator.py" \
+            npm package-lock.json -o "$RUNNER_TEMP/node-sources.json"
+          "$py" "$RUNNER_TEMP/flatpak-builder-tools/cargo/flatpak-cargo-generator.py" \
+            src-tauri/Cargo.lock -o "$RUNNER_TEMP/cargo-sources.json"
+          "$py" packaging/flathub/assemble.py \
+            --version "$VERSION" \
+            --commit "$(git rev-parse HEAD)" \
+            --cargo "$RUNNER_TEMP/cargo-sources.json" \
+            --npm "$RUNNER_TEMP/node-sources.json" \
+            --output "$RUNNER_TEMP/flathub"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flathub-manifest
+          path: ${{ runner.temp }}/flathub
+          if-no-files-found: error
+      - name: Open Flathub pull request
+        env:
+          GH_TOKEN: ${{ secrets.FLATHUB_TOKEN }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: bash packaging/publish/flathub.sh "$VERSION" "$RUNNER_TEMP/flathub"

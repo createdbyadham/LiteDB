@@ -1,0 +1,3 @@
+packaging/publish/*.sh text eol=lf
+packaging/aur/PKGBUILD text eol=lf
+packaging/flathub/assemble.py text eol=lf

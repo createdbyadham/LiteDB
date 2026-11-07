@@ -1,0 +1,15 @@
+pkgname=litedb-bin
+pkgver=2.4.0
+pkgrel=1
+pkgdesc="SQLite and PostgreSQL desktop client"
+arch=('x86_64')
+url="https://github.com/createdbyadham/LiteDB"
+license=('MIT')
+depends=('fuse2')
+options=('!strip')
+source_x86_64=("https://github.com/createdbyadham/LiteDB/releases/download/v${pkgver}/LiteDB_${pkgver}_amd64.AppImage")
+sha256sums_x86_64=('SKIP')
+
+package() {
+  install -Dm755 "${srcdir}/LiteDB_${pkgver}_amd64.AppImage" "${pkgdir}/usr/bin/litedb"
+}

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The webview CSP no longer allows `cdn.gpteng.co` or `rsms.me`, and `connect-src` is no longer `*`. Model downloads go to Hugging Face. The ONNX runtime is served with the app.
+
+### Fixed
+
+- Release assets are published on `v<version>`, the tag the README and changelog link to.
+- macOS installers are Developer ID signed and notarized. Windows installers are Authenticode-signed, so the download is not an unsigned file Gatekeeper or SmartScreen rejects.
+
 ## [2.4.0] - 2026-11-07
 
 ### Added
@@ -84,8 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Download badge and release links updated to v2.1.0
 
 [2.4.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.4.0
-[2.3.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.3.0
-[2.2.2]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.2
-[2.2.1]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.1
-[2.2.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.0
-[2.1.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.1.0
+[2.3.0]: https://github.com/createdbyadham/LiteDB/releases/tag/app-v2.3.0
+[2.2.2]: https://github.com/createdbyadham/LiteDB/releases/tag/app-v2.2.2
+[2.2.1]: https://github.com/createdbyadham/LiteDB/releases/tag/app-v2.2.1
+[2.2.0]: https://github.com/createdbyadham/LiteDB/releases/tag/app-v2.2.0
+[2.1.0]: https://github.com/createdbyadham/LiteDB/releases/tag/app-v2.1.0

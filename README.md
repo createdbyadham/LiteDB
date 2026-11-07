@@ -11,6 +11,22 @@ A modern, fast, and user-friendly database viewer/editor built with React and Ta
 
 ![LiteDB](./docs/assets/Litedb.png)
 
+## Install
+
+```bash
+brew install --cask litedb
+winget install -e --id AdhamEhab.LiteDB
+scoop bucket add extras && scoop install extras/litedb
+yay -S litedb-bin
+flatpak install flathub com.adhamehab.litedb
+```
+
+The badge above is the GitHub release for this version. macOS builds are Developer ID signed and notarized. Windows builds are Authenticode-signed.
+
+## Code signing policy
+
+Free code signing provided by SignPath.io, certificate by SignPath Foundation
+
 ## Measured, not asserted
 
 LiteDB's Text-to-SQL agent ships with a public benchmark in [`evals/`](./evals)

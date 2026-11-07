@@ -1,0 +1,30 @@
+{
+    "version": "VERSION",
+    "description": "SQLite and PostgreSQL desktop client",
+    "homepage": "https://github.com/createdbyadham/LiteDB",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/createdbyadham/LiteDB/releases/download/vVERSION/LiteDB_VERSION_x64-setup.exe#/dl.7z",
+            "hash": "SHA256"
+        }
+    },
+    "pre_install": [
+        "Expand-7zipArchive \"$dir\\`$PLUGINSDIR\\app-64.7z\" \"$dir\" -Removal",
+        "Remove-Item \"$dir\\`$PLUGINSDIR\", \"$dir\\Uninstall*\" -Force -Recurse"
+    ],
+    "shortcuts": [
+        [
+            "LiteDB.exe",
+            "LiteDB"
+        ]
+    ],
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/createdbyadham/LiteDB/releases/download/v$version/LiteDB_$version_x64-setup.exe#/dl.7z"
+            }
+        }
+    }
+}
