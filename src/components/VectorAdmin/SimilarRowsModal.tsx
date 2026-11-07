@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table';
 import { Loader2, Search, Box } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SimilarityResult, VectorColumnInfo } from '@/lib/pgService';
+import type { SimilarityResult, VectorColumnInfo } from '@/lib/db/pgClient';
 import { RowData } from '@/lib/sqliteService';
 import { VectorBadge } from './VectorBadge';
 

@@ -36,6 +36,8 @@ export interface ActiveConnection {
     sqlitePath?: string | null;
     /** Addressing plus password, so the MCP server can follow this connection. */
     postgres?: HandoffPostgres;
+    /** Tagged production: read-only unless someone chooses otherwise. */
+    production?: boolean;
 }
 
 function readPolicies(): Record<string, SafetyPolicy> {
@@ -61,7 +63,30 @@ function readPolicies(): Record<string, SafetyPolicy> {
  * click away for the case it is meant for: pointing the app at production.
  */
 export function policyFor(connectionId: string): SafetyPolicy {
-    return readPolicies()[connectionId] ?? DEFAULT_POLICY;
+    return readPolicies()[connectionId] ?? defaultPolicies.get(connectionId) ?? DEFAULT_POLICY;
+}
+
+// What a connection starts in when nobody has chosen a mode for it. A
+// connection tagged production starts read-only: pointing the app at
+// production is the case read-only exists for, and the tag says it is that.
+const defaultPolicies = new Map<string, SafetyPolicy>();
+
+export function setDefaultPolicy(connectionId: string, policy: SafetyPolicy | null): void {
+    if (policy) defaultPolicies.set(connectionId, policy);
+    else defaultPolicies.delete(connectionId);
+}
+
+/** Forget a chosen mode, so the connection falls back to its default. */
+export function clearPolicyFor(connectionId: string): void {
+    try {
+        const policies = readPolicies();
+        if (!(connectionId in policies)) return;
+        delete policies[connectionId];
+        localStorage.setItem(POLICY_STORAGE_KEY, JSON.stringify(policies));
+    } catch (error) {
+        console.error('Failed to clear safety policy:', error);
+    }
+    window.dispatchEvent(new CustomEvent('sqlPolicyChanged', { detail: { connectionId } }));
 }
 
 export function setPolicyFor(connectionId: string, policy: SafetyPolicy): void {
@@ -80,9 +105,9 @@ export function setPolicyFor(connectionId: string, policy: SafetyPolicy): void {
     }
 }
 
-// Which connection the services should consult. A desktop client holds one at
-// a time, so this is module state rather than a parameter threaded through
-// every method signature.
+// The connection on screen: what the status bar shows, what the editor runs
+// against, and what the MCP server follows. Other connections can be open
+// behind it; their clients pass their own id to `assertWritable`.
 let active: ActiveConnection | null = null;
 
 export function setActiveConnection(connection: ActiveConnection): void {
@@ -114,8 +139,9 @@ export function activePolicy(): SafetyPolicy {
  * inline edits and row deletions as well as the SQL editor. A read-only mode
  * that only guarded the query box would be a claim the app does not honour.
  */
-export function isReadOnly(): boolean {
-    return activePolicy() === 'read-only';
+export function isReadOnly(connectionId?: string): boolean {
+    const policy = connectionId ? policyFor(connectionId) : activePolicy();
+    return policy === 'read-only';
 }
 
 /**
@@ -171,8 +197,12 @@ export class ReadOnlyConnectionError extends Error {
 }
 
 /** Throw unless the active connection permits writes. */
-export function assertWritable(operation: string): void {
-    if (isReadOnly()) throw new ReadOnlyConnectionError(operation);
+/**
+ * Throw unless the connection permits writes. Clients pass their own policy
+ * id, so a connection open behind the active one is held to its own mode.
+ */
+export function assertWritable(operation: string, connectionId?: string): void {
+    if (isReadOnly(connectionId)) throw new ReadOnlyConnectionError(operation);
 }
 
 export interface DecisionRecord {
@@ -187,6 +217,8 @@ export interface DecisionRecord {
     durationMs?: number | null;
     model?: string | null;
     prompt?: string | null;
+    /** The connection it ran on, when that is not the active one. */
+    connection?: { label: string; dialect: SqlDialect };
 }
 
 /**
@@ -197,7 +229,7 @@ export interface DecisionRecord {
  * question about a statement.
  */
 export async function recordDecision(record: DecisionRecord): Promise<void> {
-    const connection = active;
+    const connection = record.connection ?? active;
     const at = new Date().toISOString();
 
     for (const statement of record.statements) {

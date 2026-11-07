@@ -22,6 +22,13 @@ url = "2"
 keyring = "3"
 tauri-plugin-log = "2.8.0"
 tauri-plugin-clipboard-manager = "2.3.2"
+# 0.30 because it shares libsqlite3-sys 0.27 with sqlx 0.7: the `links = "sqlite3"`
+# rule allows one copy in the graph, and sqlx lists its SQLite driver even unused.
+rusqlite = { version = "0.30", features = ["bundled", "column_decltype"] }
+# ring rather than the default aws-lc-rs, which needs CMake and NASM on Windows.
+russh = { version = "0.65", default-features = false, features = ["ring", "flate2", "rsa"] }
+base64 = "0.22"
+log = "0.4"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"

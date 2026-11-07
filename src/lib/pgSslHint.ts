@@ -7,10 +7,13 @@
  */
 export function pgSslHint(message: string, sslRequired: boolean): string | null {
     if (!sslRequired && /no encryption|ssl off|insecure|sslmode|requires? (ssl|encryption|tls)/i.test(message)) {
-        return 'This server requires an encrypted connection. Tick "Require SSL" and connect again.';
+        return 'This server requires an encrypted connection. Set SSL to Require (or a Verify mode) and connect again.';
     }
     if (sslRequired && /does not support (tls|ssl)/i.test(message)) {
-        return 'This server does not accept encrypted connections. Untick "Require SSL" to connect without it.';
+        return 'This server does not accept encrypted connections. Set SSL to Off to connect without it.';
+    }
+    if (sslRequired && /certificate|unknown ca|self.signed|UnknownIssuer|invalid peer/i.test(message)) {
+        return 'The server certificate could not be verified. Choose the CA certificate it was issued by, or use Require to encrypt without verifying.';
     }
     return null;
 }

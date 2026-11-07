@@ -24,12 +24,21 @@ export const HANDOFF_VERSION = 1 as const;
 export const HANDOFF_FILENAME = 'mcp-handoff.json';
 
 export interface HandoffPostgres {
+    /**
+     * Where to connect. For a connection made through an SSH tunnel this is
+     * the tunnel's local end, so the agent goes through the app's tunnel.
+     */
     host: string;
     port: number;
     database: string;
     username: string;
     password: string;
+    /** Kept for servers that predate sslMode: true when sslMode is not disable. */
     ssl: boolean;
+    /** disable | prefer | require | verify-ca | verify-full */
+    sslMode?: string;
+    /** CA certificate path for the verify modes. */
+    sslRootCert?: string;
 }
 
 export interface McpHandoff {
@@ -43,6 +52,8 @@ export interface McpHandoff {
     /** Absolute path. Null when the editor is holding an in-memory database. */
     sqlitePath?: string | null;
     postgres?: HandoffPostgres;
+    /** Tagged production in the app. */
+    production?: boolean;
 }
 
 export class HandoffError extends Error {
@@ -92,13 +103,16 @@ function asPostgres(value: unknown): HandoffPostgres {
     if (typeof port !== 'number' || !Number.isInteger(port) || port < 1) {
         throw new HandoffError('Handoff Postgres port is invalid. Reconnect in LiteDB.');
     }
+    const sslMode = typeof raw.sslMode === 'string' && raw.sslMode ? raw.sslMode : undefined;
     return {
         host: asString(raw.host, 'postgres.host'),
         port,
         database: asString(raw.database, 'postgres.database'),
         username: asString(raw.username, 'postgres.username'),
         password: typeof raw.password === 'string' ? raw.password : '',
-        ssl: raw.ssl === true,
+        ssl: raw.ssl === true || (sslMode !== undefined && sslMode !== 'disable'),
+        ...(sslMode ? { sslMode } : {}),
+        ...(typeof raw.sslRootCert === 'string' && raw.sslRootCert ? { sslRootCert: raw.sslRootCert } : {}),
     };
 }
 
@@ -127,6 +141,7 @@ export function parseHandoff(contents: string): McpHandoff {
         label: asString(raw.label, 'label'),
         dialect,
         policy: asPolicy(raw.policy),
+        ...(raw.production === true ? { production: true } : {}),
     };
 
     if (dialect === 'sqlite') {
@@ -150,13 +165,25 @@ export function postgresTarget(cfg: HandoffPostgres): string {
     const pass = encodeURIComponent(cfg.password);
     const host = cfg.host.includes(':') && !cfg.host.startsWith('[') ? `[${cfg.host}]` : cfg.host;
     const database = encodeURIComponent(cfg.database);
-    // `sslmode=require` in node-pg now verifies the server cert (libpq 17
-    // behaviour) and prints a SECURITY WARNING. The app checkbox is "Use SSL"
-    // with no CA to trust — encrypt, don't verify — which is `no-verify`.
-    // Without this, a self-signed or private-CA host that the desktop app
-    // accepted would fail in the agent with a certificate error.
-    const ssl = cfg.ssl ? '?sslmode=no-verify' : '';
-    return `postgres://${user}:${pass}@${host}:${cfg.port}/${database}${ssl}`;
+    return `postgres://${user}:${pass}@${host}:${cfg.port}/${database}${sslQuery(cfg)}`;
+}
+
+/**
+ * The query string that makes node-pg encrypt and verify the way the app did.
+ *
+ * `sslmode=require` in node-pg verifies the server certificate (libpq 17
+ * behaviour). The app's require and prefer encrypt without verifying, which
+ * node-pg spells `no-verify` — without it a self-signed or private-CA host the
+ * app accepted would fail in the agent with a certificate error.
+ */
+function sslQuery(cfg: HandoffPostgres): string {
+    const mode = cfg.sslMode ?? (cfg.ssl ? 'require' : 'disable');
+    if (mode === 'disable') return '';
+    if (mode === 'verify-ca' || mode === 'verify-full') {
+        const cert = cfg.sslRootCert ? `&sslrootcert=${encodeURIComponent(cfg.sslRootCert)}` : '';
+        return `?sslmode=${mode}${cert}`;
+    }
+    return '?sslmode=no-verify';
 }
 
 function inTauri(): boolean {
@@ -169,6 +196,7 @@ export interface HandoffConnection {
     dialect: SqlDialect;
     sqlitePath?: string | null;
     postgres?: HandoffPostgres;
+    production?: boolean;
 }
 
 /**
@@ -188,6 +216,7 @@ export function writeActiveHandoff(
         policy,
         sqlitePath: connection.dialect === 'sqlite' ? (connection.sqlitePath ?? null) : undefined,
         postgres: connection.dialect === 'postgres' ? connection.postgres : undefined,
+        ...(connection.production ? { production: true } : {}),
     };
 
     return persist(serializeHandoff(payload));

@@ -39,7 +39,7 @@ import {
   ChevronDown,
   Workflow
 } from 'lucide-react';
-import { ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo } from '@/lib/sqliteService';
+import type { ColumnInfo, ForeignKeyInfo, IndexInfo, TableInfo } from '@/lib/types';
 import { Sidebar, SidebarItem } from '@/components/Sidebar';
 import { useSidebar } from '@/contexts/SidebarContext';
 

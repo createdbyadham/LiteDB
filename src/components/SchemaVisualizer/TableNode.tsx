@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
 import { Key, Hash, Link2, Circle, Diamond } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ColumnInfo, ForeignKeyInfo, IndexInfo } from '@/lib/sqliteService';
+import type { ColumnInfo, ForeignKeyInfo, IndexInfo } from '@/lib/types';
 
 export interface TableNodeData {
   name: string;
