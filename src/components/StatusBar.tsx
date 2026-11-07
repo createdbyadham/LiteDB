@@ -107,7 +107,7 @@ const StatusBar = ({
   };
 
   return (
-    <div className="h-6 bg-muted/30 border-t border-border flex items-center justify-between px-3 text-xs select-none shrink-0">
+    <div data-mascot-home className="relative z-40 h-6 bg-card border-t border-border flex items-center justify-between px-3 text-xs select-none shrink-0">
       {/* Left side - Connection status */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1.5">

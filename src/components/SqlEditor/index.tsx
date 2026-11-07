@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { mascot } from '@/lib/mascot';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,6 +29,9 @@ import { aiService } from '@/lib/aiService';
 interface SqlEditorProps {
   isPostgres?: boolean;
   refreshTables?: () => Promise<void> | void;
+  /** Set when Text to SQL was asked for from elsewhere (Star); opens the dialog once. */
+  requestAiDialog?: boolean;
+  onAiDialogRequested?: () => void;
 }
 
 /**
@@ -42,7 +46,7 @@ interface ScriptOrigin {
   prompt: string | null;
 }
 
-const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
+const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false, onAiDialogRequested }: SqlEditorProps) => {
   const [sqlScript, setSqlScript] = useState('');
   const [useTransaction, setUseTransaction] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -60,6 +64,12 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
   const [scriptName, setScriptName] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
+
+  useEffect(() => {
+    if (!requestAiDialog) return;
+    setIsAiDialogOpen(true);
+    onAiDialogRequested?.();
+  }, [requestAiDialog, onAiDialogRequested]);
 
   // Write-safety state. `provenance` is what makes the gate treat generated
   // SQL differently from typed SQL, so it is tracked on the editor rather than
@@ -233,6 +243,9 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
         executionTime: Math.round(endTime - startTime)
       });
 
+      // Star cheers at a clean run and winces at a failed one.
+      mascot.setMood(result.success ? 'happy' : 'error', result.success ? 1200 : 1600);
+
       if (result.success) {
         // Row count, not just "success". An UPDATE whose WHERE matches nothing
         // succeeds; without this it reported exactly the same as one that
@@ -261,6 +274,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables }: SqlEditorProps) => {
       return { success: result.success, errors: result.errors, rowsAffected: result.rowsAffected };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error occurred";
+      mascot.setMood('error', 1600);
       setResults({
         success: false,
         affectedTables: [],

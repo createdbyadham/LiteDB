@@ -39,6 +39,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { ExportDialog } from '@/components/ExportDialog';
+import { Star } from '@/components/Mascot/Star';
 import { SemanticSearch, VectorInspector, SimilarRowsModal, MockDataGenerator } from '@/components/VectorAdmin';
 
 const DEFAULT_QUERY: TableQuery = { limit: 100, offset: 0, search: '', sortColumn: null, sortDirection: 'asc' };
@@ -56,6 +57,9 @@ const DatabaseView = () => {
   const [confirmReload, setConfirmReload] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('browse');
+  /** Star was clicked: show the SQL editor and open Text to SQL there. */
+  const [aiRequested, setAiRequested] = useState(false);
+  const clearAiRequest = useCallback(() => setAiRequested(false), []);
   const [lastSaved] = useState<Date | null>(null);
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
 
@@ -614,6 +618,8 @@ const DatabaseView = () => {
               <SqlEditor
                 isPostgres={isPostgresActive}
                 refreshTables={refreshAfterWrite}
+                requestAiDialog={aiRequested}
+                onAiDialogRequested={clearAiRequest}
               />
             )}
 
@@ -648,6 +654,16 @@ const DatabaseView = () => {
           onReloadFromDisk={() => setConfirmReload(true)}
         />
       </div>
+
+      {/* Star peeks over the status bar; clicking it opens Text to SQL. */}
+      {databaseAvailable && (
+        <Star
+          onActivate={() => {
+            setActiveTab('query');
+            setAiRequested(true);
+          }}
+        />
+      )}
 
       <AlertDialog open={confirmReload} onOpenChange={setConfirmReload}>
         <AlertDialogContent>
