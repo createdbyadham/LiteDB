@@ -12,8 +12,8 @@ export type MascotGesture = 'exhale';
 
 /** How Star looks: a preference, chosen in Settings and kept on this device. */
 export interface StarLook {
-  color: 'white' | 'amber' | 'graphite';
-  eyes: 'cutout' | 'bubble' | 'dots' | 'lines' | 'none';
+  color: 'white' | 'graphite';
+  eyes: 'cutout' | 'bubble' | 'lines' | 'none';
   mouth: boolean;
 }
 export const DEFAULT_LOOK: StarLook = { color: 'white', eyes: 'cutout', mouth: false };
@@ -24,8 +24,8 @@ function loadLook(): StarLook {
     const saved = JSON.parse(localStorage.getItem(LOOK_KEY) ?? 'null') as Partial<StarLook> | null;
     if (!saved) return DEFAULT_LOOK;
     return {
-      color: ['white', 'amber', 'graphite'].includes(saved.color as string) ? (saved.color as StarLook['color']) : DEFAULT_LOOK.color,
-      eyes: ['cutout', 'bubble', 'dots', 'lines', 'none'].includes(saved.eyes as string) ? (saved.eyes as StarLook['eyes']) : DEFAULT_LOOK.eyes,
+      color: ['white', 'graphite'].includes(saved.color as string) ? (saved.color as StarLook['color']) : DEFAULT_LOOK.color,
+      eyes: ['cutout', 'bubble', 'lines', 'none'].includes(saved.eyes as string) ? (saved.eyes as StarLook['eyes']) : DEFAULT_LOOK.eyes,
       mouth: typeof saved.mouth === 'boolean' ? saved.mouth : DEFAULT_LOOK.mouth,
     };
   } catch {

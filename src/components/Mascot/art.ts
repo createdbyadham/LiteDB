@@ -27,7 +27,6 @@ export const STAR = {
 
 export const STAR_COLORS: Record<StarLook['color'], { body: string; line: string; ink: string }> = {
   white: { body: '#ededed', line: 'rgba(16,16,18,0.3)', ink: '#161618' },
-  amber: { body: '#f5a524', line: 'rgba(16,16,18,0.38)', ink: '#24180a' },
   graphite: { body: '#2b2b2f', line: 'rgba(237,237,237,0.4)', ink: '#ededed' },
 };
 
@@ -107,9 +106,8 @@ export function makeStar(
           `<g class="eye"><g clip-path="url(#${uid}-c${i})"><ellipse class="pupil" cx="${x}" cy="${EY}" rx="2.6" ry="3.8" fill="${ink}"/><circle cx="${x - 0.9}" cy="${EY - 1.6}" r="0.95" fill="#fff"/><rect class="lid" x="${x - 3.8}" y="${EY - 4.8}" width="7.6" height="0" fill="${C.body}"/></g></g>`,
       )
       .join('');
-  } else if (look.eyes === 'dots' || cut) {
-    const [rx, ry] = cut ? [2.3, 3.2] : [1.75, 1.75];
-    eyes = [XL, XR].map(x => `<g class="eye"><ellipse class="pupil" cx="${x}" cy="${EY}" rx="${rx}" ry="${ry}" fill="${ink}"/></g>`).join('');
+  } else if (cut) {
+    eyes = [XL, XR].map(x => `<g class="eye"><ellipse class="pupil" cx="${x}" cy="${EY}" rx="2.3" ry="3.2" fill="${ink}"/></g>`).join('');
   } else if (look.eyes === 'lines') {
     eyes = [XL, XR]
       .map(x => `<g class="eye"><rect class="pupil" x="${x - 0.95}" y="${EY - 2.8}" width="1.9" height="5.6" rx="0.95" fill="${ink}"/></g>`)
