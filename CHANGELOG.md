@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-07
+
+### Added
+
+- **Star**, the Text to SQL mascot. It peeks over the status bar, opens Text to SQL when clicked, and reacts to a clean run or a failed one. Colour (White, Graphite), eyes (Cutout, Glossy, Lines, None) and mouth are chosen in Settings and kept on this device.
+- The Text to SQL dialog shows how full the model window is, split into instructions, schema, sample values, examples, the question and the reply. Ollama's window is read from the server; other models use a known size, or no limit when the size is unknown. Compact drops the samples and examples so a small window still fits the schema.
+
 ## [2.3.0] - 2026-11-05
 
 ### Added
@@ -76,6 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.4.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.4.0
 [2.3.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.3.0
 [2.2.2]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.2
 [2.2.1]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.2.1
