@@ -1,10 +1,38 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import fs from "fs";
 import path from "path";
+
+/** Serve @xenova/transformers' ONNX wasm from this app instead of jsDelivr. */
+function onnxWasm(): Plugin {
+  const src = path.resolve("node_modules/@xenova/transformers/dist");
+  const files = () => fs.readdirSync(src).filter((name) => name.endsWith(".wasm"));
+  return {
+    name: "onnx-wasm",
+    configureServer(server) {
+      server.middlewares.use("/onnx", (req, res, next) => {
+        const name = path.basename((req.url || "").split("?")[0]);
+        const file = path.join(src, name);
+        if (!name.endsWith(".wasm") || !fs.existsSync(file)) return next();
+        res.setHeader("Content-Type", "application/wasm");
+        fs.createReadStream(file).pipe(res);
+      });
+    },
+    generateBundle() {
+      for (const name of files()) {
+        this.emitFile({
+          type: "asset",
+          fileName: `onnx/${name}`,
+          source: fs.readFileSync(path.join(src, name)),
+        });
+      }
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [react(), onnxWasm()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

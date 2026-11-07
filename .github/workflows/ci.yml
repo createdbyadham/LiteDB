@@ -17,6 +17,49 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Release links match the version
+        run: |
+          node <<'EOF'
+          const fs = require('fs');
+          const version = require('./src-tauri/tauri.conf.json').version;
+          const tag = `v${version}`;
+          const link = `releases/tag/${tag}`;
+          for (const file of ['README.md', 'CHANGELOG.md']) {
+            if (!fs.readFileSync(file, 'utf8').includes(link)) {
+              console.error(`${file} does not link to ${link}`);
+              process.exit(1);
+            }
+          }
+          const pkg = require('./package.json').version;
+          if (pkg !== version) {
+            console.error(`package.json is ${pkg}, tauri.conf.json is ${version}`);
+            process.exit(1);
+          }
+          const cargo = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
+          if (!cargo.includes(`version = "${version}"`)) {
+            console.error(`Cargo.toml package version is not ${version}`);
+            process.exit(1);
+          }
+          const meta = fs.readFileSync('packaging/flathub/com.adhamehab.litedb.metainfo.xml', 'utf8');
+          if (!meta.includes(`version="${version}"`)) {
+            console.error(`Flathub metainfo has no release ${version}`);
+            process.exit(1);
+          }
+          const csp = require('./src-tauri/tauri.conf.json').app.security.csp;
+          if (csp.includes('cdn.gpteng.co') || csp.includes('rsms.me')) {
+            console.error('CSP still allows a template CDN');
+            process.exit(1);
+          }
+          const connect = csp.split(';').map((s) => s.trim()).find((s) => s.startsWith('connect-src '));
+          const sources = connect.slice('connect-src '.length).split(/\s+/);
+          for (const bad of ['*', 'https://*', 'http://*', 'ws://*', 'wss://*']) {
+            if (sources.includes(bad)) {
+              console.error(`connect-src allows ${bad}`);
+              process.exit(1);
+            }
+          }
+          EOF
+
       - name: Install dependencies
         run: npm install
 

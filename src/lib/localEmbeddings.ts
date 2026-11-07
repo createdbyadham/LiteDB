@@ -1,5 +1,9 @@
 import { pipeline, env } from '@xenova/transformers';
 
+// The package loads its ONNX runtime from cdn.jsdelivr.net. The webview CSP
+// does not allow that host, so the wasm files copied at build time are used.
+env.backends.onnx.wasm.wasmPaths = import.meta.env.PROD ? './onnx/' : '/onnx/';
+
 type FeatureExtractor = {
   (text: string, options?: { pooling?: string; normalize?: boolean }): Promise<{ data: Float32Array }>;
 };

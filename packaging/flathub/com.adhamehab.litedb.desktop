@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=LiteDB
+Comment=SQLite and PostgreSQL desktop client
+Exec=litedb
+Icon=com.adhamehab.litedb
+Terminal=false
+Categories=Development;Database;
+StartupWMClass=LiteDB
