@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-08
+
 ### Added
 
-- **A real SQL editor.** Syntax highlighting, autocomplete for your tables and columns, and errors underlined where the database points. `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection; `Shift+Ctrl/Cmd+Enter` or `F5` runs the whole tab. Tabs keep their text across restarts, every run is kept in History, and **Cancel** stops a query that runs too long. Results stop at a row limit you choose, 1,000 by default.
-- **AI in the editor.** `Ctrl/Cmd+K` opens Text to SQL, and the SQL it writes goes in after the statement you are on. **Explain** describes the statement under the cursor and its plan without running it. A failed query offers **Explain** and **Fix with AI**.
+- **A real SQL editor.** Syntax highlighting, autocomplete for tables and for the columns of the tables in your query, without typing `table.` first (a name two tables share comes in as `o.id`), and errors underlined where the database points. `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection; `Shift+Ctrl/Cmd+Enter` or `F5` runs the whole tab. Tabs keep their text across restarts, every run is kept in History, and **Cancel** stops a query that runs too long. Results stop at a row limit you choose, 1,000 by default.
+- **AI in the editor.** **Ask AI** (`Ctrl/Cmd+K`) opens Text to SQL, and the SQL it writes goes in after the statement you are on. **Explain** describes the statement under the cursor and its plan without running it. A failed query offers **Explain** and **Fix with AI**.
 - **Transactions in the editor.** With **Transaction** on, a script runs all or nothing. A `BEGIN` you type stays open until you end it; the editor says so and offers Commit and Roll back.
 - **Saved connections**, as many as you like, each with a name and a colour. SQLite files you open are remembered too. Passwords and SSH secrets stay in the OS keychain.
 - **Production tag.** A connection tagged production opens read-only, for you and for agents, under a red title bar. Leaving read-only asks first.
@@ -122,6 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.5.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0
 [2.4.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.4.0
 [2.3.0]: https://github.com/createdbyadham/LiteDB/releases/tag/app-v2.3.0
 [2.2.2]: https://github.com/createdbyadham/LiteDB/releases/tag/app-v2.2.2
