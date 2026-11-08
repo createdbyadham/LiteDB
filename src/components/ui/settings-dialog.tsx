@@ -490,6 +490,50 @@ export function SettingsDialog() {
               </div>
             </div>
 
+            <div className="space-y-3 rounded-lg border px-4 py-3">
+              <div className="flex items-start gap-3">
+                <Switch
+                  id="inlineSuggestions"
+                  className="mt-0.5"
+                  checked={settings.inlineSuggestions}
+                  onCheckedChange={(checked) =>
+                    setSettings((prev) => ({ ...prev, inlineSuggestions: checked }))
+                  }
+                />
+                <div className="min-w-0 space-y-1">
+                  <Label htmlFor="inlineSuggestions">Inline suggestions</Label>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Grey text after the cursor in the SQL editor: Tab accepts
+                    it, Esc dismisses it. Each pause in typing sends the
+                    statement you are writing and your table names, with the
+                    columns of the tables it uses, to this provider. Always off
+                    on connections tagged production.
+                  </p>
+                </div>
+              </div>
+              {settings.inlineSuggestions && (
+                <div className="space-y-1.5 pl-14">
+                  <Label htmlFor="inlineModelName" className="text-xs">
+                    Model for suggestions (optional)
+                  </Label>
+                  <Input
+                    id="inlineModelName"
+                    type="text"
+                    value={currentConfig.inlineModelName || ''}
+                    onChange={(e) => updateCurrentConfig({ inlineModelName: e.target.value })}
+                    placeholder={currentConfig.modelName ? `Same as Model (${currentConfig.modelName})` : 'Same as Model'}
+                  />
+                  {settings.activeProvider === 'ollama' && (
+                    <p className="text-[11px] text-muted-foreground leading-snug">
+                      A fill-in-the-middle model such as qwen2.5-coder:1.5b
+                      completes best and fastest. Other models are asked
+                      through chat.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="flex justify-end">
               <Button onClick={handleSave}>Save changes</Button>
             </div>

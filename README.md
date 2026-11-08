@@ -67,6 +67,7 @@ unattended — even on a connection you have set to unrestricted.
 - **Several databases open at once**, as tabs in the title bar. Switching does not reconnect.
 - **SQL editor**: syntax highlighting, autocomplete that offers the columns of the tables in your query (no `table.` needed), `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection, `F5` runs the script, query tabs that survive a restart, history and saved scripts, a row limit, and Cancel for a long query. Errors underline the statement (and, in Postgres, the exact spot).
 - **AI in the editor**: **Ask AI** (`Ctrl/Cmd+K`) opens Text to SQL from the editor, **Explain** describes a query with its plan, and a failed query offers **Explain** and **Fix with AI**, shown side by side before anything changes.
+- **Inline suggestions** (off by default): the model's continuation as grey text after the cursor, `Tab` to accept, `Esc` to dismiss. Fill-in-the-middle on Ollama, chat elsewhere. Never on a production connection, and accepted text counts as AI-written for the safety gate.
 - **Table editor**: double-click a cell to edit it, insert and duplicate rows, filter by any column, follow a foreign key to the row it points at (or see what points here), view and edit JSON, and copy rows as TSV, CSV, JSON, INSERT statements or Markdown. Results scroll smoothly however many rows come back.
 - **CSV import**: into a new table with inferred column types, or into an existing one with columns matched by name, in one transaction.
 - **Command palette**: `Ctrl/Cmd+P` jumps to any table, connection or action.
@@ -238,7 +239,8 @@ log records your reads too.
 
 Provenance is sticky. Editing generated SQL does not make you its author —
 someone who tweaks one clause has not read the rest — and `ai` only ever
-tightens the gate. Clearing the editor resets it.
+tightens the gate. Accepting an inline suggestion makes a tab `ai` too.
+Clearing the editor resets it.
 
 > **Deviation from the original plan, stated plainly:** this was specified as
 > "read-only by default". Read-only by default would make the table editor —
@@ -446,7 +448,11 @@ Edits in the grid follow the connection's safety mode: in read-only they are ref
    - With **Transaction** on, a script runs all or nothing. A `BEGIN` you type yourself stays open until you commit; the editor shows it and offers *Commit* and *Roll back*.
    - Results stop at the row limit in the toolbar (1,000 by default). **Cancel** stops a query that runs too long.
 3. **Ask AI** (`Ctrl/Cmd+K`) opens Text to SQL: describe what you want, and the SQL goes in after the statement you are on, selected, ready to run. **Explain** describes the statement under the cursor and its plan (plain `EXPLAIN`, so nothing runs). A failed query offers **Explain** and **Fix with AI**.
-4. Tabs keep their text across restarts. The panel on the right has **History**, **Saved** scripts and the **Audit** log.
+4. **Inline suggestions** (Settings → AI, off by default): pause while typing and the model's continuation appears in grey after the cursor. `Tab` accepts it, `Esc` dismisses it, and typing its next characters keeps the rest. They wait while the column popup is open.
+   - Each pause sends the statement you are writing, your table names and the columns of the tables it reads to the provider, capped to a few hundred tokens. A connection tagged production never sends anything.
+   - On Ollama the request is fill-in-the-middle, with the text after the cursor sent separately. A FIM-trained model such as `qwen2.5-coder:1.5b` completes best and fastest; set it as the model for suggestions to keep a larger model for Text to SQL. Models that refuse fill-in-the-middle, and the other providers, are asked through chat.
+   - Accepting a suggestion marks the tab as AI-written, as Text to SQL output is, so its writes ask first even in **Unrestricted**.
+5. Tabs keep their text across restarts. The panel on the right has **History**, **Saved** scripts and the **Audit** log.
 
 #### Example Scripts
 

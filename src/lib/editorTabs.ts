@@ -11,6 +11,11 @@ export interface EditorTab {
     provenance: Provenance;
     /** The request generated SQL came from, for the audit log. */
     aiPrompt: string | null;
+    /**
+     * The model that wrote it, when that is not the configured one: inline
+     * suggestions can have a model of their own. Absent means the configured model.
+     */
+    aiModel?: string | null;
     /** Renamed by the user; otherwise the title follows the SQL. */
     named?: boolean;
 }

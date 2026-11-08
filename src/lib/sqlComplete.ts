@@ -162,7 +162,8 @@ function positionAt(tokens: SqlToken[], offset: number): 'column' | 'table' | 'n
     return 'column';
 }
 
-function findTable(catalog: ColumnCatalog, ref: TableRef): CatalogTable | null {
+/** The catalog's table for a name the statement wrote, resolved as the database would. */
+export function findTable(catalog: ColumnCatalog, ref: TableRef): CatalogTable | null {
     if (catalog.dialect === 'sqlite') {
         // A SQLite schema is a database name (main, temp); names ignore case.
         const name = ref.table.name.toLowerCase();

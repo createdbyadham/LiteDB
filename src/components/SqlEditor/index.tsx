@@ -41,7 +41,7 @@ import { setInTransaction, visibleTables, type OpenConnection } from '@/lib/db/c
 import { PgClient } from '@/lib/db/pgClient';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 import { ApprovalDialog } from './ApprovalDialog';
-import { SqlCodeEditor, type SqlCodeEditorHandle } from './SqlCodeEditor';
+import { SqlCodeEditor, type InlineSuggestionSource, type SqlCodeEditorHandle } from './SqlCodeEditor';
 import { AiQueryDialog } from './AiQueryDialog';
 import { ResultPanel, type RunOutcome } from './ResultPanel';
 import { ExplainPanel, type ExplainState } from './ExplainPanel';
@@ -69,6 +69,19 @@ interface ScriptOrigin {
   prompt: string | null;
   /** The script as written, so a failure can be explained or fixed. */
   script: string;
+  /** The model that wrote it, when not the configured one. */
+  model?: string | null;
+}
+
+/** Inline suggestions through the app's AI settings, where they are off until turned on. */
+const INLINE_SUGGESTIONS: InlineSuggestionSource = {
+  enabled: () => aiService.inlineSuggestionsEnabled(),
+  suggest: (prompt) => aiService.suggestInline(prompt),
+};
+
+/** For the audit log: who wrote generated SQL. */
+function authorModel(origin: ScriptOrigin): string | null {
+  return origin.provenance === 'ai' ? (origin.model ?? aiService.activeModelName()) : null;
 }
 
 /** The last run that failed: what ran, what the database said, and where it sits in the editor. */
@@ -439,7 +452,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
       actualRows: result.success && decision.kind !== 'read' ? result.rowsAffected : null,
       durationMs: Math.round(performance.now() - started),
       prompt: origin.prompt,
-      model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
+      model: authorModel(origin),
     });
   };
 
@@ -487,7 +500,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         policy: decision.appliedPolicy,
         error: decision.reason,
         prompt: origin.prompt,
-        model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
+        model: authorModel(origin),
       });
       return;
     }
@@ -519,7 +532,18 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
     provenance: activeTab.provenance,
     prompt: activeTab.aiPrompt,
     script,
+    model: activeTab.aiModel ?? null,
   });
+
+  /**
+   * Tab took an inline suggestion. The tab now holds SQL a model wrote, so
+   * the gate treats it as generated, as it does Text to SQL's: writes ask
+   * first even in Unrestricted. A tab already marked keeps its prompt and model.
+   */
+  const acceptSuggestion = () => {
+    if (activeTab.provenance === 'ai') return;
+    patchActiveTab({ provenance: 'ai', aiPrompt: null, aiModel: aiService.inlineModelName() });
+  };
 
   /** Mod-Enter: the selection, or the statement under the cursor. */
   const runStatement = () => {
@@ -589,7 +613,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
       provenance: origin.provenance,
       policy: decision.appliedPolicy,
       prompt: origin.prompt,
-      model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
+      model: authorModel(origin),
     });
   };
 
@@ -607,7 +631,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
     editor.replaceRange(place.from, place.to, place.insert);
     const from = place.start;
     editor.select(from, from + query.length);
-    patchActiveTab({ provenance: 'ai', aiPrompt: prompt });
+    patchActiveTab({ provenance: 'ai', aiPrompt: prompt, aiModel: null });
     setFailure(null);
     setExplanation(null);
     if (isYolo()) {
@@ -652,7 +676,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
     if (range) editor.replaceRange(range.from, range.to, fixed);
     else editor.replaceRange(0, doc.length, fixed);
     const prompt = `Fix this error: ${f.error}`;
-    patchActiveTab({ provenance: 'ai', aiPrompt: prompt });
+    patchActiveTab({ provenance: 'ai', aiPrompt: prompt, aiModel: null });
     setFailure(null);
     setExplanation(null);
     setFixState(null);
@@ -779,7 +803,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
 
   const openSql = (sql: string) => {
     if (!activeTab.sql.trim()) {
-      patchActiveTab({ sql, provenance: 'user', aiPrompt: null });
+      patchActiveTab({ sql, provenance: 'user', aiPrompt: null, aiModel: null });
     } else {
       addTab(sql);
     }
@@ -1005,7 +1029,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
                 // Provenance is sticky: editing generated SQL does not make the
                 // user its author. Emptying the box is the one edit that clears it.
                 const cleared = !sql.trim();
-                patchActiveTab({ sql, ...(cleared ? { provenance: 'user' as Provenance, aiPrompt: null } : {}) });
+                patchActiveTab({ sql, ...(cleared ? { provenance: 'user' as Provenance, aiPrompt: null, aiModel: null } : {}) });
                 // Fixing would overwrite these edits, so the offer goes once the text changes.
                 if (failure) setFailure(null);
               }}
@@ -1018,6 +1042,8 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
                   ? `SELECT * FROM ${tablesForPlaceholder} LIMIT 10;   ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} asks AI`
                   : `Write SQL here. ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} asks AI`
               }
+              inlineSuggestions={conn.production ? null : INLINE_SUGGESTIONS}
+              onSuggestionAccepted={acceptSuggestion}
               onRunStatement={runStatement}
               onRunAll={runAll}
               onAi={() => setAiOpen(true)}
