@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - The TLS stack behind AI provider requests and update checks is patched: rustls 0.23.46, rustls-webpki 0.103.16 and aws-lc-sys 0.47. `tar`, which unpacks macOS updates, is 0.4.46.
+- Tauri is 2.12. Since 2.11.1, a remote page whose address starts with one of the app's scheme names is no longer mistaken for the app on Windows, so it cannot call the app's commands. The updater plugin is 2.14.1, which unpacks Windows updates with `zip` 9.
 
 ## [2.5.0] - 2026-11-08
 
