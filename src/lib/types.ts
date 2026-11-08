@@ -146,6 +146,17 @@ export function quoteIdent(name: string, kind: IdentKind = 'identifier'): string
     return `"${name.replace(/"/g, '""')}"`;
 }
 
+/**
+ * A name as an editor completion inserts it: bare when the database reads it
+ * back unchanged, quoted otherwise. Postgres folds unquoted names to lower
+ * case, so `createdAt` goes in as `"createdAt"`; SQLite does not, so
+ * `Suppliers` goes in as written. Spaces and other characters always quote.
+ */
+export function completionName(name: string, dialect: 'sqlite' | 'postgres'): string {
+    const plain = dialect === 'sqlite' ? /^[a-z_][a-z0-9_]*$/i : /^[a-z_][a-z0-9_]*$/;
+    return plain.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+}
+
 /** A SQL string literal: `it's` → `'it''s'`. */
 export function quoteLiteral(value: string): string {
     if (value.includes('\0')) throw new Error('Invalid string literal');

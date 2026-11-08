@@ -13,7 +13,6 @@ import {
   GitBranch,
   HardDrive,
   ListPlus,
-  MessageSquareCode,
   Monitor,
   Moon,
   Play,
@@ -23,6 +22,7 @@ import {
   Settings,
   ShieldCheck,
   ShieldOff,
+  Sparkles,
   Sun,
   Table2,
   TableOfContents,
@@ -172,8 +172,8 @@ export function CommandPalette() {
                   <Play /> Run the statement under the cursor
                   <CommandShortcut>{shortcutLabel('Mod+Enter')}</CommandShortcut>
                 </CommandItem>
-                <CommandItem value="text to sql ask ai" onSelect={() => inDatabase({ type: 'aiGenerate' })}>
-                  <MessageSquareCode /> Text to SQL
+                <CommandItem value="ask ai text to sql" onSelect={() => inDatabase({ type: 'aiGenerate' })}>
+                  <Sparkles /> Ask AI to write SQL
                   <CommandShortcut>{shortcutLabel('Mod+K')}</CommandShortcut>
                 </CommandItem>
                 <CommandItem value="insert row" onSelect={() => inDatabase({ type: 'insertRow' })}>

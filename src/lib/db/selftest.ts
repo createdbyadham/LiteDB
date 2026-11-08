@@ -15,6 +15,8 @@ import { asJsonDocument, parseCellText, typeFamily } from './cellParse';
 import { placeAfterStatement, statementAt, statementRanges } from '../sqlCursor';
 import { titleFromSql } from '../editorTabs';
 import { postgresTarget } from '../mcpHandoff';
+import { completionName } from '../types';
+import { columnOptions, tablesIn, type ColumnCatalog } from '../sqlComplete';
 
 let failures = 0;
 
@@ -138,6 +140,78 @@ equal('right after a semicolon is the statement before it', statementAt(script, 
 equal('a blank line belongs to the statement above', statementAt(script, script.indexOf('\n\n') + 1)?.sql, 'SELECT 1');
 equal('the end of the script is the last statement', statementAt(script, script.length)?.sql, 'SELECT 3');
 check('an empty script has no statement', statementAt('   ', 1) === null);
+
+process.stdout.write('\nNames as autocomplete inserts them\n');
+equal('SQLite: capitals go in as written', completionName('Suppliers', 'sqlite'), 'Suppliers');
+equal('SQLite: a space is quoted', completionName('Unit Price', 'sqlite'), '"Unit Price"');
+equal('SQLite: a plain name stays plain', completionName('customer_id', 'sqlite'), 'customer_id');
+equal('Postgres: capitals are quoted, or they fold to lower case', completionName('createdAt', 'postgres'), '"createdAt"');
+equal('Postgres: a lower-case name stays plain', completionName('created_at', 'postgres'), 'created_at');
+equal('a leading digit is quoted', completionName('2fa', 'postgres'), '"2fa"');
+equal('a quote inside a name is doubled', completionName('a"b', 'postgres'), '"a""b"');
+
+process.stdout.write('\nColumn names without table. first\n');
+const shop: ColumnCatalog = {
+    dialect: 'sqlite',
+    defaultSchema: null,
+    tables: [
+        { schema: null, table: 'orders', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'customer_id', type: 'INTEGER' }, { name: 'status', type: 'TEXT' }] },
+        { schema: null, table: 'customers', columns: [{ name: 'id', type: 'INTEGER' }, { name: 'name', type: 'TEXT' }] },
+        { schema: null, table: 'Order Details', columns: [{ name: 'Unit Price', type: 'REAL' }] },
+    ],
+};
+/** Options with the cursor where `|` is, and the `|` removed. */
+function at(catalog: ColumnCatalog, sqlWithCursor: string) {
+    const offset = sqlWithCursor.indexOf('|');
+    const sql = sqlWithCursor.replace('|', '');
+    // The word being typed starts where its letters do.
+    let from = offset;
+    while (from > 0 && /[A-Za-z0-9_$]/.test(sql[from - 1])) from--;
+    return columnOptions(catalog, sql, from);
+}
+/** What the popup shows for each option. */
+const labels = (options: ReturnType<typeof at>) => (options ? options.map((o) => o.display ?? o.label) : null);
+equal(
+    'FROM and JOIN tables with their aliases',
+    tablesIn('SELECT * FROM orders o JOIN customers AS c ON c.id = o.customer_id').map((t) => [t.table.name, t.alias?.name ?? null]),
+    [['orders', 'o'], ['customers', 'c']],
+);
+equal('a FROM list, UPDATE and INSERT INTO', tablesIn('UPDATE a SET x = 1; INSERT INTO b (y) SELECT * FROM c, d').map((t) => t.table.name), ['a', 'b', 'c', 'd']);
+equal("names in strings and comments are not tables", tablesIn("SELECT 'FROM fake' FROM real -- FROM other").map((t) => t.table.name), ['real']);
+check('nothing after FROM: a table belongs there', at(shop, 'SELECT * FROM |') === null);
+check('nothing after AS: an alias belongs there', at(shop, 'SELECT count(*) AS n| FROM orders') === null);
+check('nothing inside VALUES', at(shop, 'INSERT INTO orders (status) VALUES (|') === null);
+equal('the FROM table\'s columns, even when FROM comes later', labels(at(shop, 'SELECT st| FROM orders')), ['id', 'customer_id', 'status']);
+equal(
+    'a name two tables share comes qualified by alias',
+    labels(at(shop, 'SELECT | FROM orders o JOIN customers c ON c.id = o.customer_id')),
+    ['o.id', 'customer_id', 'status', 'c.id', 'name'],
+);
+equal(
+    'a shared name is still found by its first letter',
+    at(shop, 'SELECT i| FROM orders o JOIN customers c ON c.id = o.customer_id')
+        ?.filter((o) => o.label.startsWith('i'))
+        .map((o) => o.apply),
+    ['o.id', 'c.id'],
+);
+equal('INSERT INTO t ( lists t\'s columns', labels(at(shop, 'INSERT INTO customers (|')), ['id', 'name']);
+equal('a column that needs quotes is inserted quoted', at(shop, 'SELECT | FROM "Order Details"')?.[0]?.apply, '"Unit Price"');
+equal(
+    'with no FROM yet, every column once',
+    at(shop, 'SELECT i|')?.map((o) => `${o.label}: ${o.detail}`),
+    ['id: orders +1', 'customer_id: orders · INTEGER', 'status: orders · TEXT', 'name: customers · TEXT', 'Unit Price: Order Details · REAL'],
+);
+const pgCatalog: ColumnCatalog = {
+    dialect: 'postgres',
+    defaultSchema: 'public',
+    tables: [
+        { schema: 'public', table: 'users', columns: [{ name: 'createdAt', type: 'timestamp' }] },
+        { schema: 'auth', table: 'sessions', columns: [{ name: 'token', type: 'text' }] },
+    ],
+};
+equal('Postgres: a bare name folds to lower case', labels(at(pgCatalog, 'SELECT | FROM Users')), ['createdAt']);
+equal('Postgres: camelCase goes in quoted', at(pgCatalog, 'SELECT | FROM users')?.[0]?.apply, '"createdAt"');
+equal('Postgres: schema-qualified tables', labels(at(pgCatalog, 'SELECT | FROM auth.sessions s')), ['token']);
 
 process.stdout.write('\nWhere Text to SQL puts its SQL\n');
 /** The script after placing `sql` with the cursor at `offset`, and the placed text read back. */

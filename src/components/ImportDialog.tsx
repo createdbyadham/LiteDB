@@ -118,7 +118,8 @@ export function ImportDialog({ open, onOpenChange, conn, initialTable, onImporte
   const runImport = async () => {
     if (!file) return;
     setBusy(true);
-    const statements: string[] = [];
+    /** The INSERT the audit log records if the rows fail to go in. */
+    let attempted: string | null = null;
     try {
       let tableName = table;
       let columns: string[];
@@ -129,7 +130,9 @@ export function ImportDialog({ open, onOpenChange, conn, initialTable, onImporte
         if (conn.tables.some((t) => t.name.toLowerCase() === tableName.toLowerCase())) {
           throw new Error(`${tableName} already exists. Pick another name, or import into it.`);
         }
-        statements.push(await conn.client.createTable(tableName, header.map((name, i) => ({ name, type: sqlTypeFor(types[i] ?? 'text', conn.dialect) }))));
+        const created = await conn.client.createTable(tableName, header.map((name, i) => ({ name, type: sqlTypeFor(types[i] ?? 'text', conn.dialect) })));
+        // An entry of its own: it changed no rows, and the table stays if the rows then fail.
+        auditGridWrite(conn, [created], { ok: true });
         await refreshConnectionTables(conn.id);
         columns = header;
         rows = body.map((r) => header.map((_, i) => cellValue(r[i], types[i])));
@@ -140,16 +143,16 @@ export function ImportDialog({ open, onOpenChange, conn, initialTable, onImporte
         const indexes = mappedColumns.map(([, csv]) => header.indexOf(csv));
         rows = body.map((r) => indexes.map((i) => cellValue(r[i])));
       }
+      const summary = (count: number) =>
+        `INSERT INTO ${conn.client.qualified(tableName)} (${columns.map((c) => quoteIdent(c, 'column')).join(', ')}) VALUES (…) /* ${count} rows from ${fileName(file.path)} */`;
+      attempted = summary(rows.length);
       const { inserted } = await conn.client.importRows(tableName, columns, rows);
-      statements.push(
-        `INSERT INTO ${conn.client.qualified(tableName)} (${columns.map((c) => quoteIdent(c, 'column')).join(', ')}) VALUES (…) /* ${inserted} rows from ${fileName(file.path)} */`,
-      );
-      auditGridWrite(conn, statements, { ok: true, rows: inserted });
+      auditGridWrite(conn, [summary(inserted)], { ok: true, rows: inserted });
       toast({ title: 'Imported', description: `${inserted.toLocaleString()} rows into ${tableName}.` });
       onOpenChange(false);
       onImported(tableName);
     } catch (error) {
-      if (statements.length) auditGridWrite(conn, statements, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      if (attempted) auditGridWrite(conn, [attempted], { ok: false, error: error instanceof Error ? error.message : String(error) });
       toast({
         title: error instanceof ReadOnlyConnectionError ? 'Read-only connection' : 'Import failed',
         description: error instanceof Error ? error.message : String(error),

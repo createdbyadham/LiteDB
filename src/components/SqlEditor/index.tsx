@@ -3,7 +3,6 @@ import type { SQLNamespace } from '@codemirror/lang-sql';
 import {
   Lightbulb,
   ListChecks,
-  MessageSquareCode,
   PanelRight,
   Play,
   Plus,
@@ -32,6 +31,8 @@ import { canValidate, validateScript } from '@/lib/sqlValidator';
 import { classifyStatement } from '@/lib/sqlClassifier';
 import type { AuditDecision, AuditOutcome } from '@/lib/auditLog';
 import { placeAfterStatement, statementAt, statementRanges, type StatementRange } from '@/lib/sqlCursor';
+import { completionName } from '@/lib/types';
+import type { ColumnCatalog } from '@/lib/sqlComplete';
 import { loadTabs, newTab, saveTabs, titleFromSql, type EditorTab, type EditorTabsState } from '@/lib/editorTabs';
 import { addHistory } from '@/lib/queryHistory';
 import { shortcutLabel, useAppCommand } from '@/lib/commands';
@@ -120,18 +121,20 @@ function resultObjects(result: StatementResult): { columns: string[]; rows: Reco
   };
 }
 
-function ToolbarButton({ label, shortcut, onClick, disabled, children, variant = 'ghost' }: {
+function ToolbarButton({ label, shortcut, onClick, disabled, children, variant = 'ghost', iconOnly = false }: {
   label: string;
   shortcut?: string;
   onClick: () => void;
   disabled?: boolean;
   children: React.ReactNode;
   variant?: 'ghost' | 'default' | 'outline' | 'destructive';
+  /** No visible text, so the tooltip's label is its name for screen readers. */
+  iconOnly?: boolean;
 }) {
   return (
     <Tooltip delayDuration={300}>
       <TooltipTrigger asChild>
-        <Button variant={variant} size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={onClick} disabled={disabled}>
+        <Button variant={variant} size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={onClick} disabled={disabled} aria-label={iconOnly ? label : undefined}>
           {children}
         </Button>
       </TooltipTrigger>
@@ -246,7 +249,12 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
 
   const pg = client instanceof PgClient ? client : null;
   const schema: SQLNamespace = useMemo(() => {
-    const completion = (c: { name: string; type: string }) => ({ label: c.name, type: 'property', detail: c.type });
+    // lang-sql inserts a completion object as its label, unquoted, so a column
+    // that needs quotes (Postgres `createdAt`, SQLite `Unit Price`) says so.
+    const completion = (c: { name: string; type: string }) => {
+      const apply = completionName(c.name, dialect);
+      return { label: c.name, type: 'property', detail: c.type, ...(apply !== c.name ? { apply } : {}) };
+    };
     if (!pg) {
       const ns: Record<string, ReturnType<typeof completion>[]> = {};
       for (const table of conn.tables) ns[table.name] = (columnsByTable.get(table.name) ?? []).map(completion);
@@ -260,7 +268,21 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
       ns[schemaName][table.table ?? table.name] = (columnsByTable.get(table.name) ?? []).map(completion);
     }
     return ns;
-  }, [conn.tables, columnsByTable, pg]);
+  }, [conn.tables, columnsByTable, pg, dialect]);
+
+  // The same tables and columns, for column names without `table.` first.
+  const catalog: ColumnCatalog = useMemo(
+    () => ({
+      dialect,
+      defaultSchema: pg ? pg.defaultSchema : null,
+      tables: conn.tables.map((table) => ({
+        schema: pg ? (table.schema ?? pg.defaultSchema) : null,
+        table: table.table ?? table.name,
+        columns: columnsByTable.get(table.name) ?? [],
+      })),
+    }),
+    [conn.tables, columnsByTable, pg, dialect],
+  );
 
   // --- helpers ----------------------------------------------------------------------
 
@@ -899,8 +921,8 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
             </>
           )}
           <div className="mx-1 h-4 w-px bg-border" />
-          <ToolbarButton label={policy === 'yolo' ? 'Text to SQL (YOLO: runs what it writes)' : 'Text to SQL'} shortcut="Mod+K" onClick={() => setAiOpen(true)}>
-            <MessageSquareCode strokeWidth={1.5} className={cn('h-3.5 w-3.5', policy === 'yolo' && 'text-destructive')} /> Text to SQL
+          <ToolbarButton label={policy === 'yolo' ? 'Ask AI (YOLO: runs what it writes)' : 'Ask AI to write SQL'} shortcut="Mod+K" onClick={() => setAiOpen(true)}>
+            <Sparkles className={cn('h-3.5 w-3.5', policy === 'yolo' ? 'text-destructive' : 'text-key')} /> Ask AI
           </ToolbarButton>
           <ToolbarButton label="Explain the selection or the statement under the cursor" shortcut="Mod+Shift+E" onClick={() => void explainQuery()}>
             <Lightbulb className="h-3.5 w-3.5" /> Explain
@@ -934,13 +956,13 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
             <Switch checked={useTransaction} onCheckedChange={setUseTransaction} className="scale-75" />
             Transaction
           </label>
-          <ToolbarButton label="Save this script" onClick={() => {
+          <ToolbarButton label="Save this script" iconOnly onClick={() => {
             setScriptName(activeTab.title.startsWith('Query ') ? '' : activeTab.title);
             setSaveOpen(true);
           }} disabled={!activeTab.sql.trim()}>
             <Save className="h-3.5 w-3.5" />
           </ToolbarButton>
-          <ToolbarButton label="History, saved scripts and the audit log" onClick={() => setPanel((p) => (p ? null : 'history'))}>
+          <ToolbarButton label="History, saved scripts and the audit log" iconOnly onClick={() => setPanel((p) => (p ? null : 'history'))}>
             <PanelRight className="h-3.5 w-3.5" />
           </ToolbarButton>
         </div>
@@ -990,10 +1012,11 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
               dialect={dialect}
               schema={schema}
               defaultSchema={pg?.defaultSchema}
+              catalog={catalog}
               placeholder={
                 tablesForPlaceholder
-                  ? `SELECT * FROM ${tablesForPlaceholder} LIMIT 10;   ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} Text to SQL`
-                  : `Write SQL here. ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} Text to SQL`
+                  ? `SELECT * FROM ${tablesForPlaceholder} LIMIT 10;   ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} asks AI`
+                  : `Write SQL here. ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} asks AI`
               }
               onRunStatement={runStatement}
               onRunAll={runAll}
