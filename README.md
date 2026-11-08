@@ -60,17 +60,20 @@ unattended — even on a connection you have set to unrestricted.
 
 ## Features
 
+- **SQLite, opened in place**: files are read and written natively (rusqlite), so a multi-gigabyte database opens as fast as a small one and shares the file with your app or an agent through SQLite's own locking. Writes from another program show up in the grid on their own.
+- **PostgreSQL the way it is used**: every schema the role can see (Supabase's `auth` and `storage` included), paste a `postgres://` URL to fill the form, SSL from off to verify-full with your CA, and SSH tunnels through a bastion with a key, a password or your SSH agent.
+- **Saved connections**: as many as you like, each with a name and a colour. Passwords and SSH passphrases go to the OS keychain, only if you ask.
+- **Production tag**: a connection tagged production opens read-only, for you and for any agent following the app, and turns the title bar red while it is on screen. Leaving read-only asks first.
+- **Several databases open at once**, as tabs in the title bar. Switching does not reconnect.
+- **SQL editor**: syntax highlighting, autocomplete from your schema, `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection, `F5` runs the script, query tabs that survive a restart, history and saved scripts, a row limit, and Cancel for a long query. Errors underline the statement (and, in Postgres, the exact spot).
+- **AI in the editor**: `Ctrl/Cmd+K` writes SQL at the cursor or rewrites the selection, **Explain** describes a query with its plan, and a failed query offers **Explain** and **Fix with AI**, shown side by side before anything changes.
+- **Table editor**: double-click a cell to edit it, insert and duplicate rows, filter by any column, follow a foreign key to the row it points at (or see what points here), view and edit JSON, and copy rows as TSV, CSV, JSON, INSERT statements or Markdown. Results scroll smoothly however many rows come back.
+- **CSV import**: into a new table with inferred column types, or into an existing one with columns matched by name, in one transaction.
+- **Command palette**: `Ctrl/Cmd+P` jumps to any table, connection or action.
+- **Light and dark themes**, or follow the OS.
 - **Schema Visualization**: Visualize your database structure, relationships, and foreign keys in an interactive diagram.
   - **Auto-Layout**: Automatically arranges tables to minimize crossing lines.
   - **Export**: Save your schema diagram as **PNG or SVG** for documentation.
-- **Edit Support**: View and edit database records directly
-- **Advanced Search**: Filter and search through your data
-- **Real-time Updates**: Changes reflect immediately
-- **Data Sorting**: Sort any column with a click
-- **Responsive Design**: Works great on any screen size
-- **Batch Operations**: Execute multiple SQL statements with transaction support
-- **SQL Script Management**: Save and reuse your SQL scripts
-- **Dual Database Support**: Works with SQLite and PostgreSQL
 - **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries.
   - Settings → **AI**: OpenAI, OpenAI-compatible (LM Studio, vLLM, GitHub Models, Azure, …), or Ollama. Default is Ollama.
   - Same prompt the eval harness measures: schema + sample values (toggle), retrieved few-shot (K=3), one compile-repair pass.
@@ -81,8 +84,8 @@ unattended — even on a connection you have set to unrestricted.
   - Approval shows the **exact affected-row count**, not just a warning.
   - Generated SQL is **compiled before you see it**, so the model fixes its own
     unknown columns and syntax errors — writes included.
-  - Append-only audit log of every statement that ran, and who authorised it.
-- **Autosave & Export**: Automatically save changes and export query results to **CSV, Excel, or JSON**.
+  - Append-only audit log of every statement that ran — including edits, inserts, deletes and imports made in the grid — and who authorised it.
+- **Export**: tables or query results to **CSV, Excel, JSON or INSERT statements**.
 - **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
 
 ## Compared honestly
@@ -94,7 +97,7 @@ layer. It is not a replacement for a general DBA workbench.
 | --- | :---: | :---: | :---: | :---: |
 | SQLite + PostgreSQL | ✓ | ✓ | ✓ | ✓ |
 | MySQL, SQL Server, and the rest | — | ✓ | ✓ | ✓ |
-| SSH tunnel / jump host | — | ✓ | ✓ | ✓ |
+| SSH tunnel / jump host | ✓ | ✓ | ✓ | ✓ |
 | ERD | ✓ | paid | plugins | ✓ |
 | Text-to-SQL (local or cloud) | ✓ | — | — | Pro AI |
 | Write-safety (classify, row-count approval, audit) | ✓ | — | — | — |
@@ -103,9 +106,10 @@ layer. It is not a replacement for a general DBA workbench.
 | JDBC / every obscure driver | — | — | — | ✓ |
 | Native polish / years of query UX | — | ✓ | — | — |
 
-The losses that matter in practice: **two dialects**, no SSH, and TablePlus
-still feels faster for “just run this SQL.” Use those tools for that. Use this
-one when a model is allowed near the database, or when pgvector is the point.
+The loss that matters in practice: **two dialects**. If you need MySQL or SQL
+Server, use those tools. Use this one when a model is allowed near the
+database, when production should be hard to change by accident, or when
+pgvector is the point.
 
 ## Schema Visualization
 
@@ -414,50 +418,35 @@ npm run tauri build
 
 ## Usage
 
-Connecting to Databases:
-1. SQLite: Click "Upload Database" or drag & drop your SQLite file
-2. PostgreSQL: Open the Connection Manager, enter your credentials, and connect
-3. Switch Databases: Use the database switcher to toggle between SQLite & PostgreSQL
-4. Browse tables using the table selector
-5. Use the search bar to filter data
-6. Double-click any row to edit
-7. Check multiple rows at once then click "Delete" to remove them
-8. Click "Save Changes" to persist modifications
+### Connecting
 
-PostgreSQL-Specific Features:
-- Run SQL queries with real-time feedback
-- View table structures directly in the UI
-- Batch execute multiple statements in transaction mode
-- Securely connect using SSL
+- **SQLite**: *Open SQLite file*, drop a file anywhere on the home screen, or *New SQLite database* for an empty one. Files you open are saved to the list for next time.
+- **PostgreSQL**: *Connect to Postgres*, or paste a `postgres://` URL anywhere on the home screen. Give it a name and a colour, tag it production if it is, choose the SSL mode, and turn on *Connect through SSH* for a database behind a bastion. *Test* checks it without saving.
+- Saved connections reopen with one click. Several can be open at once; each is a tab in the title bar, and `+` goes back to the list.
 
-### Batch Operations & SQL Scripting
+### Browsing and editing
 
-The batch operations feature allows you to execute multiple SQL statements at once, which is perfect for complex database operations.
+- Pick a table in the sidebar. In Postgres, the picker above it chooses the schema.
+- Search, sort, and **Filter** by any column. A foreign-key value has an arrow that opens the row it points at; right-click a row for *Referenced by*.
+- Double-click a cell to edit it (`Enter` saves, `Esc` cancels), or right-click for the whole row, *Set to NULL*, *Duplicate* and *Delete*. JSON opens in a viewer you can edit.
+- **Insert row** fills in defaults and generated keys for you. **Import** loads a CSV.
+- Copy cells with `Ctrl/Cmd+C`, or ticked rows as TSV, CSV, JSON, INSERT statements or Markdown.
 
-#### Using Batch Operations
+Edits in the grid follow the connection's safety mode: in read-only they are refused, and every change is written to the audit log.
 
-1. After loading a database, click on the "Batch Operations" tab
-2. Enter your SQL statements in the editor, separating them with semicolons (`;`)
-3. Use the "Use Transaction" toggle to enable/disable transaction mode:
-   - When enabled (default): All statements succeed or none do (atomic operations)
-   - When disabled: Each statement is executed independently
-4. Click "Execute Script" to run your SQL commands
+### The SQL editor
+
+1. Write SQL. Autocomplete knows your tables and columns.
+2. `Ctrl/Cmd+Enter` runs the statement under the cursor, or the selection. `Shift+Ctrl/Cmd+Enter` or `F5` runs every statement in the tab.
    - Reads run immediately. Anything that changes the database opens an
      approval dialog first, showing how many rows each statement will affect —
      see [Write safety](#write-safety). Switch the connection to
      **Unrestricted** in the status bar to skip the prompt for statements you
      typed yourself.
-5. View the results including execution time, affected tables, and any errors
-6. The **Audit** tab records every statement that ran, and who authorised it
-
-#### Saving and Reusing Scripts
-
-1. Write your SQL script in the editor
-2. Enter a name for your script in the input field
-3. Click "Save Script" to store it for future use
-4. Access your saved scripts by clicking on the "Saved Scripts" tab
-5. Use the "Load" button to load a script back into the editor
-6. Delete unwanted scripts with the delete button
+   - With **Transaction** on, a script runs all or nothing. A `BEGIN` you type yourself stays open until you commit; the editor shows it and offers *Commit* and *Roll back*.
+   - Results stop at the row limit in the toolbar (1,000 by default). **Cancel** stops a query that runs too long.
+3. `Ctrl/Cmd+K` asks AI for SQL at the cursor, or to rewrite the selection. **Explain** describes the statement under the cursor and its plan (plain `EXPLAIN`, so nothing runs). A failed query offers **Explain** and **Fix with AI**.
+4. Tabs keep their text across restarts. The panel on the right has **History**, **Saved** scripts and the **Audit** log.
 
 #### Example Scripts
 
@@ -506,11 +495,21 @@ COMMIT;
 ```
 src/
   ├── components/     # React components
-  ├── hooks/         # Custom React hooks
-  ├── lib/           # Utilities and services
-  ├── styles/        # Global styles
-  └── types/         # TypeScript type definitions
+  ├── hooks/          # Custom React hooks
+  ├── lib/            # Utilities and services
+  │   └── db/         # connections, the SQLite and Postgres clients, CSV, URLs
+  └── types/          # TypeScript type definitions
+src-tauri/src/
+  ├── main.rs         # window, AI proxy, keychain
+  └── db/             # sqlite.rs (rusqlite), postgres.rs (sqlx), ssh.rs (russh)
 ```
+
+Every database call goes through one Tauri command, `db_run`, to a connection
+held in Rust. SQLite is opened in place with rusqlite; Postgres keeps a small
+pool plus a dedicated session for the editor, and an SSH tunnel when the
+connection has one. `npm run test:unit` covers the pure helpers (URL parsing,
+CSV, SQL literals, the statement under the cursor) and `cargo test` the SQLite
+engine.
 
 The Text-to-SQL and write-safety modules are deliberately free of browser,
 Tauri and network imports, so the eval harness in [`evals/`](./evals) exercises

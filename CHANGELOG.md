@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A real SQL editor.** Syntax highlighting, autocomplete for your tables and columns, and errors underlined where the database points. `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection; `Shift+Ctrl/Cmd+Enter` or `F5` runs the whole tab. Tabs keep their text across restarts, every run is kept in History, and **Cancel** stops a query that runs too long. Results stop at a row limit you choose, 1,000 by default.
+- **AI in the editor.** `Ctrl/Cmd+K` writes SQL at the cursor or rewrites the selection, with the context meter from Text to SQL. **Explain** describes the statement under the cursor and its plan without running it. A failed query offers **Explain** and **Fix with AI**.
+- **Transactions in the editor.** With **Transaction** on, a script runs all or nothing. A `BEGIN` you type stays open until you end it; the editor says so and offers Commit and Roll back.
+- **Saved connections**, as many as you like, each with a name and a colour. SQLite files you open are remembered too. Passwords and SSH secrets stay in the OS keychain.
+- **Production tag.** A connection tagged production opens read-only, for you and for agents, under a red title bar. Leaving read-only asks first.
+- **Several connections open at once**, each a tab in the title bar.
+- **PostgreSQL:** every schema, with a schema picker in the sidebar; paste a `postgres://` URL to fill in the form; SSL modes Off, Prefer, Require, Verify CA and Verify full, with your own CA certificate; and **SSH tunnels** with a key, a password or your SSH agent, the host key checked against `known_hosts`.
+- **Editing in the grid.** Double-click a cell to edit it, set NULL, duplicate a row, or insert one with defaults filled in. Filter by any column, open the row a foreign key points at or the rows that point at this one, read and edit JSON in a viewer, and copy rows as TSV, CSV, JSON, INSERT statements or Markdown. Pages hold 50 to 1,000 rows, and the grid draws only what is on screen.
+- **CSV import** into a new table, with column types guessed from the data, or into an existing one.
+- **Command palette** (`Ctrl/Cmd+P`) for tables, connections and commands.
+- **Light theme**, or follow the system.
+- Export as SQL INSERT statements, for one table or all of them.
+
+### Changed
+
+- **SQLite runs natively, on the file itself.** LiteDB used to load a copy into the webview with sql.js and write the whole copy back when you saved. Now each change is written when it happens, there is no Save step, and a large file no longer has to fit in memory. A change another program makes, such as an agent through the MCP server, appears on its own within a couple of seconds.
+- PostgreSQL connections are held by the app's Rust side: a small pool for browsing, plus one session for the editor, so `SET`, temporary tables and open transactions carry over from one run to the next.
+- The home screen lists your connections instead of asking for a file.
+- The SQL editor replaces the Batch Operations tab and the Text to SQL dialog. Clicking Star opens `Ctrl/Cmd+K`.
+- Grid edits and CSV imports obey the connection's safety mode and are written to the audit log.
+- Agents see every PostgreSQL schema; a table outside the search path is named `schema.table`. The MCP config LiteDB copies carries the SSL mode, CA certificate and production tag, and goes through the app's SSH tunnel while the connection is open.
+
+### Removed
+
+- sql.js and what it needed: Save, the guarded write and its lock, and reloading the whole file when another program changed it. SQLite's own locking now handles a second writer, waiting up to five seconds for it.
+- The limit of three saved PostgreSQL connections.
+- Leftovers from the Lovable / GPT Engineer template: the GPT Engineer script, the `rsms.me` stylesheet and the social-image tags in `index.html`, a second toaster (Sonner) that nothing used, unused shadcn components and hooks, `@tailwindcss/typography`, and template Tailwind settings.
+
 ### Security
 
 - The webview CSP no longer allows `cdn.gpteng.co` or `rsms.me`, and `connect-src` is no longer `*`. Model downloads go to Hugging Face. The ONNX runtime is served with the app.

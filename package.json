@@ -34,7 +34,8 @@
     "eval:verify": "tsx evals/src/index.ts --verify-references",
     "eval:selftest": "tsx evals/src/selftest.ts",
     "eval:schema": "tsx evals/src/dump-schema.ts",
-    "eval:models": "tsx evals/src/index.ts --list-models"
+    "eval:models": "tsx evals/src/index.ts --list-models",
+    "test:unit": "tsx src/lib/db/selftest.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
@@ -82,14 +83,12 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
     "reactflow": "^11.11.4",
-    "sonner": "^1.5.0",
     "tailwind-merge": "^2.5.2",
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@tailwindcss/typography": "^0.5.15",
     "@tauri-apps/cli": "~2.10.0",
     "@types/node": "^22.13.10",
     "@types/pg": "^8.11.10",

@@ -1,208 +1,154 @@
-import { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useEffect, useState } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import { sqliteService } from '@/lib/sqliteService';
-import { usePostgres } from '@/hooks/usePostgres';
 import { tauriService } from '@/lib/tauri';
 import { csvRow, rowsToJson } from '@/lib/exportFormat';
 import { buildXlsx } from '@/lib/xlsx';
-import { pgService } from '@/lib/pgService';
+import { formatRows } from '@/lib/db/sqlLiteral';
+import { quoteIdent } from '@/lib/types';
+import { visibleTables, type OpenConnection } from '@/lib/db/connections';
 
-type ExportFormat = 'csv' | 'json' | 'xlsx' | 'png' | 'svg';
+type DataFormat = 'csv' | 'json' | 'xlsx' | 'sql';
+type ImageFormat = 'png' | 'svg';
+
+const ALL = '__all__';
 
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  isPostgres?: boolean;
+  conn: OpenConnection;
   mode?: 'data' | 'schema';
-  onExportSchema?: (format: 'png' | 'svg') => Promise<void>;
+  /** Preselected table: the one on screen. */
+  initialTable?: string;
+  onExportSchema?: (format: ImageFormat) => Promise<void>;
 }
 
-export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'data', onExportSchema }: ExportDialogProps) {
-  const [format, setFormat] = useState<ExportFormat>(mode === 'schema' ? 'png' : 'csv');
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportableTables, setExportableTables] = useState<string[]>([]);
-  const [selectedTable, setSelectedTable] = useState<string>('');
+export function ExportDialog({ open, onOpenChange, conn, mode = 'data', initialTable, onExportSchema }: ExportDialogProps) {
+  const tables = visibleTables(conn);
+  const [format, setFormat] = useState<DataFormat | ImageFormat>(mode === 'schema' ? 'png' : 'csv');
+  const [table, setTable] = useState<string>(initialTable || ALL);
+  const [busy, setBusy] = useState(false);
 
-  const { tables: postgresTables } = usePostgres();
-
-  // Reset format when mode changes
   useEffect(() => {
+    if (!open) return;
     setFormat(mode === 'schema' ? 'png' : 'csv');
-  }, [mode]);
+    setTable(initialTable && tables.some((t) => t.name === initialTable) ? initialTable : ALL);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode]);
 
-  // Fetch available tables when dialog opens
-  useEffect(() => {
-    if (open && isPostgres && mode === 'data' && postgresTables.length > 0) {
-      const tableNames = postgresTables.map(t => t.name);
-      setExportableTables(tableNames);
-      if (tableNames.length > 0 && !selectedTable) {
-        setSelectedTable(tableNames[0]);
-      }
+  const exportData = async () => {
+    const targets = table === ALL ? tables.map((t) => t.name) : [table];
+    if (targets.length === 0) {
+      toast({ title: 'Nothing to export', description: 'This database has no tables.' });
+      return;
     }
-  }, [open, isPostgres, postgresTables, mode]);
+    const data = await Promise.all(targets.map(async (name) => ({ name, ...(await conn.client.exportTable(name)) })));
+    let output: string | Uint8Array;
+    let extension: string = format;
+    if (format === 'xlsx') {
+      output = buildXlsx(data.map((d) => ({ name: d.name, columns: d.columns, rows: d.rows })));
+    } else if (format === 'json') {
+      output =
+        data.length === 1
+          ? JSON.stringify(rowsToJson(data[0].rows), null, 2)
+          : JSON.stringify(Object.fromEntries(data.map((d) => [d.name, rowsToJson(d.rows)])), null, 2);
+    } else if (format === 'sql') {
+      extension = 'sql';
+      output = data
+        .map((d) =>
+          d.rows.length === 0
+            ? `-- ${d.name}: no rows`
+            : formatRows(
+                d.columns,
+                d.rows.map((r) => d.columns.map((c) => r[c])),
+                'insert',
+                { dialect: conn.dialect, table: conn.client.qualified(d.name), quotedColumns: d.columns.map((c) => quoteIdent(c, 'column')) },
+              ),
+        )
+        .join('\n\n') + '\n';
+    } else {
+      // One table is plain CSV. Several go in one file, each under its name.
+      output = data
+        .map((d) => {
+          const lines = [csvRow(d.columns), ...d.rows.map((r) => csvRow(d.columns.map((c) => r[c])))];
+          return data.length === 1 ? lines.join('\n') : `Table: ${d.name}\n${lines.join('\n')}`;
+        })
+        .join('\n\n\n') + '\n';
+    }
+    const saved = await tauriService.exportDatabase(output, extension);
+    if (saved.success) {
+      const rows = data.reduce((n, d) => n + d.rows.length, 0);
+      toast({ title: 'Exported', description: `${rows.toLocaleString()} rows from ${data.length === 1 ? data[0].name : `${data.length} tables`}.` });
+      onOpenChange(false);
+    } else if (saved.error !== 'Export cancelled') {
+      toast({ title: 'Export failed', description: saved.error, variant: 'destructive' });
+    }
+  };
 
   const handleExport = async () => {
+    setBusy(true);
     try {
-      setIsExporting(true);
-
       if (mode === 'schema') {
-        if (onExportSchema) {
-          await onExportSchema(format as 'png' | 'svg');
-          onOpenChange(false);
-        }
-        return;
-      }
-
-      let exportData: string | Uint8Array = '';
-      const exportFormat = format;
-
-      if (isPostgres) {
-        // For PostgreSQL we need to export the selected table
-        if (!selectedTable) {
-          toast({
-            title: "Error",
-            description: "Please select a table to export",
-            variant: "destructive"
-          });
-          return;
-        }
-
-        // Every row, with pgvector columns read as text (SELECT * returns
-        // them as binary the driver cannot decode).
-        const result = await pgService.getTableData(selectedTable, -1);
-        if (!result || result.columns.length === 0) {
-          toast({
-            title: "Error",
-            description: "Failed to fetch table data for export",
-            variant: "destructive"
-          });
-          return;
-        }
-
-        // Format data based on the selected format
-        if (format === 'json') {
-          // JSON format
-          exportData = JSON.stringify(rowsToJson(result.rows), null, 2);
-        } else if (format === 'csv') {
-          // CSV format
-          const header = csvRow(result.columns);
-          const rows = result.rows.map((row) =>
-            csvRow(result.columns.map(col => (row as unknown as Record<string, unknown>)[col]))
-          );
-          exportData = [header, ...rows].join('\n') + '\n';
-        } else {
-          exportData = buildXlsx([{ name: selectedTable, columns: result.columns, rows: result.rows }]);
-        }
-      } else {
-        // Get data in selected format for SQLite
-        const sqliteData =
-          format === 'png' || format === 'svg'
-            ? null
-            : format === 'xlsx'
-              ? sqliteService.exportToXlsx()
-              : sqliteService.exportToFormat(format);
-        if (!sqliteData) {
-          toast({
-            title: "Error",
-            description: "No database loaded or empty database",
-            variant: "destructive"
-          });
-          return;
-        }
-        exportData = sqliteData;
-      }
-
-      // Check if we have data to export
-      if (!exportData || exportData.length === 0) {
-        toast({
-          title: "Error",
-          description: "No data to export",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      // Export the data
-      const result = await tauriService.exportDatabase(exportData, exportFormat);
-
-      if (result.success) {
-        toast({
-          title: "Success",
-          description: `${isPostgres ? 'Table' : 'Database'} exported successfully as ${exportFormat.toUpperCase()}`
-        });
+        await onExportSchema?.(format as ImageFormat);
         onOpenChange(false);
-      } else if (result.error !== 'Export cancelled') {
-        toast({
-          title: "Error",
-          description: result.error || `Failed to export ${isPostgres ? 'table' : 'database'} as ${exportFormat.toUpperCase()}`,
-          variant: "destructive"
-        });
+      } else {
+        await exportData();
       }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: `Failed to export ${isPostgres ? 'table' : 'database'}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        variant: "destructive"
-      });
+      toast({ title: 'Export failed', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
     } finally {
-      setIsExporting(false);
+      setBusy(false);
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>Export {mode === 'schema' ? 'Schema' : (isPostgres ? 'Table' : 'Database')}</DialogTitle>
+          <DialogTitle>{mode === 'schema' ? 'Export schema diagram' : 'Export data'}</DialogTitle>
+          <DialogDescription>{mode === 'schema' ? 'Save the diagram as an image.' : 'Every row, not just the page on screen.'}</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
-          {mode === 'data' && isPostgres && (
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="table" className="text-right">
-                Table
-              </Label>
-              <Select
-                value={selectedTable}
-                onValueChange={(value) => setSelectedTable(value)}
-              >
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select table" />
+        <div className="grid gap-4 py-2">
+          {mode === 'data' && (
+            <div className="grid gap-1.5">
+              <Label className="text-xs text-muted-foreground">Table</Label>
+              <Select value={table} onValueChange={setTable}>
+                <SelectTrigger>
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {exportableTables.map(table => (
-                    <SelectItem key={table} value={table}>{table}</SelectItem>
+                  <SelectItem value={ALL}>All {tables.length} tables</SelectItem>
+                  {tables.map((t) => (
+                    <SelectItem key={t.name} value={t.name}>
+                      {t.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           )}
-
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="format" className="text-right">
-              Format
-            </Label>
-            <Select
-              value={format}
-              onValueChange={(value) => setFormat(value as ExportFormat)}
-            >
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Select format" />
+          <div className="grid gap-1.5">
+            <Label className="text-xs text-muted-foreground">Format</Label>
+            <Select value={format} onValueChange={(v) => setFormat(v as DataFormat | ImageFormat)}>
+              <SelectTrigger>
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {mode === 'data' ? (
                   <>
                     <SelectItem value="csv">CSV</SelectItem>
                     <SelectItem value="json">JSON</SelectItem>
-                    <SelectItem value="xlsx">Excel</SelectItem>
+                    <SelectItem value="xlsx">Excel (one sheet per table)</SelectItem>
+                    <SelectItem value="sql">SQL INSERT statements</SelectItem>
                   </>
                 ) : (
                   <>
-                    <SelectItem value="png">PNG Image</SelectItem>
-                    <SelectItem value="svg">SVG Image</SelectItem>
+                    <SelectItem value="png">PNG image</SelectItem>
+                    <SelectItem value="svg">SVG image</SelectItem>
                   </>
                 )}
               </SelectContent>
@@ -213,11 +159,12 @@ export function ExportDialog({ open, onOpenChange, isPostgres = false, mode = 'd
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleExport} disabled={isExporting || (mode === 'data' && isPostgres && !selectedTable)}>
-            {isExporting ? 'Exporting...' : 'Export'}
+          <Button onClick={() => void handleExport()} disabled={busy}>
+            {busy && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+            Export
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
-} 
+}

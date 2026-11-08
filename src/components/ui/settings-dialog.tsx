@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Switch } from "./switch"
 import { Settings2, Copy, Download, ChevronDown, RefreshCw, Check, X, Loader2 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
-import { useToast } from "./use-toast"
+import { useToast } from "@/hooks/use-toast"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./dropdown-menu"
 import { aiService, AIProvider, AISettings, defaultSettings, loadAISettingsAsync, saveNonSecretSettings } from "@/lib/aiService"
 import { storeAllApiKeys } from "@/lib/secretStorage"
@@ -261,8 +261,8 @@ export function SettingsDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-9 w-12 rounded-none hover:bg-muted/50">
-          <Settings2 className="h-4 w-4 text-muted-foreground" />
+        <Button variant="ghost" size="icon" className="h-9 w-11 rounded-none text-current opacity-70 hover:opacity-100 hover:bg-foreground/10" aria-label="Settings" title="Settings">
+          <Settings2 className="h-4 w-4" />
         </Button>
       </DialogTrigger>
       <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[560px]">

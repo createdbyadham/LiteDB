@@ -159,17 +159,19 @@ function Workspace({ conn }: { conn: OpenConnection }) {
     toast({ title: 'Refreshed', description: `${conn.name} reloaded.` });
   };
 
+  const selectedRef = useRef(selectedTable);
+  selectedRef.current = selectedTable;
   const selectTable = useCallback((tableName: string, filters: ColumnFilter[] = []) => {
     setActiveTab('browse');
-    setSelectedTable((current) => {
-      if (current !== tableName) {
-        setTableColumns([]);
-        setForeignKeys([]);
-        setTableData(EMPTY_PAGE);
-        setLoading(true);
-      }
-      return tableName;
-    });
+    if (selectedRef.current !== tableName) {
+      // A different table shows a spinner until its first page arrives; the
+      // same table with a new filter keeps the grid on screen.
+      setTableColumns([]);
+      setForeignKeys([]);
+      setTableData(EMPTY_PAGE);
+      setLoading(true);
+    }
+    setSelectedTable(tableName);
     setTableQuery({ ...DEFAULT_QUERY, filters });
   }, []);
 
@@ -458,14 +460,15 @@ function Workspace({ conn }: { conn: OpenConnection }) {
               />
             )}
 
-            {activeTab === 'query' && (
+            {/* Kept mounted: results, undo history and a running query survive a tab switch. */}
+            <div className={activeTab === 'query' ? 'h-full' : 'hidden'}>
               <SqlEditor
                 conn={conn}
                 refreshTables={refreshAfterWrite}
                 requestAiDialog={aiRequest}
                 onAiDialogRequested={clearAiRequest}
               />
-            )}
+            </div>
 
             {activeTab === 'vectors' && pg && hasPgVector && (
               <SemanticSearch

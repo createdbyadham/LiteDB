@@ -2,9 +2,14 @@
 
 LiteDB already has the database open. The MCP server follows that connection —
 no path, no URL, no restart when you switch databases. The status-bar policy is
-the agent's policy (YOLO maps down to guarded). Quitting the app removes the
+the agent's policy (YOLO maps down to guarded), and a connection tagged
+production starts read-only for the agent as well. Quitting the app removes the
 handoff, including any Postgres password, so the agent cannot keep using the
 last database.
+
+The handoff carries the connection's SSL mode and CA certificate. A Postgres
+connection behind SSH goes through the app's tunnel, so the agent reaches that
+database only while LiteDB has it open.
 
 Requires Node.js 22.5+ with `npx` on the PATH that Claude, Cursor, or VS Code uses. LiteDB does not install Node.
 
@@ -69,5 +74,5 @@ Watch, in this order:
 If (1) does not prompt, the host auto-ran the tool (Cursor auto-accept, or
 `execute_approved` allowlisted). LiteDB cannot force that click. The preview
 text is still the record; [`mcp/README.md`](../mcp/README.md#what-it-does-not-do)
-is doing real work. SQLite is the file on disk, not unsaved editor state —
-save first.
+is doing real work. For SQLite, the agent works on the file itself; edits made
+in the app are already there.

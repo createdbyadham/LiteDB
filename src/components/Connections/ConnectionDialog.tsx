@@ -13,7 +13,7 @@ import { tauriService } from '@/lib/tauri';
 import { pgSslHint } from '@/lib/pgSslHint';
 import { clearPolicyFor } from '@/lib/queryGate';
 import { postgresConnectionId, sqliteConnectionId } from '@/lib/connectionId';
-import { SSL_MODES, looksLikePostgresUrl, parsePostgresUrl, type SslMode } from '@/lib/db/pgUrl';
+import { SSL_MODES, parsePostgresUrl, type SslMode } from '@/lib/db/pgUrl';
 import type { PgConnectConfig } from '@/lib/db/native';
 import { openPostgres, testPostgres, updateOpenConnectionMeta } from '@/lib/db/connections';
 import {
@@ -189,7 +189,6 @@ export function ConnectionDialog({ open, onOpenChange, initial, prefillUrl, onCo
       setForm(EMPTY);
       if (prefillUrl) applyUrl(prefillUrl);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial, prefillUrl]);
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -622,5 +621,3 @@ export function ConnectionDialog({ open, onOpenChange, initial, prefillUrl, onCo
     </Dialog>
   );
 }
-
-export { looksLikePostgresUrl };

@@ -31,7 +31,7 @@ import { tauriService } from '@/lib/tauri';
 import { pgSslHint } from '@/lib/pgSslHint';
 import { formatPostgresUrl, looksLikePostgresUrl } from '@/lib/db/pgUrl';
 import { inTauri, type PgConnectConfig } from '@/lib/db/native';
-import { openPostgres, openSqliteFile, useConnections } from '@/lib/db/connections';
+import { activateConnection, openPostgres, openSqliteFile, useConnections } from '@/lib/db/connections';
 import {
   colorSwatch,
   deleteConnection,
@@ -151,7 +151,6 @@ const ConnectionsView = () => {
     async (entry: SavedConnection) => {
       if (open.some((c) => c.profileId === entry.id)) {
         const conn = open.find((c) => c.profileId === entry.id)!;
-        const { activateConnection } = await import('@/lib/db/connections');
         activateConnection(conn.id);
         navigate('/database');
         return;
