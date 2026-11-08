@@ -15,16 +15,19 @@ tauri-plugin-dialog = "2.0.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 futures-util = "0.3"
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "macros", "uuid", "chrono", "json"] }
+# aws-lc-rs, the rustls provider reqwest already uses.
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "macros", "uuid", "chrono", "json"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13.2", features = ["json", "rustls"] }
+# Only to install the process-wide crypto provider in main(); see there.
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs"] }
 url = "2"
 keyring = "3"
 tauri-plugin-log = "2.8.0"
 tauri-plugin-clipboard-manager = "2.3.2"
-# 0.30 because it shares libsqlite3-sys 0.27 with sqlx 0.7: the `links = "sqlite3"`
+# 0.32 because it shares libsqlite3-sys 0.30 with sqlx 0.8: the `links = "sqlite3"`
 # rule allows one copy in the graph, and sqlx lists its SQLite driver even unused.
-rusqlite = { version = "0.30", features = ["bundled", "column_decltype"] }
+rusqlite = { version = "0.32", features = ["bundled", "column_decltype"] }
 # ring rather than the default aws-lc-rs, which needs CMake and NASM on Windows.
 russh = { version = "0.65", default-features = false, features = ["ring", "flate2", "rsa"] }
 base64 = "0.22"
@@ -32,3 +35,4 @@ log = "0.4"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+tauri-plugin-process = "~2.3"

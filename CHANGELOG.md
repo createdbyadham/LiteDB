@@ -11,10 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Inline suggestions** in the SQL editor, off by default (Settings → AI). After a pause in typing, the model's suggestion shows as grey text after the cursor: `Tab` accepts it, `Esc` dismisses it, and typing its next characters keeps the rest. Ollama is asked fill-in-the-middle, which FIM-trained models such as qwen2.5-coder complete best; other providers, and models that refuse it, are asked through chat. Suggestions can have a smaller model of their own. Each pause sends the statement you are writing, your table names and the columns of the tables it reads to the provider. They never appear while the column popup is open or on a connection tagged production, and accepting one marks the tab as written by AI, so its writes still ask first in Unrestricted and the audit log names the model.
 
+### Fixed
+
+- After an update installs on macOS or Linux, the app restarts into the new version. The restart used to fail without a word, and the old version kept running until you quit it.
+
 ### Security
 
 - The TLS stack behind AI provider requests and update checks is patched: rustls 0.23.46, rustls-webpki 0.103.16 and aws-lc-sys 0.47. `tar`, which unpacks macOS updates, is 0.4.46.
 - Tauri is 2.12. Since 2.11.1, a remote page whose address starts with one of the app's scheme names is no longer mistaken for the app on Windows, so it cannot call the app's commands. The updater plugin is 2.14.1, which unpacks Windows updates with `zip` 9.
+- PostgreSQL connections, SSL included, run on sqlx 0.8 and rustls 0.23. sqlx 0.7 held them on rustls 0.21, which no longer gets security fixes.
 
 ## [2.5.0] - 2026-11-08
 

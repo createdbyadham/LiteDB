@@ -195,11 +195,22 @@ fn clear_mcp_handoff(app: &tauri::AppHandle) {
     }
 }
 
+/// The updater plugin turns on rustls' ring backend; reqwest and sqlx turn on
+/// aws-lc-rs. With both compiled in, rustls cannot pick a default and panics
+/// wherever a caller relies on one, such as the verifier sqlx builds for
+/// Postgres "Verify CA". Choose aws-lc-rs once, before any TLS starts.
+fn install_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 fn main() {
+    install_crypto_provider();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(db::DbState::default())
@@ -271,6 +282,19 @@ mod tests {
         assert!(is_proxy_url_allowed(&url("https://[::ffff:169.254.169.254]/latest")).is_err());
         assert!(is_proxy_url_allowed(&url("https://metadata.google.internal/")).is_err());
         assert!(is_proxy_url_allowed(&url("ftp://localhost/x")).is_err());
+    }
+
+    #[test]
+    fn tls_verifiers_have_a_crypto_provider() {
+        // What sqlx does for "Verify CA": a verifier built without naming a
+        // provider. It panics when the default was never installed.
+        super::install_crypto_provider();
+        let roots = std::sync::Arc::new(rustls::RootCertStore::empty());
+        let built = rustls::client::WebPkiServerVerifier::builder(roots).build();
+        assert!(
+            built.is_err(),
+            "no roots, so building fails, but without a panic"
+        );
     }
 
     #[test]

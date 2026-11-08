@@ -582,6 +582,8 @@ mod tests {
             eprintln!("skipping: EVAL_POSTGRES_URL not set");
             return;
         };
+        // As the app does at startup, so `sslmode=verify-ca` URLs work here too.
+        crate::install_crypto_provider();
         let pool = PgPoolOptions::new().connect(&url).await.unwrap();
         pool.execute(
             "DROP TABLE IF EXISTS row_json_probe;
