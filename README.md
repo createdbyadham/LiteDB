@@ -66,7 +66,7 @@ unattended — even on a connection you have set to unrestricted.
 - **Production tag**: a connection tagged production opens read-only, for you and for any agent following the app, and turns the title bar red while it is on screen. Leaving read-only asks first.
 - **Several databases open at once**, as tabs in the title bar. Switching does not reconnect.
 - **SQL editor**: syntax highlighting, autocomplete from your schema, `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection, `F5` runs the script, query tabs that survive a restart, history and saved scripts, a row limit, and Cancel for a long query. Errors underline the statement (and, in Postgres, the exact spot).
-- **AI in the editor**: `Ctrl/Cmd+K` writes SQL at the cursor or rewrites the selection, **Explain** describes a query with its plan, and a failed query offers **Explain** and **Fix with AI**, shown side by side before anything changes.
+- **AI in the editor**: `Ctrl/Cmd+K` opens Text to SQL from the editor, **Explain** describes a query with its plan, and a failed query offers **Explain** and **Fix with AI**, shown side by side before anything changes.
 - **Table editor**: double-click a cell to edit it, insert and duplicate rows, filter by any column, follow a foreign key to the row it points at (or see what points here), view and edit JSON, and copy rows as TSV, CSV, JSON, INSERT statements or Markdown. Results scroll smoothly however many rows come back.
 - **CSV import**: into a new table with inferred column types, or into an existing one with columns matched by name, in one transaction.
 - **Command palette**: `Ctrl/Cmd+P` jumps to any table, connection or action.
@@ -445,7 +445,7 @@ Edits in the grid follow the connection's safety mode: in read-only they are ref
      typed yourself.
    - With **Transaction** on, a script runs all or nothing. A `BEGIN` you type yourself stays open until you commit; the editor shows it and offers *Commit* and *Roll back*.
    - Results stop at the row limit in the toolbar (1,000 by default). **Cancel** stops a query that runs too long.
-3. `Ctrl/Cmd+K` asks AI for SQL at the cursor, or to rewrite the selection. **Explain** describes the statement under the cursor and its plan (plain `EXPLAIN`, so nothing runs). A failed query offers **Explain** and **Fix with AI**.
+3. `Ctrl/Cmd+K` opens **Text to SQL**: describe what you want, and the SQL goes in after the statement you are on, selected, ready to run. **Explain** describes the statement under the cursor and its plan (plain `EXPLAIN`, so nothing runs). A failed query offers **Explain** and **Fix with AI**.
 4. Tabs keep their text across restarts. The panel on the right has **History**, **Saved** scripts and the **Audit** log.
 
 #### Example Scripts
