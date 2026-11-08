@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The home screen lists your connections instead of asking for a file.
 - The SQL editor replaces the Batch Operations tab.
 - Grid edits and CSV imports obey the connection's safety mode and are written to the audit log.
-- Agents see every PostgreSQL schema; a table outside the search path is named `schema.table`. The MCP config LiteDB copies carries the SSL mode, CA certificate and production tag, and goes through the app's SSH tunnel while the connection is open.
+- Agents see every PostgreSQL schema (litedb-mcp 0.1.6); a table outside the search path is named `schema.table`. The handoff the MCP server follows carries the SSL mode, CA certificate and production tag, and a connection behind SSH goes through the app's tunnel while it is open.
 
 ### Removed
 
