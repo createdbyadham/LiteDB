@@ -26,7 +26,7 @@ import { executeApprovedInput, runApproved, runQuery, type ToolResult } from './
 import { describeTable, listTables, renderSchema } from './tools/schema';
 import { listVectorColumns, semanticSearch, type DistanceMetric } from './tools/vector';
 
-const VERSION = '0.1.5';
+const VERSION = '0.1.6';
 
 /** stdout carries the protocol. Everything human-readable goes to stderr. */
 function log(message: string): void {

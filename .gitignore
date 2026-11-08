@@ -43,9 +43,8 @@ release
 .env.test.local
 .env.production.local
 
-# Lock files (choose one)
+# Lock files: npm's is committed, because the release workflow installs with `npm ci`
 yarn.lock
-package-lock.json
 bun.lockb
 
 *.db
