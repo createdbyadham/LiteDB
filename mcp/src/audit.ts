@@ -61,6 +61,15 @@ export interface AuditContext {
 
 let context: AuditContext | null = null;
 
+// Which MCP host is calling, as it introduced itself during initialize. A
+// getter, because the handshake finishes after the audit is installed.
+let clientName: () => string | null = () => null;
+
+/** Tell the audit which host is calling, so the app can say "Claude is reading orders". */
+export function identifyClient(get: () => string | null): void {
+    clientName = get;
+}
+
 /** Point `recordAudit` at a file and remember what to stamp entries with. */
 export function installAudit(next: AuditContext): void {
     context = next;
@@ -112,6 +121,9 @@ export async function record(entry: DecisionRecord): Promise<void> {
             // it arrived over MCP.
             model: null,
             prompt: null,
+            // The host's own name for itself (clientInfo.name). Unlike a model
+            // name this is something the protocol does tell us.
+            client: clientName(),
         };
         await recordAudit(row);
     }

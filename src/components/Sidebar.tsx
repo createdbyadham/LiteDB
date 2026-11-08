@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Search, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { pressTable } from '@/lib/tableDrag';
 import { useState, useMemo } from 'react';
 
 export interface SidebarItem {
@@ -13,6 +14,8 @@ export interface SidebarItem {
   extra?: React.ReactNode; // Extra info on the right (e.g. column count)
   onClick: () => void;
   tooltip?: string;
+  /** A table name: the item can be dragged onto Star to ask about that table. */
+  dragTable?: string;
 }
 
 interface SidebarProps {
@@ -114,6 +117,8 @@ export function Sidebar({
                   <button
                     key={item.id}
                     onClick={item.onClick}
+                    onPointerDown={item.dragTable ? (e) => pressTable(e, item.dragTable!) : undefined}
+                    title={item.dragTable ? 'Drag onto Star to ask about this table' : undefined}
                     className={cn(
                       "w-full text-left h-9 px-3 rounded-md text-sm transition-colors",
                       "hover:bg-muted/50 flex items-center justify-between gap-3 group",

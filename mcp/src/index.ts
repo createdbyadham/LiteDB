@@ -18,6 +18,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { auditLogLocation, readAudit } from '../../src/lib/auditLog';
+import { identifyClient } from './audit';
 import { ConfigError, type ServerConfig } from './config';
 import { LiveSession } from './session';
 import { pluralRows } from './render';
@@ -25,7 +26,7 @@ import { executeApprovedInput, runApproved, runQuery, type ToolResult } from './
 import { describeTable, listTables, renderSchema } from './tools/schema';
 import { listVectorColumns, semanticSearch, type DistanceMetric } from './tools/vector';
 
-const VERSION = '0.1.4';
+const VERSION = '0.1.5';
 
 /** stdout carries the protocol. Everything human-readable goes to stderr. */
 function log(message: string): void {
@@ -322,6 +323,8 @@ async function main(): Promise<void> {
             }
         },
     );
+
+    identifyClient(() => server.server.getClientVersion()?.name ?? null);
 
     const transport = new StdioServerTransport();
     await server.connect(transport);

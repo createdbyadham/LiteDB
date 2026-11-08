@@ -1,8 +1,12 @@
 import { pipeline, env } from '@xenova/transformers';
 
 // The package loads its ONNX runtime from cdn.jsdelivr.net. The webview CSP
-// does not allow that host, so the wasm files copied at build time are used.
-env.backends.onnx.wasm.wasmPaths = import.meta.env.PROD ? './onnx/' : '/onnx/';
+// does not allow that host, so the app serves the wasm files itself (see
+// vite.config.ts). Only the app: the MCP server imports this module under
+// Node, where there is no Vite and `import.meta.env` is undefined, and
+// onnxruntime finds its own files there.
+const vite = (import.meta as ImportMeta & { env?: { PROD?: boolean } }).env;
+if (vite) env.backends.onnx.wasm.wasmPaths = vite.PROD ? './onnx/' : '/onnx/';
 
 type FeatureExtractor = {
   (text: string, options?: { pooling?: string; normalize?: boolean }): Promise<{ data: Float32Array }>;

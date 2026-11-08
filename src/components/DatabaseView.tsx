@@ -17,6 +17,7 @@ import { toast } from '@/hooks/use-toast';
 import { ExportDialog } from '@/components/ExportDialog';
 import { ImportDialog } from '@/components/ImportDialog';
 import { Star } from '@/components/Mascot/Star';
+import { useMascot } from '@/lib/mascot';
 import { SemanticSearch, VectorInspector, SimilarRowsModal, MockDataGenerator } from '@/components/VectorAdmin';
 import {
   refreshConnectionTables,
@@ -70,8 +71,21 @@ function Workspace({ conn }: { conn: OpenConnection }) {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [importTarget, setImportTarget] = useState<{ table?: string } | null>(null);
   const [insertRequest, setInsertRequest] = useState(0);
-  const [aiRequested, setAiRequested] = useState(false);
-  const clearAiRequest = useCallback(() => setAiRequested(false), []);
+  /**
+   * Star was clicked, or a table dropped on it: show the SQL editor and open
+   * Text to SQL there, starting the prompt with the table when there is one.
+   */
+  const [aiRequest, setAiRequest] = useState<{ seed?: string } | null>(null);
+  const clearAiRequest = useCallback(() => setAiRequest(null), []);
+  const askStar = useCallback(() => {
+    setActiveTab('query');
+    setAiRequest({});
+  }, []);
+  const askStarAbout = useCallback((table: string) => {
+    setActiveTab('query');
+    setAiRequest({ seed: `Using the ${table} table, ` });
+  }, []);
+  const { prefs: starPrefs } = useMascot();
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
 
   const tables = useMemo(() => visibleTables(conn), [conn]);
@@ -183,8 +197,7 @@ function Workspace({ conn }: { conn: OpenConnection }) {
         }
         break;
       case 'aiGenerate':
-        setActiveTab('query');
-        setAiRequested(true);
+        askStar();
         break;
     }
   });
@@ -272,9 +285,11 @@ function Workspace({ conn }: { conn: OpenConnection }) {
         label: table.name,
         icon: table.type === 'view' ? <Eye /> : <TableOfContents />,
         tooltip: table.type === 'view' ? `${table.name} (view, read-only)` : table.name,
+        // Dragging a table onto Star asks about it; only offered while Star is shown.
+        dragTable: starPrefs.visible ? table.name : undefined,
         onClick: () => selectTable(table.name),
       })),
-    [tables, selectTable],
+    [tables, selectTable, starPrefs.visible],
   );
 
   const sidebarStats = (
@@ -447,7 +462,7 @@ function Workspace({ conn }: { conn: OpenConnection }) {
               <SqlEditor
                 conn={conn}
                 refreshTables={refreshAfterWrite}
-                requestAiDialog={aiRequested}
+                requestAiDialog={aiRequest}
                 onAiDialogRequested={clearAiRequest}
               />
             )}
@@ -485,12 +500,8 @@ function Workspace({ conn }: { conn: OpenConnection }) {
         <StatusBar conn={conn} tableCount={tables.length} />
       </div>
 
-      <Star
-        onActivate={() => {
-          setActiveTab('query');
-          setAiRequested(true);
-        }}
-      />
+      {/* Star peeks over the status bar; clicking it opens Text to SQL. Hidden from Settings → Star. */}
+      {starPrefs.visible && <Star onActivate={askStar} onAsk={askStarAbout} />}
 
       <ExportDialog
         open={exportDialogOpen}
