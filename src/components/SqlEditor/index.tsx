@@ -1,372 +1,420 @@
-import { useState, useRef, useEffect } from 'react';
-import { mascot } from '@/lib/mascot';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SQLNamespace } from '@codemirror/lang-sql';
+import {
+  Lightbulb,
+  ListChecks,
+  PanelRight,
+  Play,
+  Plus,
+  Save,
+  Sparkles,
+  Square,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { sqliteService } from '@/lib/sqliteService';
-import { pgService } from '@/lib/pgService';
-import { toast } from '@/hooks/use-toast';
-import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, MessageSquareCode, Download, Loader2 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { AiQueryDialog } from './AiQueryDialog';
-import { ApprovalDialog } from './ApprovalDialog';
-import { AuditLogView } from './AuditLogView';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { toast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+import { mascot } from '@/lib/mascot';
+import { aiService } from '@/lib/aiService';
 import { tauriService } from '@/lib/tauri';
+import { csvRow, rowsToJson } from '@/lib/exportFormat';
+import { buildXlsx } from '@/lib/xlsx';
 import { evaluateScript, type GateDecision, type Provenance } from '@/lib/sqlPolicy';
 import { previewImpact, type ImpactEstimate, type PreviewRunner } from '@/lib/impactPreview';
-import { activePolicy, auditableStatements, isYolo, recordDecision } from '@/lib/queryGate';
-import { validateScript } from '@/lib/sqlValidator';
+import { activePolicy, auditableStatements, isYolo, recordDecision, ReadOnlyConnectionError } from '@/lib/queryGate';
+import { canValidate, validateScript } from '@/lib/sqlValidator';
+import { classifyStatement } from '@/lib/sqlClassifier';
 import type { AuditDecision, AuditOutcome } from '@/lib/auditLog';
-import { aiService } from '@/lib/aiService';
+import { statementAt, statementRanges, type StatementRange } from '@/lib/sqlCursor';
+import { loadTabs, newTab, saveTabs, titleFromSql, type EditorTab, type EditorTabsState } from '@/lib/editorTabs';
+import { addHistory } from '@/lib/queryHistory';
+import { shortcutLabel, useAppCommand } from '@/lib/commands';
+import { dbCancel, newQueryId, type RunError, type StatementResult } from '@/lib/db/native';
+import { setInTransaction, visibleTables, type OpenConnection } from '@/lib/db/connections';
+import { PgClient } from '@/lib/db/pgClient';
+import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
+import { ApprovalDialog } from './ApprovalDialog';
+import { SqlCodeEditor, type SqlCodeEditorHandle } from './SqlCodeEditor';
+import { AiInlineBar } from './AiInlineBar';
+import { ResultPanel, type RunOutcome } from './ResultPanel';
+import { ExplainPanel, type ExplainState } from './ExplainPanel';
+import { FixDialog, type FixState } from './FixDialog';
+import { SidePanel, type SavedScript } from './SidePanel';
 
 interface SqlEditorProps {
-  isPostgres?: boolean;
+  conn: OpenConnection;
   refreshTables?: () => Promise<void> | void;
   /**
-   * Set when Text to SQL was asked for from elsewhere (Star); opens the dialog
+   * Text to SQL asked for from elsewhere (Star, the palette): opens the AI bar
    * once, starting the prompt with `seed` when a table was dropped on Star.
    */
   requestAiDialog?: { seed?: string } | null;
   onAiDialogRequested?: () => void;
 }
 
-/** The last run that failed: what ran and what the database said. Star offers to explain or fix it. */
-interface Failure {
-  sql: string;
-  error: string;
-}
-
 /**
- * Who wrote the script being run, and what they asked for.
- *
- * Carried alongside the script rather than read from component state, because
- * YOLO mode runs a generated script in the same tick it arrives — before
- * React has flushed the corresponding `setProvenance` call.
+ * Who wrote the script being run, and what they asked for. Carried with the
+ * script rather than read from state, because YOLO runs a generated script in
+ * the same tick it arrives, before React has flushed it into the editor.
  */
 interface ScriptOrigin {
   provenance: Provenance;
   prompt: string | null;
-  /** The script as written, so a failure can be explained or fixed afterwards. */
+  /** The script as written, so a failure can be explained or fixed. */
   script: string;
 }
 
-const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = null, onAiDialogRequested }: SqlEditorProps) => {
-  const [sqlScript, setSqlScript] = useState('');
-  const [useTransaction, setUseTransaction] = useState(true);
-  const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState<{
-    success: boolean;
-    affectedTables: string[];
-    errors: string[];
-    executionTime?: number;
-    queryResults?: {
-      columns: string[];
-      rows: (string | number | boolean | null)[][];
-    } | null;
-  } | null>(null);
-  const [savedScripts, setSavedScripts] = useState<{ name: string; sql: string }[]>([]);
-  const [scriptName, setScriptName] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
-  /** How the next Text to SQL prompt starts: a table dropped on Star. */
-  const [aiSeed, setAiSeed] = useState('');
+/** The last run that failed: what ran, what the database said, and where it sits in the editor. */
+interface Failure {
+  sql: string;
+  error: string;
+  range: StatementRange | null;
+}
 
-  useEffect(() => {
-    if (!requestAiDialog) return;
-    setAiSeed(requestAiDialog.seed ?? '');
-    setIsAiDialogOpen(true);
-    onAiDialogRequested?.();
-  }, [requestAiDialog, onAiDialogRequested]);
+const ROW_LIMITS = [100, 500, 1000, 5000, 10000];
+const LIMIT_KEY = 'editorRowLimit';
+const SCRIPTS_KEY = 'savedScripts';
 
-  // After a failed run, Star offers to explain the error or fix the query.
-  const [failure, setFailure] = useState<Failure | null>(null);
-  const [explanation, setExplanation] = useState<string | null>(null);
-  const [explaining, setExplaining] = useState(false);
-  const [fixing, setFixing] = useState(false);
+function readLimit(): number | null {
+  try {
+    const raw = localStorage.getItem(LIMIT_KEY);
+    if (raw === 'none') return null;
+    const n = Number(raw);
+    return ROW_LIMITS.includes(n) ? n : 1000;
+  } catch {
+    return 1000;
+  }
+}
+
+function readScripts(): SavedScript[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(SCRIPTS_KEY) || '[]');
+    return Array.isArray(parsed) ? (parsed as SavedScript[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** BEGIN, COMMIT and friends in the script: the user is managing the transaction. */
+function managesTransaction(statements: string[]): boolean {
+  return statements.some((s) => /^\s*(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|END|SAVEPOINT|RELEASE)\b/i.test(s));
+}
+
+/** Rows as objects keyed by column, with repeated names kept apart. */
+function resultObjects(result: StatementResult): { columns: string[]; rows: Record<string, unknown>[] } {
+  const seen = new Map<string, number>();
+  const columns = result.columns.map((c) => {
+    const n = seen.get(c) ?? 0;
+    seen.set(c, n + 1);
+    return n === 0 ? c : `${c}_${n + 1}`;
+  });
+  return {
+    columns,
+    rows: result.rows.map((row) => Object.fromEntries(columns.map((c, i) => [c, row[i]]))),
+  };
+}
+
+function ToolbarButton({ label, shortcut, onClick, disabled, children, variant = 'ghost' }: {
+  label: string;
+  shortcut?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+  variant?: 'ghost' | 'default' | 'outline' | 'destructive';
+}) {
+  return (
+    <Tooltip delayDuration={300}>
+      <TooltipTrigger asChild>
+        <Button variant={variant} size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={onClick} disabled={disabled}>
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-xs">
+        {label}
+        {shortcut && <span className="ml-2 text-muted-foreground">{shortcutLabel(shortcut)}</span>}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequested }: SqlEditorProps) => {
+  const client = conn.client;
+  const dialect = conn.dialect;
+  const editorRef = useRef<SqlCodeEditorHandle>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
-  const explanationRef = useRef<HTMLDivElement>(null);
 
-  // Write-safety state. `provenance` is what makes the gate treat generated
-  // SQL differently from typed SQL, so it is tracked on the editor rather than
-  // inferred later: once the text is in the box, nothing can tell them apart.
+  // --- tabs ---------------------------------------------------------------------
+  const [tabsState, setTabsState] = useState<EditorTabsState>(() => loadTabs(conn.id));
+  const activeTab = tabsState.tabs.find((t) => t.id === tabsState.activeId) ?? tabsState.tabs[0];
+  const [renaming, setRenaming] = useState<string | null>(null);
+
+  const updateTabs = useCallback(
+    (update: (state: EditorTabsState) => EditorTabsState) => {
+      setTabsState((current) => {
+        const next = update(current);
+        saveTabs(conn.id, next);
+        return next;
+      });
+    },
+    [conn.id],
+  );
+
+  const patchActiveTab = useCallback(
+    (changes: Partial<EditorTab>) =>
+      updateTabs((s) => ({ ...s, tabs: s.tabs.map((t) => (t.id === s.activeId ? { ...t, ...changes } : t)) })),
+    [updateTabs],
+  );
+
+  const addTab = useCallback(
+    (sql = '') =>
+      updateTabs((s) => {
+        const tab = newTab(s.tabs.length + 1, sql);
+        return { tabs: [...s.tabs, tab], activeId: tab.id };
+      }),
+    [updateTabs],
+  );
+
+  const closeTab = (id: string) =>
+    updateTabs((s) => {
+      if (s.tabs.length === 1) {
+        const fresh = newTab(1);
+        return { tabs: [fresh], activeId: fresh.id };
+      }
+      const index = s.tabs.findIndex((t) => t.id === id);
+      const tabs = s.tabs.filter((t) => t.id !== id);
+      const activeId = s.activeId === id ? tabs[Math.max(0, index - 1)].id : s.activeId;
+      return { tabs, activeId };
+    });
+
+  // --- run state ----------------------------------------------------------------
+  const [running, setRunning] = useState<{ queryId: string; startedAt: number } | null>(null);
+  const [outcome, setOutcome] = useState<RunOutcome | null>(null);
+  const [useTransaction, setUseTransaction] = useState(true);
+  const [rowLimit, setRowLimit] = useState<number | null>(readLimit);
   const [pendingDecision, setPendingDecision] = useState<GateDecision | null>(null);
   const [pendingOrigin, setPendingOrigin] = useState<ScriptOrigin | null>(null);
+  const [pendingRanges, setPendingRanges] = useState<StatementRange[] | null>(null);
   const [previews, setPreviews] = useState<ImpactEstimate[]>([]);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const previewGen = useRef(0);
-  const [provenance, setProvenance] = useState<Provenance>('user');
-  const [aiPrompt, setAiPrompt] = useState<string | null>(null);
+  const lastRanges = useRef<StatementRange[] | null>(null);
 
-  const dialect = isPostgres ? 'postgres' : 'sqlite';
+  // --- AI state -------------------------------------------------------------------
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiSeed, setAiSeed] = useState<string | undefined>(undefined);
+  const [hasSelection, setHasSelection] = useState(false);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [explaining, setExplaining] = useState(false);
+  const [fixState, setFixState] = useState<FixState | null>(null);
+  const [explainState, setExplainState] = useState<ExplainState | null>(null);
+  const [panel, setPanel] = useState<'history' | 'saved' | 'audit' | null>(null);
+  const [savedScripts, setSavedScripts] = useState<SavedScript[]>(readScripts);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [scriptName, setScriptName] = useState('');
+  const { policy } = useSafetyPolicy();
 
-  /**
-   * Read-only runner for the impact preview.
-   *
-   * Postgres goes through tauriService rather than pgService because
-   * pgService raises a toast on failure — and a failed EXPLAIN is an expected
-   * outcome here, not something to interrupt the user with.
-   */
-  const previewRunner: PreviewRunner = async (sql) => {
-    if (isPostgres) {
-      const result = await tauriService.executePostgresQuery({ query: sql });
-      if (!result || !result.success) throw new Error(result?.error || 'preview query failed');
-      return (result.rows ?? []) as unknown as unknown[][];
+  const [editorFraction, setEditorFraction] = useState(0.5);
+  const splitRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!requestAiDialog) return;
+    setAiSeed(requestAiDialog.seed);
+    setAiOpen(true);
+    onAiDialogRequested?.();
+  }, [requestAiDialog, onAiDialogRequested]);
+
+  // --- schema for autocomplete ---------------------------------------------------
+  const [columnsByTable, setColumnsByTable] = useState<Map<string, { name: string; type: string }[]>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void client
+      .getAllColumns()
+      .then((columns) => {
+        if (!cancelled) setColumnsByTable(columns);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [client, conn.tables]);
+
+  const pg = client instanceof PgClient ? client : null;
+  const schema: SQLNamespace = useMemo(() => {
+    const completion = (c: { name: string; type: string }) => ({ label: c.name, type: 'property', detail: c.type });
+    if (!pg) {
+      const ns: Record<string, ReturnType<typeof completion>[]> = {};
+      for (const table of conn.tables) ns[table.name] = (columnsByTable.get(table.name) ?? []).map(completion);
+      return ns;
     }
-    return sqliteService.executeQuery(sql)?.rows ?? null;
-  };
+    // Postgres: schema → table → columns, so `auth.` completes auth's tables.
+    const ns: Record<string, Record<string, ReturnType<typeof completion>[]>> = {};
+    for (const table of conn.tables) {
+      const schemaName = table.schema ?? pg.defaultSchema;
+      ns[schemaName] ??= {};
+      ns[schemaName][table.table ?? table.name] = (columnsByTable.get(table.name) ?? []).map(completion);
+    }
+    return ns;
+  }, [conn.tables, columnsByTable, pg]);
+
+  // --- helpers ----------------------------------------------------------------------
+
+  /** Reads for the impact preview and the validator. Never raises a toast. */
+  const previewRunner: PreviewRunner = useCallback(async (sql) => (await client.query(sql)).rows, [client]);
 
   /**
    * Compile generated SQL against the live database and report the first
-   * error, so the model can fix it before the SQL reaches the editor.
-   *
-   * This is the answer to the failure that used to reach the user: the model
-   * writes an UPDATE naming a column that does not exist, it lands in the box
-   * looking plausible, and the error only appears after Execute. Compiling it
-   * here turns that into a retry the user never sees.
+   * error, so the model can fix it before it reaches the editor. Compiled
+   * with EXPLAIN, never run.
    */
-  const validateGeneratedSql = async (sql: string): Promise<string | null> => {
-    try {
-      const failure = await validateScript(sql, dialect, previewRunner);
-      return failure ? failure.error : null;
-    } catch (error) {
-      // The checker itself failed — no connection, a driver problem. Report
-      // no error rather than a false one: a spurious message would send the
-      // model rewriting SQL that was fine.
-      console.error('SQL validation failed:', error);
-      return null;
+  const validateGeneratedSql = useCallback(
+    async (sql: string): Promise<string | null> => {
+      try {
+        const failed = await validateScript(sql, dialect, async (q) => client.query(q));
+        return failed ? failed.error : null;
+      } catch (error) {
+        console.error('SQL validation failed:', error);
+        return null;
+      }
+    },
+    [client, dialect],
+  );
+
+  const markError = (error: RunError, ranges: StatementRange[] | null) => {
+    const range = ranges?.[error.statement];
+    if (!range) return;
+    if (error.position) {
+      const doc = editorRef.current?.getValue() ?? '';
+      const from = range.from + error.position - 1;
+      let to = from;
+      while (to < doc.length && /[\w."]/.test(doc[to])) to++;
+      editorRef.current?.markError(from, Math.max(to, from + 1), error.message);
+    } else {
+      editorRef.current?.markError(range.from, range.to, error.message);
     }
   };
 
-  // Function to execute the SQL script
-  /**
-   * @param reportsRowCount Whether the script changes rows, so a count is
-   *   meaningful. Reads are excluded because neither engine gives a clean
-   *   answer for them: SQLite's counter still holds the previous write's
-   *   value, and Postgres reports rows *returned* in the same field.
-   */
-  const executeScript = async (statements: string[], reportsRowCount: boolean) => {
-    setIsRunning(true);
-    setResults(null);
+  // --- running ---------------------------------------------------------------------
 
+  const executeScript = async (
+    statements: string[],
+    writes: boolean[],
+    ranges: StatementRange[] | null,
+  ): Promise<{ success: boolean; errors: string[]; rowsAffected: number; failedStatement: number | null }> => {
+    const queryId = newQueryId();
+    const startedAt = Date.now();
+    setRunning({ queryId, startedAt });
+    setOutcome(null);
+    setExplanation(null);
+    editorRef.current?.clearErrors();
+    const transaction = useTransaction && statements.length > 1 && !managesTransaction(statements);
     try {
-      const startTime = performance.now();
-
-      let result: {
-        success: boolean;
-        affectedTables: string[];
-        errors: string[];
-        rowsAffected: number;
-        queryResults?: {
-          columns: string[];
-          rows: (string | number | boolean | null)[][];
-        } | null;
-      };
-
-
-      if (isPostgres) {
-        // For PostgreSQL, execute each statement sequentially
-        result = { success: true, affectedTables: [], errors: [], rowsAffected: 0, queryResults: null };
-
-        for (const statement of statements) {
-          try {
-            // Check if this is a SELECT or similar query that returns data
-            const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statement);
-
-            const queryResult = await pgService.executeQuery(statement);
-            if (queryResult) {
-              result.rowsAffected += queryResult.rowsAffected;
-              // For SELECT queries, we want to display the results
-              if (isSelectQuery) {
-                // Normalize Postgres object rows to array-of-arrays based on columns (type-safe)
-                const isObjectRow = (value: unknown): value is Record<string, unknown> =>
-                  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-                let normalizedRows: (string | number | boolean | null)[][] = [];
-                if (Array.isArray(queryResult.rows) && queryResult.rows.length > 0) {
-                  const firstRowUnknown = queryResult.rows[0] as unknown;
-                  if (isObjectRow(firstRowUnknown)) {
-                    const objectRows = queryResult.rows as unknown as Array<Record<string, unknown>>;
-                    normalizedRows = objectRows.map((r) =>
-                      queryResult.columns.map((c) => {
-                        const v = r[c];
-                        return (v === undefined ? null : (v as string | number | boolean | null));
-                      })
-                    );
-                  } else {
-                    normalizedRows = queryResult.rows as (string | number | boolean | null)[][];
-                  }
-                }
-
-                result.queryResults = {
-                  columns: queryResult.columns,
-                  rows: normalizedRows
-                };
-              }
-
-              // Refreshing is handled once in runApproved, for every kind of
-              // change rather than only DDL.
-
-              // Try to extract table names from the SQL
-              const tableMatches = statement.match(/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE)\s+(?:"|')?(\w+)(?:"|')?/i);
-              if (tableMatches && tableMatches[1] && !result.affectedTables.includes(tableMatches[1])) {
-                result.affectedTables.push(tableMatches[1]);
-              }
-            } else {
-              result.success = false;
-              result.errors.push(`Failed to execute: ${statement}`);
-            }
-          } catch (error) {
-            result.success = false;
-            result.errors.push(error instanceof Error ? error.message : "Unknown error");
-          }
-        }
-      } else {
-        // For SQLite, check if we have a SELECT query and handle it specially
-        const isSelectQuery = /^\s*(SELECT|WITH|SHOW|EXPLAIN|ANALYZE|DESC|DESCRIBE)/i.test(statements[0]);
-
-        if (isSelectQuery && statements.length === 1) {
-          try {
-            const queryResult = sqliteService.executeQuery(statements[0]);
-            result = {
-              success: true,
-              affectedTables: [],
-              errors: [],
-              rowsAffected: queryResult?.rowsAffected ?? 0,
-              queryResults: queryResult as {
-                columns: string[];
-                rows: (string | number | boolean | null)[][];
-              }
-            };
-          } catch (error) {
-            result = {
-              success: false,
-              affectedTables: [],
-              errors: [error instanceof Error ? error.message : "Unknown error"],
-              rowsAffected: 0
-            };
-          }
-        } else {
-          // For other SQL statements, use the existing batch operation
-          result = sqliteService.executeBatchOperations(statements, useTransaction);
-        }
-      }
-
-      const endTime = performance.now();
-
-      setResults({
-        ...result,
-        executionTime: Math.round(endTime - startTime)
+      const response = await client.execute(statements, {
+        session: true,
+        queryId,
+        transaction,
+        continueOnError: !transaction,
+        maxRows: rowLimit ?? undefined,
+        stopAtLimit: statements.length === 1 && rowLimit !== null,
       });
-
+      setInTransaction(conn.id, response.inTransaction);
+      const result: RunOutcome = {
+        statements,
+        results: response.results,
+        errors: response.errors,
+        elapsedMs: response.elapsedMs,
+        rolledBack: response.rolledBack,
+        limit: rowLimit,
+        writes,
+      };
+      setOutcome(result);
+      const rowsAffected = response.results.reduce((n, r) => (writes[r.statement] ? n + r.rowsAffected : n), 0);
+      const success = response.errors.length === 0;
+      const lastSet = [...response.results].reverse().find((r) => r.returnsRows);
+      addHistory({
+        connectionId: conn.id,
+        connectionName: conn.name,
+        sql: statements.join(';\n'),
+        durationMs: response.elapsedMs,
+        ok: success,
+        rows: lastSet ? lastSet.rows.length : writes.some(Boolean) ? rowsAffected : null,
+        error: response.errors[0]?.message,
+      });
+      if (!success) markError(response.errors[0], ranges);
       // Star cheers at a clean run and winces at a failed one.
-      mascot.setMood(result.success ? 'happy' : 'error', result.success ? 1200 : 1600);
-
-      if (result.success) {
-        // Row count, not just "success". An UPDATE whose WHERE matches nothing
-        // succeeds; without this it reported exactly the same as one that
-        // changed thousands, and the user had no way to tell them apart.
-        const changed = result.rowsAffected;
-        const ran = `Executed ${statements.length} statement${statements.length > 1 ? 's' : ''}`;
-        if (!reportsRowCount) {
-          toast({ title: "Success", description: `${ran} successfully` });
-        } else {
-          toast({
-            title: changed === 0 ? "No rows changed" : "Success",
-            description:
-              changed === 0
-                ? `${ran}, but nothing matched — 0 rows changed.`
-                : `${ran}. ${changed.toLocaleString()} row${changed === 1 ? '' : 's'} changed.`,
-          });
-        }
-      } else {
+      mascot.setMood(success ? 'happy' : 'error', success ? 1200 : 1600);
+      if (success && writes.some(Boolean)) {
         toast({
-          title: "Execution Error",
-          description: `${result.errors.length} error${result.errors.length > 1 ? 's' : ''} occurred`,
-          variant: "destructive"
+          title: rowsAffected === 0 ? 'No rows changed' : 'Done',
+          description: rowsAffected === 0 ? 'The statement ran, but nothing matched.' : `${rowsAffected.toLocaleString()} ${rowsAffected === 1 ? 'row' : 'rows'} changed.`,
         });
       }
-
-      return { success: result.success, errors: result.errors, rowsAffected: result.rowsAffected };
+      return {
+        success,
+        errors: response.errors.map((e) => e.message),
+        rowsAffected,
+        failedStatement: success ? null : response.errors[0].statement,
+      };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error occurred";
+      const message = error instanceof Error ? error.message : String(error);
+      setOutcome({
+        statements,
+        results: [],
+        errors: [{ statement: 0, message, code: null, cancelled: false, position: null }],
+        elapsedMs: Date.now() - startedAt,
+        rolledBack: false,
+        limit: rowLimit,
+        writes,
+      });
       mascot.setMood('error', 1600);
-      setResults({
-        success: false,
-        affectedTables: [],
-        errors: [message]
-      });
-
-      toast({
-        title: "Execution Failed",
-        description: message,
-        variant: "destructive"
-      });
-
-      return { success: false, errors: [message], rowsAffected: 0 };
+      if (error instanceof ReadOnlyConnectionError) {
+        toast({ title: 'Read-only connection', description: message, variant: 'destructive' });
+      }
+      return { success: false, errors: [message], rowsAffected: 0, failedStatement: 0 };
     } finally {
-      setIsRunning(false);
+      setRunning(null);
     }
   };
 
-  /**
-   * Run a script the gate has cleared, and record what happened.
-   *
-   * The audit entry is written after execution rather than before, so it can
-   * carry the real outcome. A log of intentions is not a log of events.
-   */
+  /** Run a script the gate has cleared, and record what happened. */
   const runApproved = async (
     decision: GateDecision,
     auditDecision: AuditDecision,
     origin: ScriptOrigin,
     impact: ImpactEstimate[],
+    ranges: StatementRange[] | null,
   ) => {
     const started = performance.now();
-    const changesRows = decision.kind !== 'read';
-    const outcomeResult = await executeScript(
-      decision.statements.map((s) => s.sql),
-      changesRows,
-    );
-    const outcome: AuditOutcome = outcomeResult.success ? 'ok' : 'error';
-    setExplanation(null);
-    if (outcomeResult.success) {
+    const writes = decision.statements.map((s) => s.kind !== 'read');
+    const result = await executeScript(decision.statements.map((s) => s.sql), writes, ranges);
+    const outcomeKind: AuditOutcome = result.success ? 'ok' : 'error';
+
+    if (result.success) {
       setFailure(null);
-    } else {
-      setFailure({ sql: origin.script, error: outcomeResult.errors.join('\n') });
+    } else if (!result.errors[0]?.startsWith('Cancelled')) {
+      const index = result.failedStatement ?? 0;
+      const range = ranges?.[index] ?? null;
+      setFailure({ sql: range?.sql ?? decision.statements[index]?.sql ?? origin.script, error: result.errors[0] ?? '', range });
       mascot.say('Click me to explain or fix it', 2800);
     }
 
-    // Anything that changed the database invalidates what the rest of the app
-    // is showing. This used to fire only for DDL, matched with a regex, so a
-    // successful UPDATE left the table editor displaying pre-write rows and
-    // looked to the user like it had silently failed.
-    if (outcomeResult.success && decision.kind !== 'read' && refreshTables) {
-      await Promise.resolve(refreshTables());
-    }
+    // Anything that changed the database invalidates what the rest of the app shows.
+    if (result.success && decision.kind !== 'read' && refreshTables) await Promise.resolve(refreshTables());
 
     void recordDecision({
-      statements: auditableStatements(
-        decision.statements,
-        origin.provenance,
-        decision.appliedPolicy,
-      ),
+      statements: auditableStatements(decision.statements, origin.provenance, decision.appliedPolicy),
       decision: auditDecision,
-      outcome,
+      outcome: outcomeKind,
       provenance: origin.provenance,
       policy: decision.appliedPolicy,
-      error: outcomeResult.errors.join('; ') || null,
-      estimatedRows: impact.reduce<number | null>(
-        (total, preview) =>
-          preview.exactRows === null ? total : (total ?? 0) + preview.exactRows,
-        null,
-      ),
-      actualRows: outcomeResult.success && changesRows ? outcomeResult.rowsAffected : null,
+      error: result.errors.join('; ') || null,
+      estimatedRows: impact.reduce<number | null>((total, p) => (p.exactRows === null ? total : (total ?? 0) + p.exactRows), null),
+      actualRows: result.success && decision.kind !== 'read' ? result.rowsAffected : null,
       durationMs: Math.round(performance.now() - started),
       prompt: origin.prompt,
       model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
@@ -374,59 +422,43 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = null, 
   };
 
   /**
-   * The one entry point to execution.
-   *
-   * Every path that runs SQL from this editor goes through here, so the policy
-   * cannot be bypassed by a code path added later that forgets to ask.
+   * The one entry point to execution: every run from this editor goes through
+   * the gate, so the policy cannot be bypassed by a path added later.
    */
-  const runScript = async (script: string, origin: ScriptOrigin) => {
-    // Drop any previous preview so a later allow-path audit entry cannot
-    // inherit a row count from an unrelated statement. Passing impact
-    // explicitly into `runApproved` is the real fix; this keeps the dialog
-    // from flashing stale numbers if React hasn't flushed yet. The generation
-    // token discards an in-flight preview that belongs to a cancelled or
-    // superseded script — otherwise its `finally` would re-enable Run with
-    // the wrong counts.
+  const runScript = async (script: string, origin: ScriptOrigin, baseOffset: number | null) => {
     const gen = ++previewGen.current;
     setPreviews([]);
-
     if (!script.trim()) {
-      toast({
-        title: "Empty Script",
-        description: "Please enter SQL statements to execute",
-        variant: "destructive"
-      });
+      toast({ title: 'Nothing to run', description: 'Write a statement first.' });
       return;
     }
-
-    const policy = activePolicy();
-    const decision = evaluateScript(script, policy, origin.provenance);
-
+    const decision = evaluateScript(script, activePolicy(), origin.provenance);
     if (decision.statements.length === 0) {
-      toast({
-        title: "Invalid Script",
-        description: "No valid SQL statements found",
-        variant: "destructive"
-      });
+      toast({ title: 'Nothing to run', description: 'No SQL statements found.' });
       return;
     }
+    const ranges =
+      baseOffset === null
+        ? null
+        : statementRanges(script).map((r) => ({ from: r.from + baseOffset, to: r.to + baseOffset, sql: r.sql }));
+    lastRanges.current = ranges;
 
     if (decision.action === 'block') {
       // A refusal by policy is not an error to fix, so Star offers nothing.
       setFailure(null);
       setExplanation(null);
-      setResults({ success: false, affectedTables: [], errors: [decision.reason] });
-      toast({
-        title: "Blocked by connection policy",
-        description: decision.reason,
-        variant: "destructive"
+      setOutcome({
+        statements: decision.statements.map((s) => s.sql),
+        results: [],
+        errors: [{ statement: 0, message: decision.reason, code: null, cancelled: false, position: null }],
+        elapsedMs: 0,
+        rolledBack: false,
+        limit: rowLimit,
+        writes: decision.statements.map((s) => s.kind !== 'read'),
       });
+      toast({ title: 'Blocked by connection policy', description: decision.reason, variant: 'destructive' });
       void recordDecision({
-        statements: auditableStatements(
-          decision.statements,
-          origin.provenance,
-          decision.appliedPolicy,
-        ),
+        statements: auditableStatements(decision.statements, origin.provenance, decision.appliedPolicy),
         decision: 'blocked',
         outcome: 'not-run',
         provenance: origin.provenance,
@@ -439,16 +471,16 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = null, 
     }
 
     if (decision.action === 'allow') {
-      await runApproved(decision, 'allowed', origin, []);
+      await runApproved(decision, 'allowed', origin, [], ranges);
       return;
     }
 
-    // Open the dialog first and fill the numbers in as they arrive: the impact
-    // preview issues real queries, and a dialog that appears only once they
-    // return reads as a frozen app.
+    // Open the dialog first and fill the numbers in as they arrive: the
+    // preview issues real queries, and a dialog that waits on them reads as
+    // a frozen app.
     setPendingDecision(decision);
     setPendingOrigin(origin);
-    setPreviews([]);
+    setPendingRanges(ranges);
     setIsPreviewing(true);
     try {
       const next = await previewImpact(decision.statements, dialect, previewRunner);
@@ -461,18 +493,140 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = null, 
     }
   };
 
-  /**
-   * The one entry point to execution.
-   *
-   * Every path that runs SQL from this editor goes through here, so the policy
-   * cannot be bypassed by a code path added later that forgets to ask. The
-   * script and its origin are passed explicitly rather than read from state,
-   * because YOLO mode executes a generated script in the same tick it arrives
-   * — before React has flushed it into `sqlScript`.
-   */
-  const handleRun = () => runScript(sqlScript, { provenance, prompt: aiPrompt, script: sqlScript });
+  const currentOrigin = (script: string): ScriptOrigin => ({
+    provenance: activeTab.provenance,
+    prompt: activeTab.aiPrompt,
+    script,
+  });
 
-  /** Ask the model what went wrong, and show its answer under the error. */
+  /** Mod-Enter: the selection, or the statement under the cursor. */
+  const runStatement = () => {
+    const editor = editorRef.current;
+    if (!editor || running) return;
+    const selection = editor.getSelection();
+    if (selection.text.trim()) {
+      void runScript(selection.text, currentOrigin(selection.text), selection.from);
+      return;
+    }
+    const doc = editor.getValue();
+    const range = statementAt(doc, editor.getCursor());
+    if (!range) {
+      toast({ title: 'Nothing to run', description: 'Write a statement first.' });
+      return;
+    }
+    editor.select(range.from, range.to);
+    void runScript(range.sql, currentOrigin(range.sql), range.from);
+  };
+
+  /** Shift-Mod-Enter or F5: every statement in the tab. */
+  const runAll = () => {
+    const editor = editorRef.current;
+    if (!editor || running) return;
+    const doc = editor.getValue();
+    void runScript(doc, currentOrigin(doc), 0);
+  };
+
+  const cancel = async () => {
+    if (!running) return;
+    try {
+      await dbCancel(running.queryId);
+    } catch (error) {
+      console.error('Cancel failed:', error);
+    }
+  };
+
+  const handleApprove = async () => {
+    const decision = pendingDecision;
+    const origin = pendingOrigin;
+    const impact = previews;
+    const ranges = pendingRanges;
+    if (!decision || !origin) return;
+    previewGen.current += 1;
+    setPendingDecision(null);
+    setPendingOrigin(null);
+    setPendingRanges(null);
+    setPreviews([]);
+    setIsPreviewing(false);
+    await runApproved(decision, 'approved', origin, impact, ranges);
+  };
+
+  const handleDecline = () => {
+    const decision = pendingDecision;
+    const origin = pendingOrigin;
+    previewGen.current += 1;
+    setPendingDecision(null);
+    setPendingOrigin(null);
+    setPendingRanges(null);
+    setPreviews([]);
+    setIsPreviewing(false);
+    if (!decision || !origin) return;
+    void recordDecision({
+      statements: auditableStatements(decision.statements, origin.provenance, decision.appliedPolicy),
+      decision: 'declined',
+      outcome: 'not-run',
+      provenance: origin.provenance,
+      policy: decision.appliedPolicy,
+      prompt: origin.prompt,
+      model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
+    });
+  };
+
+  // --- AI: generate, explain, fix ---------------------------------------------------
+
+  const generate = async (prompt: string, compact: boolean) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const selection = editor.getSelection();
+    const editing = selection.text.trim().length > 0;
+    const request = editing ? `${prompt}\n\nRewrite this SQL to do that, and return the whole statement:\n${selection.text}` : prompt;
+    const tables = aiService.getSchema()?.tables.length ?? 0;
+    mascot.setMood('thinking');
+    mascot.say(tables ? `Reading ${tables} ${tables === 1 ? 'table' : 'tables'}` : 'Thinking', 60_000);
+    try {
+      const query = await aiService.generateSqlQuery(request, validateGeneratedSql, { compact });
+      const doc = editor.getValue();
+      let from: number;
+      if (editing) {
+        from = selection.from;
+        editor.replaceRange(selection.from, selection.to, query);
+      } else if (!doc.trim()) {
+        from = 0;
+        editor.replaceRange(0, doc.length, query);
+      } else {
+        const at = editor.getCursor();
+        const before = doc.slice(0, at);
+        const prefix = before.trim() === '' ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+        const needsSemicolon = before.trim() !== '' && !before.trimEnd().endsWith(';');
+        const insert = `${needsSemicolon ? ';' : ''}${prefix}${query}`;
+        editor.replaceRange(at, at, insert);
+        from = at + insert.length - query.length;
+      }
+      patchActiveTab({ provenance: 'ai', aiPrompt: prompt });
+      setFailure(null);
+      setExplanation(null);
+      setAiOpen(false);
+      setAiSeed(undefined);
+      mascot.setMood('happy', 1600);
+      if (isYolo()) {
+        // Nobody is reviewing this, so Star rattles.
+        mascot.gesture('rattle');
+        mascot.say('Running it now, no review', 1800);
+        void runScript(query, { provenance: 'ai', prompt, script: query }, from);
+      } else {
+        mascot.say('Here is your SQL', 1800);
+      }
+    } catch (error) {
+      mascot.setMood('error', 1800);
+      mascot.say('That did not work', 2200);
+      toast({
+        variant: 'destructive',
+        title: 'SQL not generated',
+        description: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
+      });
+    }
+  };
+
+  /** Ask the model why the last run failed; the answer shows under the error. */
   const explainFailure = async (f: Failure) => {
     setExplaining(true);
     setExplanation(null);
@@ -483,7 +637,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = null, 
       setExplanation(text);
       mascot.setMood('idle');
       mascot.say(null);
-      requestAnimationFrame(() => mascot.glance(explanationRef.current, 1200));
+      requestAnimationFrame(() => mascot.glance(resultsRef.current, 1200));
     } catch (error) {
       mascot.setMood('error', 1600);
       mascot.say(null);
@@ -497,50 +651,65 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = null, 
     }
   };
 
+  /** Apply a fix: into the failing statement's place, marked as generated. */
+  const applyFix = (f: Failure, fixed: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const doc = editor.getValue();
+    const range = f.range && doc.slice(f.range.from, f.range.to) === f.range.sql ? f.range : null;
+    if (range) editor.replaceRange(range.from, range.to, fixed);
+    else editor.replaceRange(0, doc.length, fixed);
+    const prompt = `Fix this error: ${f.error}`;
+    patchActiveTab({ provenance: 'ai', aiPrompt: prompt });
+    setFailure(null);
+    setExplanation(null);
+    setFixState(null);
+    if (isYolo()) {
+      mascot.gesture('rattle');
+      mascot.say('Fixed. Running it now, no review', 2000);
+      void runScript(fixed, { provenance: 'ai', prompt, script: fixed }, range ? range.from : 0);
+    } else {
+      mascot.setMood('happy', 1400);
+      mascot.say('Fixed. Look it over, then run it', 2600);
+    }
+  };
+
   /**
-   * Ask the model for a corrected query and put it in the editor, marked as
-   * generated. It is not run: you review it and run it, except in YOLO, where
-   * generated SQL always runs straight away.
+   * Ask for a corrected query. Shown side by side first; nothing in the
+   * editor changes until Apply. In YOLO the fix goes straight in and runs,
+   * as all generated SQL does there.
    */
   const fixFailure = async (f: Failure) => {
-    setFixing(true);
+    setFixState({ original: f.sql, error: f.error, fixed: null, loading: true, failure: null });
     mascot.setMood('thinking');
     mascot.say('Fixing it', 60_000);
     try {
       const fixed = await aiService.fixQuery(f.sql, f.error, validateGeneratedSql);
-      const prompt = `Fix this error: ${f.error}`;
-      setSqlScript(fixed);
-      setProvenance('ai');
-      setAiPrompt(prompt);
-      setFailure(null);
-      setExplanation(null);
+      mascot.say(null);
       if (isYolo()) {
-        mascot.gesture('rattle');
-        mascot.say('Fixed. Running it now, no review', 2000);
-        void runScript(fixed, { provenance: 'ai', prompt, script: fixed });
-      } else {
-        mascot.setMood('happy', 1400);
-        mascot.say('Fixed. Look it over, then run it', 2600);
-        requestAnimationFrame(() => mascot.glance(textareaRef.current, 1000));
+        applyFix(f, fixed);
+        return;
       }
+      setFixState({ original: f.sql, error: f.error, fixed, loading: false, failure: null });
+      mascot.setMood('happy', 1200);
     } catch (error) {
       mascot.setMood('error', 1600);
       mascot.say(null);
-      toast({
-        variant: 'destructive',
-        title: 'Could not fix the query',
-        description: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
+      setFixState({
+        original: f.sql,
+        error: f.error,
+        fixed: null,
+        loading: false,
+        failure: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
       });
-    } finally {
-      setFixing(false);
     }
   };
 
-  // Offer Star's help while a failure is on screen and no request is running.
+  // Star offers to explain or fix while a failure is on screen and nothing is running.
   const helpers = useRef({ explainFailure, fixFailure });
   helpers.current = { explainFailure, fixFailure };
   useEffect(() => {
-    if (!failure || explaining || fixing) {
+    if (!failure || explaining || fixState?.loading) {
       mascot.offerHelp(null);
       return;
     }
@@ -548,534 +717,396 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = null, 
       explain: () => void helpers.current.explainFailure(failure),
       fix: () => void helpers.current.fixFailure(failure),
     });
-  }, [failure, explaining, fixing]);
+  }, [failure, explaining, fixState?.loading]);
   useEffect(() => () => mascot.offerHelp(null), []);
 
   // Results arriving are something that changed: Star glances at them.
   useEffect(() => {
-    if (!results) return;
+    if (!outcome) return;
     const raf = requestAnimationFrame(() => mascot.glance(resultsRef.current, 1000));
     return () => cancelAnimationFrame(raf);
-  }, [results]);
+  }, [outcome]);
 
-  const handleApprove = async () => {
-    const decision = pendingDecision;
-    const origin = pendingOrigin;
-    const impact = previews;
-    if (!decision || !origin) return;
-    previewGen.current += 1;
-    setPendingDecision(null);
-    setPendingOrigin(null);
-    setPreviews([]);
-    setIsPreviewing(false);
-    await runApproved(decision, 'approved', origin, impact);
+  /** Mod-Shift-E: what the selection or the statement under the cursor does, and its plan. */
+  const explainQuery = async () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const selection = editor.getSelection();
+    const sql = selection.text.trim() || statementAt(editor.getValue(), editor.getCursor())?.sql || '';
+    if (!sql) {
+      toast({ title: 'Nothing to explain', description: 'Put the cursor in a statement, or select one.' });
+      return;
+    }
+    setPanel(null);
+    setExplainState({ sql, plan: null, text: null, error: null, loading: true });
+    let plan: string | null = null;
+    // Plain EXPLAIN describes a statement without running it. Never ANALYZE.
+    const statement = classifyStatement(sql);
+    if (canValidate(statement, dialect)) {
+      try {
+        const result = await client.query(dialect === 'postgres' ? `EXPLAIN ${sql.replace(/;\s*$/, '')}` : `EXPLAIN QUERY PLAN ${sql.replace(/;\s*$/, '')}`);
+        plan =
+          dialect === 'postgres'
+            ? result.rows.map((r) => String(r[0] ?? '')).join('\n')
+            : result.rows.map((r) => String(r[r.length - 1] ?? '')).join('\n');
+      } catch {
+        plan = null;
+      }
+    }
+    setExplainState({ sql, plan, text: null, error: null, loading: true });
+    try {
+      const text = await aiService.explainQuery(sql, plan);
+      setExplainState({ sql, plan, text, error: null, loading: false });
+    } catch (error) {
+      setExplainState({
+        sql,
+        plan,
+        text: null,
+        error: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
+        loading: false,
+      });
+    }
   };
 
-  const handleDecline = () => {
-    const decision = pendingDecision;
-    const origin = pendingOrigin;
-    previewGen.current += 1;
-    setPendingDecision(null);
-    setPendingOrigin(null);
-    setPreviews([]);
-    setIsPreviewing(false);
-    if (!decision || !origin) return;
-    void recordDecision({
-      statements: auditableStatements(
-        decision.statements,
-        origin.provenance,
-        decision.appliedPolicy,
-      ),
-      decision: 'declined',
-      outcome: 'not-run',
-      provenance: origin.provenance,
-      policy: decision.appliedPolicy,
-      prompt: origin.prompt,
-      model: origin.provenance === 'ai' ? aiService.activeModelName() : null,
-    });
+  // --- other actions ------------------------------------------------------------------
+
+  const exportResult = async (result: StatementResult, format: 'csv' | 'json' | 'xlsx') => {
+    try {
+      const { columns, rows } = resultObjects(result);
+      let data: string | Uint8Array;
+      if (format === 'csv') data = [csvRow(columns), ...rows.map((r) => csvRow(columns.map((c) => r[c])))].join('\n') + '\n';
+      else if (format === 'json') data = JSON.stringify(rowsToJson(rows), null, 2);
+      else data = buildXlsx([{ name: 'Query result', columns, rows }]);
+      const saved = await tauriService.exportDatabase(data, format);
+      if (saved.success) toast({ title: 'Exported', description: saved.filePath });
+      else if (saved.error !== 'Export cancelled') toast({ title: 'Export failed', description: saved.error, variant: 'destructive' });
+    } catch (error) {
+      toast({ title: 'Export failed', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+    }
+  };
+
+  const openSql = (sql: string) => {
+    if (!activeTab.sql.trim()) {
+      patchActiveTab({ sql, provenance: 'user', aiPrompt: null });
+    } else {
+      addTab(sql);
+    }
   };
 
   const saveScript = () => {
-    if (!sqlScript.trim()) {
-      toast({
-        title: "Empty Script",
-        description: "Cannot save an empty script",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    if (!scriptName.trim()) {
-      toast({
-        title: "Missing Name",
-        description: "Please provide a name for your script",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    // Check for duplicates
-    if (savedScripts.some(script => script.name === scriptName)) {
-      toast({
-        title: "Duplicate Name",
-        description: "A script with this name already exists",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const newScript = { name: scriptName, sql: sqlScript };
-    setSavedScripts([...savedScripts, newScript]);
-
-    // Save to localStorage for persistence
-    const existingScripts = JSON.parse(localStorage.getItem('savedScripts') || '[]');
-    localStorage.setItem('savedScripts', JSON.stringify([...existingScripts, newScript]));
-
-    setScriptName('');
-    toast({
-      title: "Script Saved",
-      description: `"${scriptName}" has been saved to your collection`
-    });
-  };
-
-  const loadScript = (script: { name: string; sql: string }) => {
-    setSqlScript(script.sql);
-    // Replacing the buffer with a script the user saved themselves also
-    // replaces its provenance. Editing generated SQL does not — see the
-    // Textarea handler.
-    setProvenance('user');
-    setAiPrompt(null);
-    toast({
-      title: "Script Loaded",
-      description: `"${script.name}" is ready to edit or execute`
-    });
-  };
-
-  const deleteScript = (scriptToDelete: { name: string; sql: string }) => {
-    const updatedScripts = savedScripts.filter(script => script.name !== scriptToDelete.name);
-    setSavedScripts(updatedScripts);
-
-    // Update localStorage
-    localStorage.setItem('savedScripts', JSON.stringify(updatedScripts));
-
-    toast({
-      title: "Script Deleted",
-      description: `"${scriptToDelete.name}" has been removed from your collection`
-    });
-  };
-
-  const handleExportResults = async (format: 'csv' | 'json' | 'xlsx') => {
-    if (!results?.queryResults || !results.queryResults.columns.length) {
-      toast({
-        title: "No Data",
-        description: "There are no results to export",
-        variant: "destructive"
-      });
-      return;
-    }
-
+    const name = scriptName.trim();
+    if (!name) return;
+    const next = [...savedScripts.filter((s) => s.name !== name), { name, sql: activeTab.sql }];
+    setSavedScripts(next);
     try {
-      let exportData = '';
-      const { columns, rows } = results.queryResults;
+      localStorage.setItem(SCRIPTS_KEY, JSON.stringify(next));
+    } catch {
+      // Ignore: the list still shows for this session.
+    }
+    patchActiveTab({ title: name, named: true });
+    setSaveOpen(false);
+    toast({ title: 'Saved', description: `"${name}" is in Saved scripts.` });
+  };
 
-      if (format === 'json') {
-        // Convert to JSON
-        const jsonData = rows.map(row => {
-          const obj: Record<string, unknown> = {};
-          columns.forEach((col, idx) => {
-            obj[col] = row[idx];
-          });
-          return obj;
-        });
-        exportData = JSON.stringify(jsonData, null, 2);
-      } else if (format === 'csv') {
-        // Convert to CSV
-        exportData = columns.join(',') + '\n';
-        rows.forEach(row => {
-          const csvRow = row.map(value => {
-            if (value === null) return '';
-            if (typeof value === 'string') {
-              // Escape quotes and wrap in quotes if contains comma
-              if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-                return `"${value.replace(/"/g, '""')}"`;
-              }
-              return value;
-            }
-            return String(value);
-          });
-          exportData += csvRow.join(',') + '\n';
-        });
-      } else if (format === 'xlsx') {
-        // For Excel, create a structure that can be converted by the backend
-        const data = {
-          "Query Results": {
-            columns,
-            rows
-          }
-        };
-        exportData = JSON.stringify(data);
-      }
-
-      // Export using Tauri service
-      const result = await tauriService.exportDatabase(exportData, format);
-      if (result.success) {
-        toast({
-          title: "Success",
-          description: `Results exported to ${result.filePath}`
-        });
-      } else {
-        toast({
-          title: "Error",
-          description: result.error || "Failed to export results",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to export results",
-        variant: "destructive"
-      });
+  const deleteScript = (name: string) => {
+    const next = savedScripts.filter((s) => s.name !== name);
+    setSavedScripts(next);
+    try {
+      localStorage.setItem(SCRIPTS_KEY, JSON.stringify(next));
+    } catch {
+      // Ignore.
     }
   };
 
-  // Load saved scripts from localStorage when component mounts
-  useEffect(() => {
-    try {
-      const storedScripts = localStorage.getItem('savedScripts');
-      if (storedScripts) {
-        setSavedScripts(JSON.parse(storedScripts));
-      }
-    } catch (error) {
-      console.error("Error loading saved scripts:", error);
-    }
-  }, []);
+  useAppCommand((command) => {
+    if (command.type === 'runQuery') runStatement();
+    if (command.type === 'newQueryTab') addTab();
+  });
+
+  const startSplitDrag = (event: React.MouseEvent) => {
+    event.preventDefault();
+    const container = splitRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const onMove = (e: MouseEvent) => {
+      const fraction = (e.clientY - rect.top) / rect.height;
+      setEditorFraction(Math.min(0.85, Math.max(0.15, fraction)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+    };
+    document.body.style.cursor = 'row-resize';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const tabTitle = (tab: EditorTab) => (tab.named ? tab.title : titleFromSql(tab.sql, tab.title));
+  const tablesForPlaceholder = visibleTables(conn).slice(0, 1)[0]?.name;
 
   return (
-    <div className="h-full flex flex-col overflow-auto px-2 animate-fade-in">
-      <AiQueryDialog
-        open={isAiDialogOpen}
-        onOpenChange={(open) => {
-          setIsAiDialogOpen(open);
-          if (!open) setAiSeed('');
-        }}
-        seed={aiSeed}
-        validate={validateGeneratedSql}
-        onQueryGenerated={(query, prompt) => {
-          setSqlScript(query);
-          setProvenance('ai');
-          setAiPrompt(prompt);
-          setFailure(null);
-          setExplanation(null);
-          // YOLO runs it here rather than waiting for Execute. The script is
-          // passed explicitly because `sqlScript` still holds the previous
-          // value at this point. Star rattles: nobody is reviewing this.
-          if (isYolo()) {
-            mascot.gesture('rattle');
-            mascot.say('Running it now, no review', 1800);
-            void runScript(query, { provenance: 'ai', prompt, script: query });
-          }
-        }}
-      />
+    <div className="flex h-full flex-col animate-fade-in">
       <ApprovalDialog
         open={pendingDecision !== null}
         decision={pendingDecision}
         previews={previews}
         isPreviewing={isPreviewing}
-        isRunning={isRunning}
-        onApprove={handleApprove}
+        isRunning={running !== null}
+        onApprove={() => void handleApprove()}
         onCancel={handleDecline}
       />
-      <Tabs defaultValue="editor" className="flex-1 flex flex-col">
-        <div className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="flex items-center justify-end px-4 h-[52px]">
-            <TabsList className="ml-4 h-8">
-              <TabsTrigger value="editor" className="text-xs h-7">Editor</TabsTrigger>
-              <TabsTrigger value="savedScripts" className="text-xs h-7">Saved Scripts</TabsTrigger>
-              <TabsTrigger value="audit" className="text-xs h-7">Audit</TabsTrigger>
-            </TabsList>
-          </div>
+
+      {/* Tabs and toolbar */}
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-2">
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto no-scrollbar">
+          {tabsState.tabs.map((tab) => {
+            const selected = tab.id === activeTab.id;
+            return (
+              <div
+                key={tab.id}
+                className={cn(
+                  'group flex h-7 max-w-[200px] shrink-0 items-center gap-1 rounded-md pl-2.5 pr-1 text-xs transition-colors',
+                  selected ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                )}
+              >
+                {renaming === tab.id ? (
+                  <input
+                    autoFocus
+                    defaultValue={tabTitle(tab)}
+                    onBlur={(e) => {
+                      const title = e.target.value.trim();
+                      if (title) updateTabs((s) => ({ ...s, tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, title, named: true } : t)) }));
+                      setRenaming(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      if (e.key === 'Escape') setRenaming(null);
+                    }}
+                    className="w-28 bg-transparent outline-none"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="truncate"
+                    onClick={() => updateTabs((s) => ({ ...s, activeId: tab.id }))}
+                    onDoubleClick={() => setRenaming(tab.id)}
+                    title={`${tabTitle(tab)} · double-click to rename`}
+                  >
+                    {tab.provenance === 'ai' && <Sparkles className="mr-1 inline h-3 w-3 text-key" aria-label="Written by AI" />}
+                    {tabTitle(tab)}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => closeTab(tab.id)}
+                  className={cn('rounded p-0.5 hover:bg-background', selected ? 'opacity-70' : 'opacity-0 group-hover:opacity-70')}
+                  aria-label={`Close ${tabTitle(tab)}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            );
+          })}
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => addTab()} aria-label="New query tab" title="New query tab">
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
         </div>
 
-        <TabsContent value="editor" className="flex-1 overflow-auto p-4 pt-0">
-          <div className="flex-1 flex flex-col gap-4">
-            <div className="flex items-center justify-between py-2">
-              <div className="flex items-center space-x-4">
-                {!isPostgres && (
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="transaction-mode"
-                      checked={useTransaction}
-                      onCheckedChange={setUseTransaction}
-                    />
-                    <Label htmlFor="transaction-mode" className="text-xs">
-                      Use Transaction
-                    </Label>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setIsAiDialogOpen(true)} className="h-8 text-xs">
-                  <MessageSquareCode strokeWidth={1.5} className="mr-1.5 h-3.5 w-3.5" />
-                  Text to SQL
-                </Button>
-                <div className="flex items-center space-x-2">
-                  <Input
-                    type="text"
-                    placeholder="Script name"
-                    className="w-[200px] h-8 text-xs"
-                    value={scriptName}
-                    onChange={(e) => setScriptName(e.target.value)}
-                  />
-                  <Button variant="outline" size="sm" onClick={saveScript} className="h-8 text-xs">
-                    <Save className="mr-1.5 h-3.5 w-3.5" />
-                    Save Script
-                  </Button>
-                </div>
-                <Button
-                  onClick={handleRun}
-                  disabled={isRunning || isPreviewing || pendingDecision !== null}
-                  size="sm"
-                  className="h-8 text-xs"
-                >
-                  <PlayCircle className="mr-1.5 h-3.5 w-3.5" />
-                  {isRunning ? 'Running...' : 'Execute Script'}
-                </Button>
-              </div>
-            </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {running ? (
+            <ToolbarButton label="Cancel the running query" onClick={() => void cancel()} variant="outline">
+              <Square className="h-3 w-3" /> Cancel
+            </ToolbarButton>
+          ) : (
+            <>
+              <ToolbarButton label="Run the selection, or the statement under the cursor" shortcut="Mod+Enter" onClick={runStatement} variant="default" disabled={pendingDecision !== null}>
+                <Play className="h-3 w-3" /> Run
+              </ToolbarButton>
+              <ToolbarButton label="Run every statement in this tab" shortcut="Shift+Mod+Enter" onClick={runAll} disabled={pendingDecision !== null}>
+                <ListChecks className="h-3.5 w-3.5" /> Run all
+              </ToolbarButton>
+            </>
+          )}
+          <div className="mx-1 h-4 w-px bg-border" />
+          <ToolbarButton label={policy === 'yolo' ? 'Ask AI (YOLO: runs what it writes)' : 'Ask AI to write or change SQL'} shortcut="Mod+K" onClick={() => setAiOpen((o) => !o)}>
+            <Sparkles className={cn('h-3.5 w-3.5', policy === 'yolo' ? 'text-destructive' : 'text-key')} /> Ask AI
+          </ToolbarButton>
+          <ToolbarButton label="Explain the selection or the statement under the cursor" shortcut="Mod+Shift+E" onClick={() => void explainQuery()}>
+            <Lightbulb className="h-3.5 w-3.5" /> Explain
+          </ToolbarButton>
+          <div className="mx-1 h-4 w-px bg-border" />
+          <Select
+            value={rowLimit === null ? 'none' : String(rowLimit)}
+            onValueChange={(v) => {
+              const next = v === 'none' ? null : Number(v);
+              setRowLimit(next);
+              try {
+                localStorage.setItem(LIMIT_KEY, v);
+              } catch {
+                // Ignore.
+              }
+            }}
+          >
+            <SelectTrigger className="h-7 w-[112px] text-xs" title="Rows kept per result. The rest are not fetched.">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ROW_LIMITS.map((n) => (
+                <SelectItem key={n} value={String(n)}>
+                  {n.toLocaleString()} rows
+                </SelectItem>
+              ))}
+              <SelectItem value="none">No limit</SelectItem>
+            </SelectContent>
+          </Select>
+          <label className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground" title="Run all statements in one transaction: all or nothing">
+            <Switch checked={useTransaction} onCheckedChange={setUseTransaction} className="scale-75" />
+            Transaction
+          </label>
+          <ToolbarButton label="Save this script" onClick={() => {
+            setScriptName(activeTab.title.startsWith('Query ') ? '' : activeTab.title);
+            setSaveOpen(true);
+          }} disabled={!activeTab.sql.trim()}>
+            <Save className="h-3.5 w-3.5" />
+          </ToolbarButton>
+          <ToolbarButton label="History, saved scripts and the audit log" onClick={() => setPanel((p) => (p ? null : 'history'))}>
+            <PanelRight className="h-3.5 w-3.5" />
+          </ToolbarButton>
+        </div>
+      </div>
 
-            <div className="flex-1 flex flex-col min-h-0">
-              <Textarea
-                ref={textareaRef}
-                placeholder={isPostgres ?
-                  "Enter PostgreSQL statements (each statement must end with a semicolon)" :
-                  "Enter SQL statements separated by semicolons (;)"
-                }
-                className="flex-1 font-mono text-sm min-h-[300px] resize-none rounded-md border bg-background shadow-sm placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                value={sqlScript}
-                onChange={(e) => {
-                  setSqlScript(e.target.value);
-                  // Fixing would overwrite these edits, so the offer goes once the text changes.
-                  if (failure && e.target.value !== failure.sql) setFailure(null);
-                  // Provenance is sticky: editing generated SQL does not make
-                  // the user its author. Someone who tweaks one clause has not
-                  // reviewed the rest, and 'ai' only ever tightens the gate,
-                  // so staying on it is the safe direction to be wrong in.
-                  // Emptying the box is the one edit that clears it.
-                  if (!e.target.value.trim()) {
-                    setProvenance('user');
-                    setAiPrompt(null);
-                  }
-                }}
-              />
-
-              {results && (
-                <div ref={resultsRef} className="mt-4 space-y-2">
-                  <Alert variant={results.success ? "default" : "destructive"}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {results.success ? (
-                          <CheckCircle2 className="h-4 w-4" />
-                        ) : (
-                          <AlertCircle className="h-4 w-4" />
-                        )}
-                        <AlertTitle>
-                          {results.success ? 'Script executed successfully' : 'Script execution failed'}
-                        </AlertTitle>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="outline" size="sm">
-                            <Download className="mr-2 h-4 w-4" />
-                            Export Results
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent>
-                          <DropdownMenuItem onClick={() => handleExportResults('csv')}>
-                            Export as CSV
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleExportResults('json')}>
-                            Export as JSON
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleExportResults('xlsx')}>
-                            Export as Excel
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    <AlertDescription>
-                      <div className="mt-2 space-y-2">
-                        <p className="text-sm">Execution time: {results.executionTime}ms</p>
-
-                        {results.queryResults && results.queryResults.columns.length > 0 && (
-                          <div className="mt-4 space-y-2">
-                            <p className="text-sm font-medium">Query results:</p>
-                            <div className="overflow-auto max-h-[300px] rounded-md border">
-                              <table className="min-w-full divide-y divide-border">
-                                <thead className="bg-muted/50">
-                                  <tr>
-                                    {results.queryResults.columns.map((column, idx) => (
-                                      <th
-                                        key={idx}
-                                        scope="col"
-                                        className="px-3 py-2 text-left text-xs font-medium text-muted-foreground"
-                                      >
-                                        {column}
-                                      </th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody className="bg-card divide-y divide-border">
-                                  {results.queryResults.rows.length > 0 && results.queryResults.rows.map((row, rowIdx) => {
-                                    // Check if row is an array (multi-column) or a single value
-                                    const isArray = Array.isArray(row);
-
-                                    return (
-                                      <tr key={rowIdx} className={rowIdx % 2 === 0 ? "bg-muted/20" : "bg-card"}>
-                                        {isArray ? (
-                                          // If row is an array, render each cell
-                                          row.map((cell, cellIdx) => (
-                                            <td key={cellIdx} className="px-3 py-2 whitespace-nowrap text-xs">
-                                              {cell === null ?
-                                                <span className="text-muted-foreground italic">NULL</span> :
-                                                String(cell)}
-                                            </td>
-                                          ))
-                                        ) : (
-                                          // If row is a single value (like in enum queries), render as single cell
-                                          <td className="px-3 py-2 whitespace-nowrap text-xs">
-                                            {row === null ? (
-                                              <span className="text-muted-foreground italic">NULL</span>
-                                            ) : typeof row === 'object' ? (
-                                              // Extract value from object - typically PostgreSQL enum values have an 'unnest' property
-                                              Object.values(row)[0] === null ? (
-                                                <span className="text-muted-foreground italic">NULL</span>
-                                              ) : (
-                                                String(Object.values(row)[0])
-                                              )
-                                            ) : (
-                                              String(row)
-                                            )}
-                                          </td>
-                                        )}
-                                      </tr>
-                                    );
-                                  })}
-                                  {results.queryResults.rows.length === 0 && (
-                                    <tr>
-                                      <td
-                                        colSpan={results.queryResults.columns.length}
-                                        className="px-3 py-4 text-center text-sm text-muted-foreground"
-                                      >
-                                        No results found
-                                      </td>
-                                    </tr>
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        )}
-
-                        {results.affectedTables.length > 0 && (
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium">Affected tables:</p>
-                            <div className="flex flex-wrap gap-1">
-                              {results.affectedTables.map(table => (
-                                <Badge key={table} variant="outline">
-                                  {table}
-                                </Badge>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {results.errors.length > 0 && (
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium">Errors:</p>
-                            <div className="space-y-1">
-                              {results.errors.map((error, idx) => (
-                                <div key={idx} className="text-sm p-2 bg-destructive/10 rounded-md">
-                                  {error}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {(explaining || explanation) && (
-                          <div ref={explanationRef} className="space-y-1 text-foreground">
-                            <p className="text-sm font-medium">What went wrong</p>
-                            <div className="rounded-md border bg-background/60 p-2 text-sm leading-relaxed" aria-live="polite">
-                              {explaining ? (
-                                <span className="flex items-center gap-2 text-muted-foreground">
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                                  Reading the error
-                                </span>
-                              ) : (
-                                explanation
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                </div>
-              )}
-            </div>
+      {conn.inTransaction && (
+        <div className="flex items-center gap-3 border-b bg-warning/10 px-3 py-1.5 text-xs">
+          <span className="font-medium text-warning">Transaction open</span>
+          <span className="text-muted-foreground">Changes are not visible to anyone else until you commit.</span>
+          <div className="ml-auto flex gap-1.5">
+            <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => void runScript('COMMIT', { provenance: 'user', prompt: null, script: 'COMMIT' }, null)}>
+              Commit
+            </Button>
+            <Button size="sm" variant="outline" className="h-6 text-xs" onClick={() => void runScript('ROLLBACK', { provenance: 'user', prompt: null, script: 'ROLLBACK' }, null)}>
+              Roll back
+            </Button>
           </div>
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="savedScripts" className="flex-1 overflow-auto">
-          <div className="p-4 pt-2">
-            {savedScripts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center min-h-[200px]">
-                <div className="p-6 rounded-lg border-2 border-dashed text-center">
-                  <Info className="mx-auto h-10 w-10 text-muted-foreground/50" />
-                  <h3 className="mt-3 text-lg font-medium">No saved scripts</h3>
-                  <p className="text-muted-foreground mt-1 max-w-sm text-center text-sm">
-                    Save your frequently used SQL scripts here for quick access
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {savedScripts.map((script) => (
-                  <Card key={script.name} className="flex flex-col">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3">
-                      <div>
-                        <CardTitle className="text-sm font-medium">{script.name}</CardTitle>
-                        <CardDescription className="text-xs mt-0.5">
-                          {script.sql.split('\n').length} line{script.sql.split('\n').length !== 1 ? 's' : ''}
-                        </CardDescription>
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => deleteScript(script)} className="h-8 w-8 -mr-2">
-                        <Trash className="h-4 w-4" />
-                        <span className="sr-only">Delete script</span>
-                      </Button>
-                    </CardHeader>
-                    <CardContent className="p-3 pt-0">
-                      <ScrollArea className="h-[100px] w-full rounded-md border bg-muted/40 p-2">
-                        <pre className="text-xs font-mono text-muted-foreground">{script.sql}</pre>
-                      </ScrollArea>
-                    </CardContent>
-                    <div className="p-3 pt-0">
-                      <Button size="sm" onClick={() => loadScript(script)} className="w-full">
-                        Load Script
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            )}
+      <AiInlineBar
+        open={aiOpen}
+        onClose={() => {
+          setAiOpen(false);
+          setAiSeed(undefined);
+          editorRef.current?.focus();
+        }}
+        onGenerate={generate}
+        runsImmediately={policy === 'yolo'}
+        editingSelection={hasSelection}
+        seed={aiSeed}
+      />
+
+      <div className="flex min-h-0 flex-1">
+        <div ref={splitRef} className="flex min-w-0 flex-1 flex-col">
+          <div
+            style={{ height: `${editorFraction * 100}%` }}
+            className="min-h-0"
+            onMouseUp={() => setHasSelection(!!editorRef.current?.getSelection().text.trim())}
+            onKeyUp={() => setHasSelection(!!editorRef.current?.getSelection().text.trim())}
+          >
+            <SqlCodeEditor
+              ref={editorRef}
+              docKey={activeTab.id}
+              value={activeTab.sql}
+              onChange={(sql) => {
+                // Provenance is sticky: editing generated SQL does not make the
+                // user its author. Emptying the box is the one edit that clears it.
+                const cleared = !sql.trim();
+                patchActiveTab({ sql, ...(cleared ? { provenance: 'user' as Provenance, aiPrompt: null } : {}) });
+                // Fixing would overwrite these edits, so the offer goes once the text changes.
+                if (failure) setFailure(null);
+              }}
+              dialect={dialect}
+              schema={schema}
+              defaultSchema={pg?.defaultSchema}
+              placeholder={
+                tablesForPlaceholder
+                  ? `SELECT * FROM ${tablesForPlaceholder} LIMIT 10;   ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} asks AI`
+                  : `Write SQL here. ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} asks AI`
+              }
+              onRunStatement={runStatement}
+              onRunAll={runAll}
+              onAi={() => {
+                setHasSelection(!!editorRef.current?.getSelection().text.trim());
+                setAiOpen(true);
+              }}
+              onExplain={() => void explainQuery()}
+            />
           </div>
-        </TabsContent>
+          <div
+            onMouseDown={startSplitDrag}
+            className="h-1.5 shrink-0 cursor-row-resize border-y bg-muted/40 hover:bg-key/30"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize editor and results"
+          />
+          <div ref={resultsRef} className="min-h-0 flex-1">
+            <ResultPanel
+              outcome={outcome}
+              running={running}
+              onCancel={() => void cancel()}
+              onFix={() => failure && void fixFailure(failure)}
+              onExplainError={() => failure && void explainFailure(failure)}
+              explanation={explanation}
+              explaining={explaining}
+              onExport={(result, format) => void exportResult(result, format)}
+              dialect={dialect}
+              aiConfigured
+            />
+          </div>
+        </div>
+        {explainState && <ExplainPanel state={explainState} onClose={() => setExplainState(null)} />}
+        {panel && (
+          <SidePanel
+            tab={panel}
+            onTabChange={setPanel}
+            onClose={() => setPanel(null)}
+            connectionId={conn.id}
+            onOpen={openSql}
+            savedScripts={savedScripts}
+            onDeleteScript={deleteScript}
+          />
+        )}
+      </div>
 
-        <TabsContent value="audit" className="flex-1 overflow-hidden p-4 pt-2">
-          <AuditLogView />
-        </TabsContent>
-      </Tabs>
+      <FixDialog
+        state={fixState}
+        onApply={(fixed) => failure && applyFix(failure, fixed)}
+        onClose={() => setFixState(null)}
+      />
+
+      <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveScript();
+            }}
+            className="grid gap-4"
+          >
+            <DialogHeader>
+              <DialogTitle>Save script</DialogTitle>
+            </DialogHeader>
+            <Input autoFocus value={scriptName} onChange={(e) => setScriptName(e.target.value)} placeholder="Name" />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setSaveOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!scriptName.trim()}>
+                Save
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

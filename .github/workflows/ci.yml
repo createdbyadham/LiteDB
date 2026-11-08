@@ -75,6 +75,11 @@ jobs:
       - name: Typecheck (MCP server)
         run: npm run typecheck:mcp
 
+      # URL parsing, CSV, SQL literals and copy formats, cell parsing and the
+      # statement under the cursor: what decides the text sent to a database.
+      - name: Unit self-test
+        run: npm run test:unit
+
   evals:
     name: Eval harness (no API calls)
     runs-on: ubuntu-latest
@@ -150,4 +155,9 @@ jobs:
         run: cargo fmt --check
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
+
+      # The native SQLite engine against real files: row limits, rollback,
+      # cancel, data_version. The Postgres test skips without EVAL_POSTGRES_URL.
+      - name: Test
+        run: cargo test

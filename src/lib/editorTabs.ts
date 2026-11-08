@@ -11,6 +11,8 @@ export interface EditorTab {
     provenance: Provenance;
     /** The request generated SQL came from, for the audit log. */
     aiPrompt: string | null;
+    /** Renamed by the user; otherwise the title follows the SQL. */
+    named?: boolean;
 }
 
 export interface EditorTabsState {

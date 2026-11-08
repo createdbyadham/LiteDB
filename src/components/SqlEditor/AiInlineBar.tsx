@@ -15,23 +15,33 @@ interface AiInlineBarProps {
   runsImmediately: boolean;
   /** Text is selected: the request edits it instead of writing new SQL. */
   editingSelection: boolean;
+  /** How the prompt starts, e.g. a table dropped on Star. */
+  seed?: string;
 }
 
 /**
  * Text to SQL inside the editor (Mod-K), rather than in a dialog over it. The
  * SQL lands at the cursor, or replaces the selection when one is made.
  */
-export function AiInlineBar({ open, onClose, onGenerate, runsImmediately, editingSelection }: AiInlineBarProps) {
+export function AiInlineBar({ open, onClose, onGenerate, runsImmediately, editingSelection, seed }: AiInlineBarProps) {
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const [compact, setCompact] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Star hops onto the bar while it is open, and home again when it closes.
+  useEffect(() => (open ? mascot.perchOn('dialog') : undefined), [open]);
+
   useEffect(() => {
-    mascot.setPerch(open ? 'dialog' : 'home');
-    if (open) setTimeout(() => textareaRef.current?.focus(), 0);
-  }, [open]);
-  useEffect(() => () => mascot.setPerch('home'), []);
+    if (!open) return;
+    if (seed) setPrompt(seed);
+    setTimeout(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }, 0);
+  }, [open, seed]);
 
   if (!open) return null;
 
@@ -47,7 +57,7 @@ export function AiInlineBar({ open, onClose, onGenerate, runsImmediately, editin
   };
 
   return (
-    <div data-mascot-perch className="relative z-[61] mx-3 mt-2 rounded-lg border bg-card shadow-sm">
+    <div data-mascot-perch="ai" className="relative z-[61] mx-3 mt-2 rounded-lg border bg-card shadow-sm">
       <div className="flex items-start gap-2 p-2">
         <Sparkles className="mt-2 h-4 w-4 shrink-0 text-key" />
         <Textarea

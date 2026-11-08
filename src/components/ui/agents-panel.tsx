@@ -3,7 +3,7 @@ import { Check, Copy, Plug, Unplug } from 'lucide-react';
 import { BaseDirectory, exists } from '@tauri-apps/plugin-fs';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { Button } from './button';
-import { useToast } from './use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 import { installClaudeDesktopMcp } from '@/lib/claudeDesktopMcp';
 import { HANDOFF_FILENAME, mcpPolicyFromApp } from '@/lib/mcpHandoff';

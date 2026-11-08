@@ -47,7 +47,8 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { DataGrid, defaultCell, type CellPosition, type GridColumn } from '@/components/DataGrid';
+import { DataGrid, type CellPosition, type GridColumn } from '@/components/DataGrid';
+import { defaultCell } from '@/components/DataGrid/defaultCell';
 import { EditDialog } from '@/components/EditDialog';
 import { JsonViewer } from '@/components/JsonViewer';
 import { VectorBadge } from '@/components/VectorAdmin/VectorBadge';

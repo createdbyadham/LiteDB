@@ -19,7 +19,7 @@ export const DELIMITERS: { value: Delimiter; label: string }[] = [
 
 /** The delimiter that splits the first lines into the most consistent columns. */
 export function detectDelimiter(text: string): Delimiter {
-    const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim()).slice(0, 10);
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim()).slice(0, 10);
     if (lines.length === 0) return ',';
     let best: Delimiter = ',';
     let bestScore = -1;
@@ -39,7 +39,7 @@ export function detectDelimiter(text: string): Delimiter {
 
 /** Every record as an array of fields. Blank lines are skipped. */
 export function parseCsv(input: string, delimiter: Delimiter = ','): string[][] {
-    const text = input.replace(/^﻿/, '');
+    const text = input.replace(/^\uFEFF/, '');
     const records: string[][] = [];
     let record: string[] = [];
     let field = '';

@@ -16,7 +16,6 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { parseLog } from '../../src/lib/auditLog';
-import { saveWouldClobber } from '../../src/lib/diskGuard';
 import { pgSslHint } from '../../src/lib/pgSslHint';
 import {
     mcpPolicyFromApp,
@@ -171,36 +170,25 @@ async function main(): Promise<void> {
         'the app defaults to guarded because a person is in front of it; a server is not',
     );
 
-    {
-        const disk = (mtime: number | null, walSize = 0, inUse = false) => ({ mtime, walSize, inUse });
-        check('a non-empty WAL blocks overwrite', saveWouldClobber(disk(1, 4096), disk(1)) === 'in-use');
-        check(
-            'SQLite elsewhere with the file open blocks overwrite',
-            saveWouldClobber(disk(1, 0, true), disk(1)) === 'in-use',
-        );
-        check('a changed mtime blocks overwrite', saveWouldClobber(disk(2), disk(1)) === 'changed');
-        check(
-            'an mtime never recorded is not taken as unchanged',
-            saveWouldClobber(disk(1), disk(null)) === 'changed' &&
-                saveWouldClobber(disk(1), null) === 'changed',
-        );
-        check('a vanished file is reported as missing', saveWouldClobber(disk(null), disk(1)) === 'missing');
-        check('an unchanged, idle file is safe to save', saveWouldClobber(disk(1), disk(1)) === 'ok');
-    }
-
     check(
-        'an unticked "Require SSL" against a TLS-only host says to tick it',
+        'SSL off against a TLS-only host says to turn it on',
         pgSslHint(
             'error returned from database: no pg_hba.conf entry for host "1.2.3.4", user "u", database "d", no encryption',
             false,
-        )?.includes('Tick "Require SSL"') === true,
+        )?.includes('Set SSL to Require') === true,
     );
     check(
-        'a ticked "Require SSL" against a host without TLS says to untick it',
+        'SSL on against a host without TLS says to turn it off',
         pgSslHint(
             'error occurred while attempting to establish a TLS connection: server does not support TLS',
             true,
-        )?.includes('Untick') === true,
+        )?.includes('Set SSL to Off') === true,
+    );
+    check(
+        'a certificate the client cannot verify points at the CA setting',
+        pgSslHint('error occurred while attempting to establish a TLS connection: invalid peer certificate: UnknownIssuer', true)?.includes(
+            'CA certificate',
+        ) === true,
     );
     {
         const refused = new AggregateError(

@@ -182,14 +182,12 @@ function resolveAgainst(name: string, known: string[]): string {
 /**
  * SQLite connections live for one tool call, not for the session.
  *
- * The desktop app saves by writing a whole file image. A connection that
- * stays open across that does not reliably notice: in WAL mode SQLite trusts
- * its page cache while the WAL index is unchanged, and the app does not touch
- * the WAL. Measured, not guessed — a reader kept serving the old rows, and the
- * next approved write built WAL frames on those stale pages, which either
- * reverted the app's edit or left "database disk image is malformed". Closing
- * between calls means every call starts from the file as it is now, and holds
- * no handle the app has to wait for.
+ * The desktop app now opens the file natively and shares it through SQLite's
+ * own locking. Before 2.5 it saved by writing a whole file image, which a
+ * long-lived connection here did not notice — so this server opened per call
+ * to be safe with those versions. That is still the right shape: every call
+ * starts from the file as it is now, and holds no handle anything else has
+ * to wait for.
  */
 class SqliteDatabase implements Database {
     readonly dialect: SqlDialect = 'sqlite';
@@ -417,6 +415,8 @@ class SqliteDatabase implements Database {
 class PostgresDatabase implements Database {
     readonly dialect: SqlDialect = 'postgres';
     private tables: { names: string[]; at: number } | null = null;
+    /** Where each listed name lives. Same naming as the app's sidebar. */
+    private locations = new Map<string, { schema: string; table: string }>();
 
     constructor(
         private readonly client: any,
@@ -455,15 +455,33 @@ class PostgresDatabase implements Database {
         };
     }
 
+    /**
+     * Tables in every schema the role can use, not just `public` — Supabase's
+     * `auth` and `storage`, and any app's own schemas. A table in the default
+     * schema keeps its bare name; elsewhere it is `schema.table`, which is
+     * also how an agent writes it back in SQL.
+     */
     async tableNames(): Promise<string[]> {
         const now = Date.now();
         if (this.tables && now - this.tables.at < TABLE_CACHE_MS) return this.tables.names;
         const { rows } = await this.read(
-            `SELECT table_name FROM information_schema.tables
-             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-             ORDER BY table_name`,
+            `SELECT n.nspname, c.relname, n.nspname = current_schema() AS in_default
+             FROM pg_class c
+             JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition
+               AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+               AND n.nspname NOT LIKE 'pg\\_temp\\_%' AND n.nspname NOT LIKE 'pg\\_toast\\_temp\\_%'
+               AND has_schema_privilege(n.oid, 'USAGE')
+             ORDER BY n.nspname = current_schema() DESC, n.nspname, c.relname`,
         );
-        const names = rows.map((r) => String(r[0]));
+        this.locations.clear();
+        const names = rows.map((r) => {
+            const schema = String(r[0]);
+            const table = String(r[1]);
+            const name = r[2] === true || r[2] === 't' ? table : `${schema}.${table}`;
+            this.locations.set(name, { schema, table });
+            return name;
+        });
         this.tables = { names, at: now };
         return names;
     }
@@ -472,59 +490,72 @@ class PostgresDatabase implements Database {
         return resolveAgainst(name, await this.tableNames());
     }
 
-    async columns(table: string): Promise<ColumnInfo[]> {
+    /** `'"schema"."table"'::regclass`: the catalog's handle on a listed table. */
+    private async regclass(table: string): Promise<string> {
         const resolved = await this.resolveTable(table);
+        const loc = this.locations.get(resolved) ?? { schema: 'public', table: resolved };
+        return `${literal(`${quoteIdent(loc.schema)}.${quoteIdent(loc.table)}`)}::regclass`;
+    }
+
+    /** The listed name for a schema and table, for foreign-key targets. */
+    private nameFor(schema: string, table: string): string {
+        for (const [name, loc] of this.locations) {
+            if (loc.schema === schema && loc.table === table) return name;
+        }
+        return `${schema}.${table}`;
+    }
+
+    async columns(table: string): Promise<ColumnInfo[]> {
+        const rel = await this.regclass(table);
         const { rows } = await this.read(
-            `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
-                    COALESCE(pk.is_pk, false) AS is_pk
-             FROM information_schema.columns c
-             LEFT JOIN (
-                 SELECT kcu.column_name, true AS is_pk
-                 FROM information_schema.table_constraints tc
-                 JOIN information_schema.key_column_usage kcu
-                   ON kcu.constraint_name = tc.constraint_name
-                  AND kcu.table_schema = tc.table_schema
-                 WHERE tc.table_schema = 'public'
-                   AND tc.table_name = ${literal(resolved)}
-                   AND tc.constraint_type = 'PRIMARY KEY'
-             ) pk ON pk.column_name = c.column_name
-             WHERE c.table_schema = 'public' AND c.table_name = ${literal(resolved)}
-             ORDER BY c.ordinal_position`,
+            `SELECT a.attname,
+                    format_type(a.atttypid, a.atttypmod),
+                    a.attnotnull,
+                    pg_get_expr(d.adbin, d.adrelid),
+                    EXISTS (
+                        SELECT 1 FROM pg_index i
+                        WHERE i.indrelid = a.attrelid AND i.indisprimary AND a.attnum = ANY(i.indkey)
+                    )
+             FROM pg_attribute a
+             LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+             WHERE a.attrelid = ${rel} AND a.attnum > 0 AND NOT a.attisdropped
+             ORDER BY a.attnum`,
         );
         return rows.map((r) => ({
             name: String(r[0]),
             type: String(r[1] ?? ''),
-            isNotNull: r[2] === 'NO',
+            isNotNull: r[2] === true || r[2] === 't',
             defaultValue: r[3] === null || r[3] === undefined ? null : String(r[3]),
             isPrimaryKey: r[4] === true || r[4] === 't',
         }));
     }
 
     async foreignKeys(table: string): Promise<ForeignKeyInfo[]> {
-        const resolved = await this.resolveTable(table);
+        const rel = await this.regclass(table);
+        // pg_catalog rather than information_schema, which pairs every column
+        // of a composite key with every other and hides tables the role does
+        // not own.
         const { rows } = await this.read(
-            `SELECT kcu.column_name, ccu.table_name, ccu.column_name
-             FROM information_schema.table_constraints tc
-             JOIN information_schema.key_column_usage kcu
-               ON kcu.constraint_name = tc.constraint_name
-              AND kcu.table_schema = tc.table_schema
-             JOIN information_schema.constraint_column_usage ccu
-               ON ccu.constraint_name = tc.constraint_name
-              AND ccu.table_schema = tc.table_schema
-             WHERE tc.constraint_type = 'FOREIGN KEY'
-               AND tc.table_schema = 'public'
-               AND tc.table_name = ${literal(resolved)}
-             ORDER BY kcu.ordinal_position`,
+            `SELECT a.attname, rn.nspname, rt.relname, ra.attname
+             FROM pg_constraint c
+             JOIN pg_class rt ON rt.oid = c.confrelid
+             JOIN pg_namespace rn ON rn.oid = rt.relnamespace
+             CROSS JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS k(attnum, refattnum, ord)
+             JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+             JOIN pg_attribute ra ON ra.attrelid = c.confrelid AND ra.attnum = k.refattnum
+             WHERE c.contype = 'f' AND c.conrelid = ${rel}
+             ORDER BY c.conname, k.ord`,
         );
+        await this.tableNames();
         return rows.map((r) => ({
             column: String(r[0]),
-            referencesTable: String(r[1]),
-            referencesColumn: String(r[2]),
+            referencesTable: this.nameFor(String(r[1]), String(r[2])),
+            referencesColumn: String(r[3]),
         }));
     }
 
     async indexes(table: string): Promise<IndexInfo[]> {
-        const resolved = await this.resolveTable(table);
+        const rel = await this.regclass(table);
         const { rows } = await this.read(
             `SELECT i.relname,
                     ix.indisunique,
@@ -535,9 +566,7 @@ class PostgresDatabase implements Database {
                     ) AS cols
              FROM pg_index ix
              JOIN pg_class i ON i.oid = ix.indexrelid
-             JOIN pg_class t ON t.oid = ix.indrelid
-             JOIN pg_namespace n ON n.oid = t.relnamespace
-             WHERE n.nspname = 'public' AND t.relname = ${literal(resolved)}
+             WHERE ix.indrelid = ${rel}
              ORDER BY i.relname`,
         );
         return rows.map((r) => ({

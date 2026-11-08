@@ -138,6 +138,14 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
   const placeholderRef = useRef(new Compartment());
   const states = useRef(new Map<string, EditorState>());
   const currentKey = useRef(docKey);
+  /**
+   * The text this editor last reported through onChange. React hands it back
+   * as `value` a render later, by which time fast typing may have moved on;
+   * writing that echo back would drop keystrokes, so only a `value` that
+   * differs from what we sent counts as a change from outside.
+   */
+  const lastEmitted = useRef(value);
+  const hasErrors = useRef(false);
   const handlers = useRef({ onChange, onRunStatement, onRunAll, onAi, onExplain });
   handlers.current = { onChange, onRunStatement, onRunAll, onAi, onExplain };
   const languageConfig = useRef({ dialect, schema, defaultSchema, placeholder });
@@ -180,10 +188,16 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
         ),
         keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            handlers.current.onChange(update.state.doc.toString());
-            // An edit makes the last error's position meaningless.
-            update.view.dispatch(setDiagnostics(update.state, []));
+          if (!update.docChanged) return;
+          const text = update.state.doc.toString();
+          lastEmitted.current = text;
+          handlers.current.onChange(text);
+          // An edit makes the last error's position meaningless. Cleared on
+          // the next tick: dispatching inside an update listener is not allowed.
+          if (hasErrors.current) {
+            hasErrors.current = false;
+            const view = update.view;
+            queueMicrotask(() => view.dispatch(setDiagnostics(view.state, [])));
           }
         }),
       ],
@@ -208,6 +222,8 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
     if (!view || docKey === currentKey.current) return;
     states.current.set(currentKey.current, view.state);
     currentKey.current = docKey;
+    lastEmitted.current = value;
+    hasErrors.current = false;
     const saved = states.current.get(docKey);
     view.setState(saved && saved.doc.toString() === value ? saved : createState(value));
     // Settings may have changed while the tab was away.
@@ -218,8 +234,9 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
   // Text replaced from outside (Text to SQL, history, a saved script).
   useEffect(() => {
     const view = viewRef.current;
-    if (!view) return;
+    if (!view || value === lastEmitted.current) return;
     const current = view.state.doc.toString();
+    lastEmitted.current = value;
     if (current !== value) {
       view.dispatch({ changes: { from: 0, to: current.length, insert: value }, selection: EditorSelection.cursor(value.length) });
     }
@@ -258,6 +275,7 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
         const start = Math.max(0, Math.min(from, length));
         const end = Math.max(start, Math.min(to, length));
         view.dispatch(setDiagnostics(view.state, [{ from: start, to: end === start ? Math.min(length, start + 1) : end, severity: 'error', message }]));
+        hasErrors.current = true;
       },
       clearErrors: () => {
         const view = viewRef.current;

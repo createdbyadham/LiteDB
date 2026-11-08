@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import { cellText } from '@/lib/db/sqlLiteral';
+import { defaultCell } from './defaultCell';
 
 export interface GridColumn {
   key: string;
@@ -59,16 +60,6 @@ const MAX_WIDTH = 420;
 
 function isNumericType(type?: string): boolean {
   return !!type && /int|real|floa|doub|numeric|decimal|money|serial/i.test(type) && !/interval|point/i.test(type);
-}
-
-export function defaultCell(value: unknown): React.ReactNode {
-  if (value === null || value === undefined) return <span className="text-muted-foreground/70 italic">NULL</span>;
-  if (value instanceof Uint8Array) {
-    return <span className="text-muted-foreground">{value.length.toLocaleString()} bytes</span>;
-  }
-  if (typeof value === 'boolean') return <span className="font-mono">{value ? 'true' : 'false'}</span>;
-  const text = cellText(value);
-  return text.length > 300 ? text.slice(0, 300) + '…' : text;
 }
 
 /** A starting width from the header and the first rows' text. */

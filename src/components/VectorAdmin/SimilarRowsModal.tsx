@@ -26,7 +26,7 @@ import {
 import { Loader2, Search, Box } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SimilarityResult, VectorColumnInfo } from '@/lib/db/pgClient';
-import { RowData } from '@/lib/sqliteService';
+import type { RowData } from '@/lib/types';
 import { VectorBadge } from './VectorBadge';
 
 interface SimilarRowsModalProps {
