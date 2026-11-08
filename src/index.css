@@ -251,6 +251,17 @@
   transform: scale(calc(0.6 + 0.4 * var(--grip, 1)), var(--grip, 1));
 }
 
+/* A faint contact shadow on the surface under each fingertip, so the hands
+   read as touching the edge rather than floating in front of it. */
+.star-shadow {
+  position: absolute;
+  width: 14px;
+  height: 5px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+  transform: scaleX(calc(0.6 + 0.4 * var(--grip, 1)));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .star-breathe.is-breathing { animation: none; }
 }

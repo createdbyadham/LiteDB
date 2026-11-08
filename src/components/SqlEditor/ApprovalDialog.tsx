@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { ImpactEstimate } from '@/lib/impactPreview';
+import { mascot } from '@/lib/mascot';
 import type { StatementKind } from '@/lib/sqlClassifier';
 import type { GateDecision } from '@/lib/sqlPolicy';
 
@@ -125,6 +126,21 @@ export function ApprovalDialog({
         }
     }, [open]);
 
+    // Star hops onto the dialog while it is open, and back down the moment it
+    // closes. The dialog unmounts at once, with no exit animation, so Star must
+    // not wait on it: there would be no edge left to hold. The nod or the shake
+    // of the head plays as it hops home.
+    useEffect(() => (open ? mascot.perchOn('approval') : undefined), [open]);
+
+    const approve = () => {
+        mascot.gesture('nod');
+        onApprove();
+    };
+    const cancel = () => {
+        mascot.gesture('shake');
+        onCancel();
+    };
+
     if (!decision) return null;
 
     const destructive = decision.kind === 'destructive';
@@ -138,8 +154,9 @@ export function ApprovalDialog({
         previews.find((p) => p.statement.sql === sql);
 
     return (
-        <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
-            <DialogContent className="sm:max-w-[560px]">
+        <Dialog open={open} onOpenChange={(next) => !next && cancel()}>
+            {/* Above Star's body (z-60), below its fingertips (z-62): it peeks over this edge. */}
+            <DialogContent data-mascot-perch="approval" className="z-[61] sm:max-w-[560px]">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         {destructive ? (
@@ -242,14 +259,14 @@ export function ApprovalDialog({
                 )}
 
                 <DialogFooter className="gap-2 sm:gap-2">
-                    <Button variant="outline" size="sm" onClick={onCancel} disabled={isRunning}>
+                    <Button variant="outline" size="sm" onClick={cancel} disabled={isRunning}>
                         Cancel
                     </Button>
                     <Button
                         size="sm"
                         variant={destructive ? 'destructive' : 'default'}
                         disabled={!confirmed || isRunning || isPreviewing}
-                        onClick={onApprove}
+                        onClick={approve}
                     >
                         {isRunning && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
                         {destructive ? 'Run anyway' : 'Run'}

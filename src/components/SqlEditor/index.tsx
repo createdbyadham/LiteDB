@@ -11,7 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { sqliteService } from '@/lib/sqliteService';
 import { pgService } from '@/lib/pgService';
 import { toast } from '@/hooks/use-toast';
-import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, MessageSquareCode, Download } from 'lucide-react';
+import { AlertCircle, PlayCircle, Save, Trash, CheckCircle2, Info, MessageSquareCode, Download, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { AiQueryDialog } from './AiQueryDialog';
@@ -29,9 +29,18 @@ import { aiService } from '@/lib/aiService';
 interface SqlEditorProps {
   isPostgres?: boolean;
   refreshTables?: () => Promise<void> | void;
-  /** Set when Text to SQL was asked for from elsewhere (Star); opens the dialog once. */
-  requestAiDialog?: boolean;
+  /**
+   * Set when Text to SQL was asked for from elsewhere (Star); opens the dialog
+   * once, starting the prompt with `seed` when a table was dropped on Star.
+   */
+  requestAiDialog?: { seed?: string } | null;
   onAiDialogRequested?: () => void;
+}
+
+/** The last run that failed: what ran and what the database said. Star offers to explain or fix it. */
+interface Failure {
+  sql: string;
+  error: string;
 }
 
 /**
@@ -44,9 +53,11 @@ interface SqlEditorProps {
 interface ScriptOrigin {
   provenance: Provenance;
   prompt: string | null;
+  /** The script as written, so a failure can be explained or fixed afterwards. */
+  script: string;
 }
 
-const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false, onAiDialogRequested }: SqlEditorProps) => {
+const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = null, onAiDialogRequested }: SqlEditorProps) => {
   const [sqlScript, setSqlScript] = useState('');
   const [useTransaction, setUseTransaction] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
@@ -64,12 +75,23 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false,
   const [scriptName, setScriptName] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
+  /** How the next Text to SQL prompt starts: a table dropped on Star. */
+  const [aiSeed, setAiSeed] = useState('');
 
   useEffect(() => {
     if (!requestAiDialog) return;
+    setAiSeed(requestAiDialog.seed ?? '');
     setIsAiDialogOpen(true);
     onAiDialogRequested?.();
   }, [requestAiDialog, onAiDialogRequested]);
+
+  // After a failed run, Star offers to explain the error or fix the query.
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [explaining, setExplaining] = useState(false);
+  const [fixing, setFixing] = useState(false);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const explanationRef = useRef<HTMLDivElement>(null);
 
   // Write-safety state. `provenance` is what makes the gate treat generated
   // SQL differently from typed SQL, so it is tracked on the editor rather than
@@ -312,6 +334,13 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false,
       changesRows,
     );
     const outcome: AuditOutcome = outcomeResult.success ? 'ok' : 'error';
+    setExplanation(null);
+    if (outcomeResult.success) {
+      setFailure(null);
+    } else {
+      setFailure({ sql: origin.script, error: outcomeResult.errors.join('\n') });
+      mascot.say('Click me to explain or fix it', 2800);
+    }
 
     // Anything that changed the database invalidates what the rest of the app
     // is showing. This used to fire only for DDL, matched with a regex, so a
@@ -383,6 +412,9 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false,
     }
 
     if (decision.action === 'block') {
+      // A refusal by policy is not an error to fix, so Star offers nothing.
+      setFailure(null);
+      setExplanation(null);
       setResults({ success: false, affectedTables: [], errors: [decision.reason] });
       toast({
         title: "Blocked by connection policy",
@@ -438,7 +470,93 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false,
    * because YOLO mode executes a generated script in the same tick it arrives
    * — before React has flushed it into `sqlScript`.
    */
-  const handleRun = () => runScript(sqlScript, { provenance, prompt: aiPrompt });
+  const handleRun = () => runScript(sqlScript, { provenance, prompt: aiPrompt, script: sqlScript });
+
+  /** Ask the model what went wrong, and show its answer under the error. */
+  const explainFailure = async (f: Failure) => {
+    setExplaining(true);
+    setExplanation(null);
+    mascot.setMood('thinking');
+    mascot.say('Reading the error', 60_000);
+    try {
+      const text = await aiService.explainError(f.sql, f.error);
+      setExplanation(text);
+      mascot.setMood('idle');
+      mascot.say(null);
+      requestAnimationFrame(() => mascot.glance(explanationRef.current, 1200));
+    } catch (error) {
+      mascot.setMood('error', 1600);
+      mascot.say(null);
+      toast({
+        variant: 'destructive',
+        title: 'Could not explain the error',
+        description: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
+      });
+    } finally {
+      setExplaining(false);
+    }
+  };
+
+  /**
+   * Ask the model for a corrected query and put it in the editor, marked as
+   * generated. It is not run: you review it and run it, except in YOLO, where
+   * generated SQL always runs straight away.
+   */
+  const fixFailure = async (f: Failure) => {
+    setFixing(true);
+    mascot.setMood('thinking');
+    mascot.say('Fixing it', 60_000);
+    try {
+      const fixed = await aiService.fixQuery(f.sql, f.error, validateGeneratedSql);
+      const prompt = `Fix this error: ${f.error}`;
+      setSqlScript(fixed);
+      setProvenance('ai');
+      setAiPrompt(prompt);
+      setFailure(null);
+      setExplanation(null);
+      if (isYolo()) {
+        mascot.gesture('rattle');
+        mascot.say('Fixed. Running it now, no review', 2000);
+        void runScript(fixed, { provenance: 'ai', prompt, script: fixed });
+      } else {
+        mascot.setMood('happy', 1400);
+        mascot.say('Fixed. Look it over, then run it', 2600);
+        requestAnimationFrame(() => mascot.glance(textareaRef.current, 1000));
+      }
+    } catch (error) {
+      mascot.setMood('error', 1600);
+      mascot.say(null);
+      toast({
+        variant: 'destructive',
+        title: 'Could not fix the query',
+        description: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
+      });
+    } finally {
+      setFixing(false);
+    }
+  };
+
+  // Offer Star's help while a failure is on screen and no request is running.
+  const helpers = useRef({ explainFailure, fixFailure });
+  helpers.current = { explainFailure, fixFailure };
+  useEffect(() => {
+    if (!failure || explaining || fixing) {
+      mascot.offerHelp(null);
+      return;
+    }
+    mascot.offerHelp({
+      explain: () => void helpers.current.explainFailure(failure),
+      fix: () => void helpers.current.fixFailure(failure),
+    });
+  }, [failure, explaining, fixing]);
+  useEffect(() => () => mascot.offerHelp(null), []);
+
+  // Results arriving are something that changed: Star glances at them.
+  useEffect(() => {
+    if (!results) return;
+    const raf = requestAnimationFrame(() => mascot.glance(resultsRef.current, 1000));
+    return () => cancelAnimationFrame(raf);
+  }, [results]);
 
   const handleApprove = async () => {
     const decision = pendingDecision;
@@ -637,16 +755,26 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false,
     <div className="h-full flex flex-col overflow-auto px-2 animate-fade-in">
       <AiQueryDialog
         open={isAiDialogOpen}
-        onOpenChange={setIsAiDialogOpen}
+        onOpenChange={(open) => {
+          setIsAiDialogOpen(open);
+          if (!open) setAiSeed('');
+        }}
+        seed={aiSeed}
         validate={validateGeneratedSql}
         onQueryGenerated={(query, prompt) => {
           setSqlScript(query);
           setProvenance('ai');
           setAiPrompt(prompt);
+          setFailure(null);
+          setExplanation(null);
           // YOLO runs it here rather than waiting for Execute. The script is
           // passed explicitly because `sqlScript` still holds the previous
-          // value at this point.
-          if (isYolo()) void runScript(query, { provenance: 'ai', prompt });
+          // value at this point. Star rattles: nobody is reviewing this.
+          if (isYolo()) {
+            mascot.gesture('rattle');
+            mascot.say('Running it now, no review', 1800);
+            void runScript(query, { provenance: 'ai', prompt, script: query });
+          }
         }}
       />
       <ApprovalDialog
@@ -727,6 +855,8 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false,
                 value={sqlScript}
                 onChange={(e) => {
                   setSqlScript(e.target.value);
+                  // Fixing would overwrite these edits, so the offer goes once the text changes.
+                  if (failure && e.target.value !== failure.sql) setFailure(null);
                   // Provenance is sticky: editing generated SQL does not make
                   // the user its author. Someone who tweaks one clause has not
                   // reviewed the rest, and 'ai' only ever tightens the gate,
@@ -740,7 +870,7 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false,
               />
 
               {results && (
-                <div className="mt-4 space-y-2">
+                <div ref={resultsRef} className="mt-4 space-y-2">
                   <Alert variant={results.success ? "default" : "destructive"}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -869,6 +999,22 @@ const SqlEditor = ({ isPostgres = false, refreshTables, requestAiDialog = false,
                                   {error}
                                 </div>
                               ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {(explaining || explanation) && (
+                          <div ref={explanationRef} className="space-y-1 text-foreground">
+                            <p className="text-sm font-medium">What went wrong</p>
+                            <div className="rounded-md border bg-background/60 p-2 text-sm leading-relaxed" aria-live="polite">
+                              {explaining ? (
+                                <span className="flex items-center gap-2 text-muted-foreground">
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                                  Reading the error
+                                </span>
+                              ) : (
+                                explanation
+                              )}
                             </div>
                           </div>
                         )}

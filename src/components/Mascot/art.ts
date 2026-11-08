@@ -47,6 +47,10 @@ export interface StarState {
   strain: number;
   think: boolean;
   hover: boolean;
+  /** Reaching for a table being dragged: 0.5 while it is anywhere, 1 when it is over Star. */
+  reach: number;
+  /** Arms jitter: generated SQL is running with nobody reviewing it (YOLO). */
+  rattle: boolean;
   /** Horizontal speed, for the arms to trail behind. */
   vx: number;
   reduced: boolean;
@@ -55,14 +59,17 @@ export interface StarState {
 /** Star at rest, looking straight ahead: for still previews. */
 export const AT_REST: StarState = {
   t: 0, dt: 0, ex: 0, ey: 0, open: 1, widen: 1, joy: 0, wince: 0, worry: 0, strain: 0,
-  think: false, hover: false, vx: 0, reduced: true,
+  think: false, hover: false, reach: 0, rattle: false, vx: 0, reduced: true,
 };
+
+export type StarGesture = 'hello' | 'happy' | 'land' | 'attend' | 'stretch' | 'yawn';
 
 export interface StarArt {
   springs: Spring[];
   /** True while it needs frames even with every spring at rest. */
   busy(st: StarState): boolean;
-  gesture(name: 'hello' | 'happy' | 'land' | 'attend'): void;
+  /** `strength` (0..1) scales the landing wobble. */
+  gesture(name: StarGesture, strength?: number): void;
   render(st: StarState): void;
 }
 
@@ -120,7 +127,8 @@ export function makeStar(
        <path class="m-happy" opacity="0" d="M28.7 ${MY - 1.5} Q32 ${MY + 3.9} 35.3 ${MY - 1.5} Z" fill="${ink}"/>
        <path class="m-wince" opacity="0" d="M29 ${MY} Q30.5 ${MY - 1.3} 32 ${MY} Q33.5 ${MY + 1.3} 35 ${MY}" fill="none" stroke="${ink}" stroke-width="1.45" stroke-linecap="round"/>
        <ellipse class="m-worry" opacity="0" cx="32" cy="${MY}" rx="1.4" ry="1.8" fill="${ink}"/>
-       <path class="m-think" opacity="0" d="M29.9 ${MY} L34.1 ${MY - 0.5}" fill="none" stroke="${ink}" stroke-width="1.6" stroke-linecap="round"/>`
+       <path class="m-think" opacity="0" d="M29.9 ${MY} L34.1 ${MY - 0.5}" fill="none" stroke="${ink}" stroke-width="1.6" stroke-linecap="round"/>
+       <ellipse class="m-yawn" opacity="0" cx="32" cy="${MY + 0.4}" rx="1.6" ry="0.6" fill="${ink}"/>`
     : '';
   const face = hasFace
     ? `<g class="eyes">${eyes}</g>
@@ -156,7 +164,7 @@ export function makeStar(
   const joy = one('.joy'), wince = one('.wince'), brows = one('.brows'), blushes = all('.blush');
   const m = {
     neutral: one('.m-neutral'), happy: one('.m-happy'), wince: one('.m-wince'),
-    worry: one('.m-worry'), think: one('.m-think'),
+    worry: one('.m-worry'), think: one('.m-think'), yawn: one('.m-yawn'),
   };
   const base = pupils.map(p => ({
     ry: Number(p.getAttribute('ry')),
@@ -173,18 +181,36 @@ export function makeStar(
     wave: new Spring(0, { response: 0.2, damping: 0.22, precision: 0.05 }),
     /** Arms droop when something goes wrong. */
     droop: new Spring(0, { response: 0.4, damping: 0.7, precision: 0.002 }),
+    /** The upper arms reach for a table being dragged over. */
+    reach: new Spring(0, { response: 0.3, damping: 0.6, precision: 0.002 }),
+    /** A stretch: arms long, the upper ones raised. */
+    extend: new Spring(0, { response: 0.55, damping: 0.75, precision: 0.002 }),
+    /** A yawn: the mouth, when it has one, opens wide. */
+    yawn: new Spring(0, { response: 0.5, damping: 0.85, precision: 0.002 }),
+    /** Arm length wobble, px: they compress and rebound on landing. */
+    splay: new Spring(0, { response: 0.24, damping: 0.3, precision: 0.02 }),
   };
   let free = 0;
   let spinning = false;
 
   return {
     springs: Object.values(s),
-    busy: st => st.think,
-    gesture(name) {
+    busy: st => st.think || st.rattle,
+    gesture(name, strength = 1) {
       if (name === 'happy') s.spin.target = Math.round(s.spin.target / 60) * 60 + 60;
       if (name === 'hello') { s.wave.velocity += 520; later(() => { s.wave.velocity -= 460; }, 260); }
       if (name === 'attend') s.wave.velocity += 240;
-      if (name === 'land') s.lag.velocity += rand(-80, 80);
+      if (name === 'land') {
+        // The harder it lands, the more the arms swing and spring.
+        s.lag.velocity += (Math.random() < 0.5 ? -1 : 1) * (40 + 140 * strength);
+        s.splay.velocity -= 40 * strength;
+      }
+      if (name === 'stretch') { s.extend.target = 1; later(() => { s.extend.target = 0; }, 850); }
+      if (name === 'yawn') {
+        s.yawn.target = 1;
+        s.extend.target = 0.55;
+        later(() => { s.yawn.target = 0; s.extend.target = 0; }, 1150);
+      }
     },
     render(st) {
       // Spins steadily while it writes SQL, then eases onto a symmetric pose.
@@ -193,6 +219,7 @@ export function makeStar(
       else free = s.spin.value;
       s.lag.target = clamp(-st.vx * 0.025, -16, 16);
       s.droop.target = st.wince;
+      s.reach.target = st.reach;
 
       // Without a face it looks around by turning, and twinkles where it would blink.
       const look = hasFace ? 0 : clamp(st.ex * 3.6, -13, 13);
@@ -200,13 +227,19 @@ export function makeStar(
       const tremble = st.reduced ? 0 : clamp((st.strain - 0.85) * 14, 0, 4);
       // The arm that waves is whichever one points up and to the right now.
       const waver = ARMS.reduce((best, a0, i) => (apart(a0 + s.spin.value, 30) < apart(ARMS[best] + s.spin.value, 30) ? i : best), 0);
-      const length = (ARM_LENGTH + 3.4 * st.strain) * twinkle;
+      const raise = Math.max(s.reach.value * 24, s.extend.value * 22);
       ARMS.forEach((a0, i) => {
         let a = a0 + s.spin.value + s.lag.value + look;
         if (i === waver) a += s.wave.value;
         // Every arm sinks toward straight down, whichever way it points after spinning.
         a -= s.droop.value * 18 * Math.cos((a * Math.PI) / 180);
+        // Reaching or stretching: the arms that point upward lift toward vertical.
+        const up = Math.sin((a * Math.PI) / 180) > 0.3;
+        if (up && raise > 0.05) a += clamp(((((90 - a) % 360) + 540) % 360) - 180, -raise, raise);
         if (tremble) a += rand(-1, 1) * tremble;
+        if (st.rattle && !st.reduced) a += rand(-7, 7);
+        const length =
+          (ARM_LENGTH + 3.4 * st.strain + 4.5 * s.extend.value + s.splay.value + (up ? 3 * s.reach.value : 0)) * twinkle;
         const r = (a * Math.PI) / 180;
         const x2 = (32 + length * Math.cos(r)).toFixed(2), y2 = (32 - length * Math.sin(r)).toFixed(2);
         out[i].setAttribute('x2', x2); out[i].setAttribute('y2', y2);
@@ -246,16 +279,22 @@ export function makeStar(
       blushes.forEach(b => fade(b, st.joy * 0.95 + (st.hover ? 0.3 : 0)));
 
       if (m.neutral) {
-        // Crossfade the mouths: happy, wince, worried, thinking, or neutral.
-        const happy = clamp(st.joy, 0, 1);
-        const hurt = clamp(st.wince, 0, 1) * (1 - happy);
-        const worried = clamp(st.worry, 0, 1) * (1 - Math.max(happy, hurt));
-        const thinking = (st.think ? 1 : 0) * (1 - Math.max(happy, hurt, worried));
+        // Crossfade the mouths: a yawn, happy, wince, worried, thinking, or neutral.
+        const yawning = clamp(s.yawn.value, 0, 1);
+        const happy = clamp(st.joy, 0, 1) * (1 - yawning);
+        const hurt = clamp(st.wince, 0, 1) * (1 - Math.max(happy, yawning));
+        const worried = clamp(st.worry, 0, 1) * (1 - Math.max(happy, hurt, yawning));
+        const thinking = (st.think ? 1 : 0) * (1 - Math.max(happy, hurt, worried, yawning));
+        fade(m.yawn, yawning);
+        if (yawning > 0.01) {
+          m.yawn?.setAttribute('rx', (1.6 + 1.1 * yawning).toFixed(2));
+          m.yawn?.setAttribute('ry', (0.6 + 3 * yawning).toFixed(2));
+        }
         fade(m.happy, happy);
         fade(m.wince, hurt);
         fade(m.worry, worried);
         fade(m.think, thinking);
-        fade(m.neutral, 1 - Math.max(happy, hurt, worried, thinking));
+        fade(m.neutral, 1 - Math.max(happy, hurt, worried, thinking, yawning));
       }
     },
   };

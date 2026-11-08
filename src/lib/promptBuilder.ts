@@ -200,3 +200,87 @@ export function buildRepairMessages(
         },
     ];
 }
+
+function schemaContext(schema: DatabaseSchema | null): ChatMessage[] {
+    if (!schema) return [];
+    return [
+        {
+            role: 'system',
+            content: `<database_context>
+  <dialect>${schema.dialect}</dialect>
+  <schema>
+${serializeSchema(schema)}
+  </schema>
+</database_context>`,
+        },
+    ];
+}
+
+/**
+ * Ask for a plain-language explanation of a query the database rejected.
+ *
+ * Grounded in the real engine error and the real schema, so "no such column"
+ * can be answered with the column that does exist rather than a guess.
+ */
+export function buildExplainErrorMessages(
+    sql: string,
+    errorMessage: string,
+    schema: DatabaseSchema | null,
+): ChatMessage[] {
+    return [
+        {
+            role: 'system',
+            content: `<system_instructions>
+  <role>Database assistant</role>
+  <task>Explain why a SQL query failed, for the person who ran it.</task>
+  <constraints>
+    <constraint>Two or three short sentences of plain prose: what went wrong, then how to fix it.</constraint>
+    <constraint>Name the actual table or column involved, using the schema when it helps.</constraint>
+    <constraint>No headings, no lists, no code blocks, and do not rewrite the whole query.</constraint>
+  </constraints>
+</system_instructions>`,
+        },
+        ...schemaContext(schema),
+        {
+            role: 'user',
+            content: `<failed_query>
+${sql}
+</failed_query>
+<error>${errorMessage}</error>`,
+        },
+    ];
+}
+
+/**
+ * Ask for a corrected version of a query the database rejected, keeping what
+ * it was trying to do. Raw SQL out, like Text to SQL, so the same fence
+ * stripping and validation apply.
+ */
+export function buildFixQueryMessages(
+    sql: string,
+    errorMessage: string,
+    schema: DatabaseSchema | null,
+): ChatMessage[] {
+    return [
+        {
+            role: 'system',
+            content: `<system_instructions>
+  <role>SQL Expert Assistant</role>
+  <task>Correct a SQL query that failed to run.</task>
+  <constraints>
+    <constraint>Keep the query's intent; change only what the error requires.</constraint>
+    <constraint>Use only tables and columns that exist in the schema.</constraint>
+    <constraint>Only respond with the corrected SQL. No explanations, no comments, no markdown code blocks.</constraint>
+  </constraints>
+</system_instructions>`,
+        },
+        ...schemaContext(schema),
+        {
+            role: 'user',
+            content: `<failed_query>
+${sql}
+</failed_query>
+<error>${errorMessage}</error>`,
+        },
+    ];
+}
