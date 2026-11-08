@@ -3,6 +3,7 @@ import type { SQLNamespace } from '@codemirror/lang-sql';
 import {
   Lightbulb,
   ListChecks,
+  MessageSquareCode,
   PanelRight,
   Play,
   Plus,
@@ -30,7 +31,7 @@ import { activePolicy, auditableStatements, isYolo, recordDecision, ReadOnlyConn
 import { canValidate, validateScript } from '@/lib/sqlValidator';
 import { classifyStatement } from '@/lib/sqlClassifier';
 import type { AuditDecision, AuditOutcome } from '@/lib/auditLog';
-import { statementAt, statementRanges, type StatementRange } from '@/lib/sqlCursor';
+import { placeAfterStatement, statementAt, statementRanges, type StatementRange } from '@/lib/sqlCursor';
 import { loadTabs, newTab, saveTabs, titleFromSql, type EditorTab, type EditorTabsState } from '@/lib/editorTabs';
 import { addHistory } from '@/lib/queryHistory';
 import { shortcutLabel, useAppCommand } from '@/lib/commands';
@@ -40,7 +41,7 @@ import { PgClient } from '@/lib/db/pgClient';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 import { ApprovalDialog } from './ApprovalDialog';
 import { SqlCodeEditor, type SqlCodeEditorHandle } from './SqlCodeEditor';
-import { AiInlineBar } from './AiInlineBar';
+import { AiQueryDialog } from './AiQueryDialog';
 import { ResultPanel, type RunOutcome } from './ResultPanel';
 import { ExplainPanel, type ExplainState } from './ExplainPanel';
 import { FixDialog, type FixState } from './FixDialog';
@@ -207,7 +208,6 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
   // --- AI state -------------------------------------------------------------------
   const [aiOpen, setAiOpen] = useState(false);
   const [aiSeed, setAiSeed] = useState<string | undefined>(undefined);
-  const [hasSelection, setHasSelection] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
@@ -571,58 +571,28 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
     });
   };
 
-  // --- AI: generate, explain, fix ---------------------------------------------------
+  // --- AI: Text to SQL, explain, fix ------------------------------------------------
 
-  const generate = async (prompt: string, compact: boolean) => {
+  /**
+   * Text to SQL wrote `query`. An empty tab takes it whole; otherwise it goes in
+   * after the statement the cursor is in, so nothing already there is split or
+   * replaced. It is left selected, so Run takes exactly it.
+   */
+  const placeGenerated = (query: string, prompt: string) => {
     const editor = editorRef.current;
     if (!editor) return;
-    const selection = editor.getSelection();
-    const editing = selection.text.trim().length > 0;
-    const request = editing ? `${prompt}\n\nRewrite this SQL to do that, and return the whole statement:\n${selection.text}` : prompt;
-    const tables = aiService.getSchema()?.tables.length ?? 0;
-    mascot.setMood('thinking');
-    mascot.say(tables ? `Reading ${tables} ${tables === 1 ? 'table' : 'tables'}` : 'Thinking', 60_000);
-    try {
-      const query = await aiService.generateSqlQuery(request, validateGeneratedSql, { compact });
-      const doc = editor.getValue();
-      let from: number;
-      if (editing) {
-        from = selection.from;
-        editor.replaceRange(selection.from, selection.to, query);
-      } else if (!doc.trim()) {
-        from = 0;
-        editor.replaceRange(0, doc.length, query);
-      } else {
-        const at = editor.getCursor();
-        const before = doc.slice(0, at);
-        const prefix = before.trim() === '' ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
-        const needsSemicolon = before.trim() !== '' && !before.trimEnd().endsWith(';');
-        const insert = `${needsSemicolon ? ';' : ''}${prefix}${query}`;
-        editor.replaceRange(at, at, insert);
-        from = at + insert.length - query.length;
-      }
-      patchActiveTab({ provenance: 'ai', aiPrompt: prompt });
-      setFailure(null);
-      setExplanation(null);
-      setAiOpen(false);
-      setAiSeed(undefined);
-      mascot.setMood('happy', 1600);
-      if (isYolo()) {
-        // Nobody is reviewing this, so Star rattles.
-        mascot.gesture('rattle');
-        mascot.say('Running it now, no review', 1800);
-        void runScript(query, { provenance: 'ai', prompt, script: query }, from);
-      } else {
-        mascot.say('Here is your SQL', 1800);
-      }
-    } catch (error) {
-      mascot.setMood('error', 1800);
-      mascot.say('That did not work', 2200);
-      toast({
-        variant: 'destructive',
-        title: 'SQL not generated',
-        description: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
-      });
+    const place = placeAfterStatement(editor.getValue(), editor.getSelection().to, query);
+    editor.replaceRange(place.from, place.to, place.insert);
+    const from = place.start;
+    editor.select(from, from + query.length);
+    patchActiveTab({ provenance: 'ai', aiPrompt: prompt });
+    setFailure(null);
+    setExplanation(null);
+    if (isYolo()) {
+      // Nobody is reviewing this, so Star rattles.
+      mascot.gesture('rattle');
+      mascot.say('Running it now, no review', 1800);
+      void runScript(query, { provenance: 'ai', prompt, script: query }, from);
     }
   };
 
@@ -929,8 +899,8 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
             </>
           )}
           <div className="mx-1 h-4 w-px bg-border" />
-          <ToolbarButton label={policy === 'yolo' ? 'Ask AI (YOLO: runs what it writes)' : 'Ask AI to write or change SQL'} shortcut="Mod+K" onClick={() => setAiOpen((o) => !o)}>
-            <Sparkles className={cn('h-3.5 w-3.5', policy === 'yolo' ? 'text-destructive' : 'text-key')} /> Ask AI
+          <ToolbarButton label={policy === 'yolo' ? 'Text to SQL (YOLO: runs what it writes)' : 'Text to SQL'} shortcut="Mod+K" onClick={() => setAiOpen(true)}>
+            <MessageSquareCode strokeWidth={1.5} className={cn('h-3.5 w-3.5', policy === 'yolo' && 'text-destructive')} /> Text to SQL
           </ToolbarButton>
           <ToolbarButton label="Explain the selection or the statement under the cursor" shortcut="Mod+Shift+E" onClick={() => void explainQuery()}>
             <Lightbulb className="h-3.5 w-3.5" /> Explain
@@ -991,27 +961,20 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         </div>
       )}
 
-      <AiInlineBar
+      <AiQueryDialog
         open={aiOpen}
-        onClose={() => {
-          setAiOpen(false);
-          setAiSeed(undefined);
-          editorRef.current?.focus();
+        onOpenChange={(open) => {
+          setAiOpen(open);
+          if (!open) setAiSeed(undefined);
         }}
-        onGenerate={generate}
-        runsImmediately={policy === 'yolo'}
-        editingSelection={hasSelection}
         seed={aiSeed}
+        validate={validateGeneratedSql}
+        onQueryGenerated={placeGenerated}
       />
 
       <div className="flex min-h-0 flex-1">
         <div ref={splitRef} className="flex min-w-0 flex-1 flex-col">
-          <div
-            style={{ height: `${editorFraction * 100}%` }}
-            className="min-h-0"
-            onMouseUp={() => setHasSelection(!!editorRef.current?.getSelection().text.trim())}
-            onKeyUp={() => setHasSelection(!!editorRef.current?.getSelection().text.trim())}
-          >
+          <div style={{ height: `${editorFraction * 100}%` }} className="min-h-0">
             <SqlCodeEditor
               ref={editorRef}
               docKey={activeTab.id}
@@ -1029,15 +992,12 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
               defaultSchema={pg?.defaultSchema}
               placeholder={
                 tablesForPlaceholder
-                  ? `SELECT * FROM ${tablesForPlaceholder} LIMIT 10;   ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} asks AI`
-                  : `Write SQL here. ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} asks AI`
+                  ? `SELECT * FROM ${tablesForPlaceholder} LIMIT 10;   ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} Text to SQL`
+                  : `Write SQL here. ${shortcutLabel('Mod+Enter')} runs the statement under the cursor · ${shortcutLabel('Mod+K')} Text to SQL`
               }
               onRunStatement={runStatement}
               onRunAll={runAll}
-              onAi={() => {
-                setHasSelection(!!editorRef.current?.getSelection().text.trim());
-                setAiOpen(true);
-              }}
+              onAi={() => setAiOpen(true)}
               onExplain={() => void explainQuery()}
             />
           </div>

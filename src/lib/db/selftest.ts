@@ -12,7 +12,7 @@ import { detectDelimiter, headerNames, inferColumnType, parseCsv, sqlTypeFor } f
 import { cellText, formatRows, sqlLiteral } from './sqlLiteral';
 import { OmittedBlob } from './blob';
 import { asJsonDocument, parseCellText, typeFamily } from './cellParse';
-import { statementAt, statementRanges } from '../sqlCursor';
+import { placeAfterStatement, statementAt, statementRanges } from '../sqlCursor';
 import { titleFromSql } from '../editorTabs';
 import { postgresTarget } from '../mcpHandoff';
 
@@ -138,6 +138,39 @@ equal('right after a semicolon is the statement before it', statementAt(script, 
 equal('a blank line belongs to the statement above', statementAt(script, script.indexOf('\n\n') + 1)?.sql, 'SELECT 1');
 equal('the end of the script is the last statement', statementAt(script, script.length)?.sql, 'SELECT 3');
 check('an empty script has no statement', statementAt('   ', 1) === null);
+
+process.stdout.write('\nWhere Text to SQL puts its SQL\n');
+/** The script after placing `sql` with the cursor at `offset`, and the placed text read back. */
+function placed(script: string, offset: number, sql: string): [string, string] {
+    const p = placeAfterStatement(script, offset, sql);
+    const result = script.slice(0, p.from) + p.insert + script.slice(p.to);
+    return [result, result.slice(p.start, p.start + sql.length)];
+}
+equal('an empty tab takes it whole', placed('', 0, 'SELECT 2'), ['SELECT 2', 'SELECT 2']);
+equal('blank lines count as empty', placed('\n\n', 1, 'SELECT 2'), ['SELECT 2', 'SELECT 2']);
+equal('after the statement, past its semicolon', placed('SELECT 1;', 3, 'SELECT 2'), ['SELECT 1;\n\nSELECT 2', 'SELECT 2']);
+equal('a statement without a semicolon gets one', placed('SELECT 1', 8, 'SELECT 2'), ['SELECT 1;\n\nSELECT 2', 'SELECT 2']);
+equal(
+    'a statement below is not joined to the new one',
+    placed('SELECT 1;\nSELECT 3;', 3, 'SELECT 2'),
+    ['SELECT 1;\n\nSELECT 2;\nSELECT 3;', 'SELECT 2'],
+);
+equal(
+    'SQL that ends in a semicolon gets no second one',
+    placed('SELECT 1;\nSELECT 3;', 3, 'SELECT 2;'),
+    ['SELECT 1;\n\nSELECT 2;\nSELECT 3;', 'SELECT 2;'],
+);
+equal('a space before the semicolon is kept', placed('SELECT 1 ;', 2, 'SELECT 2'), ['SELECT 1 ;\n\nSELECT 2', 'SELECT 2']);
+equal(
+    'trailing blank lines stay after the new statement',
+    placed('SELECT 1\n\n', 0, 'SELECT 2'),
+    ['SELECT 1;\n\nSELECT 2\n\n', 'SELECT 2'],
+);
+equal(
+    'a semicolon in a string does not end the statement',
+    placed("SELECT ';' AS x;", 2, 'SELECT 2'),
+    ["SELECT ';' AS x;\n\nSELECT 2", 'SELECT 2'],
+);
 equal('tab titles come from the first line of SQL', titleFromSql('-- note\nselect * from orders where id = 1', 'Query 1'), 'select * from orders where i…');
 
 process.stdout.write('\nSSL handed to the MCP server\n');

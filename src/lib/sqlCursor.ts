@@ -34,3 +34,29 @@ export function statementAt(script: string, offset: number): StatementRange | nu
     }
     return previous ?? ranges[0];
 }
+
+/** Replace `from`..`to` with `insert`; the placed SQL then starts at `start`. */
+export interface Placement {
+    from: number;
+    to: number;
+    insert: string;
+    start: number;
+}
+
+/**
+ * Where Text to SQL puts what it wrote. An empty script takes it whole.
+ * Otherwise it goes in after the statement containing `offset`, past that
+ * statement's `;`, as a statement of its own: nothing already there is split
+ * or replaced, and a `;` is added wherever two statements would run together.
+ */
+export function placeAfterStatement(script: string, offset: number, sql: string): Placement {
+    if (!script.trim()) return { from: 0, to: script.length, insert: sql, start: 0 };
+    const current = statementAt(script, offset);
+    let at = current ? current.to : script.length;
+    let probe = at;
+    while (probe < script.length && /\s/.test(script[probe])) probe++;
+    if (script[probe] === ';') at = probe + 1;
+    const lead = script.slice(0, at).trimEnd().endsWith(';') ? '' : ';';
+    const tail = script.slice(at).trim() && !sql.trimEnd().endsWith(';') ? ';' : '';
+    return { from: at, to: at, insert: `${lead}\n\n${sql}${tail}`, start: at + lead.length + 2 };
+}

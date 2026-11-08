@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **A real SQL editor.** Syntax highlighting, autocomplete for your tables and columns, and errors underlined where the database points. `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection; `Shift+Ctrl/Cmd+Enter` or `F5` runs the whole tab. Tabs keep their text across restarts, every run is kept in History, and **Cancel** stops a query that runs too long. Results stop at a row limit you choose, 1,000 by default.
-- **AI in the editor.** `Ctrl/Cmd+K` writes SQL at the cursor or rewrites the selection, with the context meter from Text to SQL. **Explain** describes the statement under the cursor and its plan without running it. A failed query offers **Explain** and **Fix with AI**.
+- **AI in the editor.** `Ctrl/Cmd+K` opens Text to SQL, and the SQL it writes goes in after the statement you are on. **Explain** describes the statement under the cursor and its plan without running it. A failed query offers **Explain** and **Fix with AI**.
 - **Transactions in the editor.** With **Transaction** on, a script runs all or nothing. A `BEGIN` you type stays open until you end it; the editor says so and offers Commit and Roll back.
 - **Saved connections**, as many as you like, each with a name and a colour. SQLite files you open are remembered too. Passwords and SSH secrets stay in the OS keychain.
 - **Production tag.** A connection tagged production opens read-only, for you and for agents, under a red title bar. Leaving read-only asks first.
@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQLite runs natively, on the file itself.** LiteDB used to load a copy into the webview with sql.js and write the whole copy back when you saved. Now each change is written when it happens, there is no Save step, and a large file no longer has to fit in memory. A change another program makes, such as an agent through the MCP server, appears on its own within a couple of seconds.
 - PostgreSQL connections are held by the app's Rust side: a small pool for browsing, plus one session for the editor, so `SET`, temporary tables and open transactions carry over from one run to the next.
 - The home screen lists your connections instead of asking for a file.
-- The SQL editor replaces the Batch Operations tab and the Text to SQL dialog. Clicking Star opens `Ctrl/Cmd+K`.
+- The SQL editor replaces the Batch Operations tab.
 - Grid edits and CSV imports obey the connection's safety mode and are written to the audit log.
 - Agents see every PostgreSQL schema; a table outside the search path is named `schema.table`. The MCP config LiteDB copies carries the SSL mode, CA certificate and production tag, and goes through the app's SSH tunnel while the connection is open.
 
