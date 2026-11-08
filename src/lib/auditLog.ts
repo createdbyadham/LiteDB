@@ -80,6 +80,12 @@ export interface AuditEntry {
     model: string | null;
     /** The natural-language request. Null for user-authored statements. */
     prompt: string | null;
+    /**
+     * The MCP host that sent it, as it names itself (`claude-ai`, `cursor-vscode`),
+     * for entries that arrived over MCP. Absent from entries the app writes and
+     * from logs written before the field existed.
+     */
+    client?: string | null;
 }
 
 const LOG_DIR = 'audit';

@@ -189,6 +189,24 @@ export interface DecisionRecord {
     prompt?: string | null;
 }
 
+// Ids of the entries this window wrote. The MCP server appends to the same
+// file, and this is how the app tells an agent's statements from its own when
+// it watches the log (see agentActivity.ts). Bounded: only recent ones matter.
+const ownEntries = new Set<string>();
+
+function rememberOwn(id: string): void {
+    ownEntries.add(id);
+    if (ownEntries.size > 500) {
+        const oldest = ownEntries.values().next();
+        if (!oldest.done) ownEntries.delete(oldest.value);
+    }
+}
+
+/** Whether this window wrote the audit entry with this id. */
+export function isOwnAuditEntry(id: string): boolean {
+    return ownEntries.has(id);
+}
+
 /**
  * Write one audit entry per statement.
  *
@@ -201,8 +219,10 @@ export async function recordDecision(record: DecisionRecord): Promise<void> {
     const at = new Date().toISOString();
 
     for (const statement of record.statements) {
+        const id = newAuditId();
+        rememberOwn(id);
         const entry: AuditEntry = {
-            id: newAuditId(),
+            id,
             at,
             provenance: record.provenance,
             connection: connection?.label ?? 'unknown',

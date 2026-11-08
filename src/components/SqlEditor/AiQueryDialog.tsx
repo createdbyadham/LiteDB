@@ -31,6 +31,8 @@ interface AiQueryDialogProps {
    * exactly what a read-only dry run could never do.
    */
   validate?: (sql: string) => Promise<string | null>;
+  /** Text the prompt starts with when the dialog opens: a table dropped on Star. */
+  seed?: string;
 }
 
 /** Roughly where the caret is, so Star can watch the words being typed. */
@@ -53,11 +55,13 @@ export function AiQueryDialog({
   onOpenChange,
   onQueryGenerated,
   validate,
+  seed = '',
 }: AiQueryDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [compact, setCompact] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const generateRef = useRef<HTMLButtonElement>(null);
   const { toast } = useToast();
   // In YOLO the generated SQL runs the moment it arrives, so the button has to
   // say so. "Generate SQL" on a control that also executes it is the kind of
@@ -66,10 +70,28 @@ export function AiQueryDialog({
   const runsImmediately = policy === 'yolo';
 
   // Star hops onto the dialog while it is open.
+  useEffect(() => (open ? mascot.perchOn('dialog') : undefined), [open]);
+
+  // A table dropped on Star: start the prompt with it, caret at the end, ready to type the question.
   useEffect(() => {
-    mascot.setPerch(open ? 'dialog' : 'home');
-  }, [open]);
-  useEffect(() => () => mascot.setPerch('home'), []);
+    if (!open || !seed) return;
+    setPrompt(seed);
+    const raf = requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(seed.length, seed.length);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, seed]);
+
+  // The Generate button coming alive is something that changed: Star glances at it.
+  const canGenerate = open && !isLoading && prompt.trim().length > 0;
+  const couldGenerate = useRef(false);
+  useEffect(() => {
+    if (canGenerate && !couldGenerate.current) mascot.glance(generateRef.current, 650);
+    couldGenerate.current = canGenerate;
+  }, [canGenerate]);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
@@ -104,7 +126,7 @@ export function AiQueryDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Above Star's body (z-60), below its fingertips (z-62): it peeks over this edge. */}
-      <DialogContent data-mascot-perch className="z-[61] sm:max-w-[480px]">
+      <DialogContent data-mascot-perch="ai" className="z-[61] sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>Text to SQL</DialogTitle>
           <DialogDescription>
@@ -132,6 +154,7 @@ export function AiQueryDialog({
           />
           <ContextMeter prompt={prompt} compact={compact} onCompactChange={setCompact} />
           <Button
+            ref={generateRef}
             onClick={handleGenerate}
             disabled={isLoading || !prompt.trim()}
             className="w-full"

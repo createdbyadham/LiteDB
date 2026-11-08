@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { ExportDialog } from '@/components/ExportDialog';
 import { Star } from '@/components/Mascot/Star';
+import { useMascot } from '@/lib/mascot';
 import { SemanticSearch, VectorInspector, SimilarRowsModal, MockDataGenerator } from '@/components/VectorAdmin';
 
 const DEFAULT_QUERY: TableQuery = { limit: 100, offset: 0, search: '', sortColumn: null, sortDirection: 'asc' };
@@ -57,9 +58,21 @@ const DatabaseView = () => {
   const [confirmReload, setConfirmReload] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('browse');
-  /** Star was clicked: show the SQL editor and open Text to SQL there. */
-  const [aiRequested, setAiRequested] = useState(false);
-  const clearAiRequest = useCallback(() => setAiRequested(false), []);
+  /**
+   * Star was clicked, or a table dropped on it: show the SQL editor and open
+   * Text to SQL there, starting the prompt with the table when there is one.
+   */
+  const [aiRequest, setAiRequest] = useState<{ seed?: string } | null>(null);
+  const clearAiRequest = useCallback(() => setAiRequest(null), []);
+  const askStar = useCallback(() => {
+    setActiveTab('query');
+    setAiRequest({});
+  }, []);
+  const askStarAbout = useCallback((table: string) => {
+    setActiveTab('query');
+    setAiRequest({ seed: `Using the ${table} table, ` });
+  }, []);
+  const { prefs: starPrefs } = useMascot();
   const [lastSaved] = useState<Date | null>(null);
   const { contentSidebarCollapsed: sidebarCollapsed, toggleContentSidebar } = useSidebar();
 
@@ -447,9 +460,11 @@ const DatabaseView = () => {
       label: table.name,
       icon: table.type === 'view' ? <Eye /> : <TableOfContents />,
       tooltip: table.type === 'view' ? `${table.name} (view, read-only)` : table.name,
+      // Dragging a table onto Star asks about it; only offered while Star is shown.
+      dragTable: starPrefs.visible ? table.name : undefined,
       onClick: () => handleTableSelect(table.name)
     }));
-  }, [tables, selectedTable]);
+  }, [tables, selectedTable, starPrefs.visible]);
 
   const sidebarStats = (
     <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
@@ -618,7 +633,7 @@ const DatabaseView = () => {
               <SqlEditor
                 isPostgres={isPostgresActive}
                 refreshTables={refreshAfterWrite}
-                requestAiDialog={aiRequested}
+                requestAiDialog={aiRequest}
                 onAiDialogRequested={clearAiRequest}
               />
             )}
@@ -655,15 +670,8 @@ const DatabaseView = () => {
         />
       </div>
 
-      {/* Star peeks over the status bar; clicking it opens Text to SQL. */}
-      {databaseAvailable && (
-        <Star
-          onActivate={() => {
-            setActiveTab('query');
-            setAiRequested(true);
-          }}
-        />
-      )}
+      {/* Star peeks over the status bar; clicking it opens Text to SQL. Hidden from Settings → Star. */}
+      {databaseAvailable && starPrefs.visible && <Star onActivate={askStar} onAsk={askStarAbout} />}
 
       <AlertDialog open={confirmReload} onOpenChange={setConfirmReload}>
         <AlertDialogContent>

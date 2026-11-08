@@ -1,7 +1,14 @@
 import OpenAI from "openai";
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { loadAllApiKeys, adoptLegacyApiKeys, markLegacyApiKeysMigrated } from './secretStorage';
-import { buildRepairMessages, buildTextToSqlMessages, stripSqlFences } from './promptBuilder';
+import {
+  buildExplainErrorMessages,
+  buildFixQueryMessages,
+  buildRepairMessages,
+  buildTextToSqlMessages,
+  stripSqlFences,
+  type ChatMessage,
+} from './promptBuilder';
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
 import type { DatabaseSchema } from './schemaTypes';
 import { FEW_SHOT, REPLY_TOKENS, knownContextWindow, withoutSampleValues } from './contextBudget';
@@ -380,6 +387,23 @@ async function ollamaWindow(endpoint: string, model: string): Promise<ContextWin
   return { tokens: 4096, source: 'assumed Ollama default', modelMax };
 }
 
+/** Room for a short explanation of an error: a few sentences, not an essay. */
+const EXPLAIN_TOKENS = 220;
+
+/** One completion with the active provider and model. */
+async function complete(messages: ChatMessage[], maxTokens: number, temperature: number): Promise<string> {
+  const settings = getSettings();
+  const model = settings.configs[settings.activeProvider].modelName || defaultModelFor(settings.activeProvider);
+  const response = await client.chat.completions.create({
+    messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    temperature,
+    top_p: 1.0,
+    max_tokens: maxTokens,
+    model,
+  });
+  return response.choices[0]?.message.content ?? '';
+}
+
 export const aiService = {
   setSchema(schema: DatabaseSchema) {
     currentSchema = schema;
@@ -561,5 +585,33 @@ export const aiService = {
       console.error('Error generating SQL query:', error);
       throw error;
     }
+  },
+  /**
+   * Explain, in two or three sentences, why a query failed. Uses the engine's
+   * real error and the schema, so it can point at the column that does exist.
+   */
+  async explainError(sql: string, error: string): Promise<string> {
+    const text = await complete(buildExplainErrorMessages(sql, error, currentSchema), EXPLAIN_TOKENS, 0.2);
+    if (!text.trim()) throw new Error('The model returned an empty explanation.');
+    return text.trim();
+  },
+  /**
+   * A corrected version of a query that failed, keeping its intent. When
+   * `validate` is supplied the fix is compiled against the live database and,
+   * if it still fails, sent back once with the new error, as Text to SQL does.
+   */
+  async fixQuery(sql: string, error: string, validate?: (sql: string) => Promise<string | null>): Promise<string> {
+    let messages = buildFixQueryMessages(sql, error, currentSchema);
+    const attempts = validate ? 2 : 1;
+    let fixed = '';
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      fixed = stripSqlFences(await complete(messages, REPLY_TOKENS, 0));
+      if (!fixed) throw new Error('The model returned no SQL.');
+      if (!validate || attempt === attempts - 1) break;
+      const failure = await validate(fixed);
+      if (!failure) break;
+      messages = buildRepairMessages(messages, fixed, failure);
+    }
+    return fixed;
   }
 }; 
