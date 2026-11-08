@@ -3,7 +3,7 @@
 // Each query tab keeps its own editor state (text, cursor, undo history), so
 // switching tabs is not an edit and Ctrl+Z still works where you left off.
 
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Compartment, EditorSelection, EditorState, Prec, type Extension } from '@codemirror/state';
 import {
   EditorView,
@@ -27,6 +27,15 @@ import { lintGutter, setDiagnostics } from '@codemirror/lint';
 import { tags as t } from '@lezer/highlight';
 import type { SqlDialect } from '@/lib/schemaTypes';
 import { columnOptions, type ColumnCatalog } from '@/lib/sqlComplete';
+import { InlineSuggester, type InlinePrompt } from '@/lib/inlineSuggest';
+import { ghostText, setGhost } from './ghostText';
+
+/** Where inline suggestions come from, and whether they are on. */
+export interface InlineSuggestionSource {
+  /** Read before each request, so the setting applies at the next pause. */
+  enabled(): boolean;
+  suggest(prompt: InlinePrompt): Promise<string | null>;
+}
 
 export interface SqlCodeEditorHandle {
   focus(): void;
@@ -51,6 +60,10 @@ export interface SqlCodeEditorProps {
   /** Tables and columns for bare column completion; see sqlComplete. */
   catalog?: ColumnCatalog | null;
   placeholder?: string;
+  /** Ghost-text suggestions; null turns them off for this editor (a production connection). */
+  inlineSuggestions?: InlineSuggestionSource | null;
+  /** A suggestion went in with Tab: the tab now holds SQL a model wrote. */
+  onSuggestionAccepted?: () => void;
   onRunStatement: () => void;
   onRunAll: () => void;
   onAi: () => void;
@@ -175,7 +188,22 @@ function languageFor(dialect: SqlDialect, schema: SQLNamespace, defaultSchema: s
 }
 
 export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>(function SqlCodeEditor(
-  { docKey, value, onChange, dialect, schema, defaultSchema, catalog = null, placeholder, onRunStatement, onRunAll, onAi, onExplain },
+  {
+    docKey,
+    value,
+    onChange,
+    dialect,
+    schema,
+    defaultSchema,
+    catalog = null,
+    placeholder,
+    inlineSuggestions = null,
+    onSuggestionAccepted,
+    onRunStatement,
+    onRunAll,
+    onAi,
+    onExplain,
+  },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -192,8 +220,15 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
    */
   const lastEmitted = useRef(value);
   const hasErrors = useRef(false);
-  const handlers = useRef({ onChange, onRunStatement, onRunAll, onAi, onExplain });
-  handlers.current = { onChange, onRunStatement, onRunAll, onAi, onExplain };
+  const handlers = useRef({ onChange, onRunStatement, onRunAll, onAi, onExplain, onSuggestionAccepted });
+  handlers.current = { onChange, onRunStatement, onRunAll, onAi, onExplain, onSuggestionAccepted };
+  // Read on each pause, like the catalog, so switching connections needs no reconfigure.
+  const inlineRef = useRef(inlineSuggestions);
+  inlineRef.current = inlineSuggestions;
+  // One per editor, shared by its tabs: the request in flight, cached answers, the pause after a failure.
+  const [suggester] = useState(
+    () => new InlineSuggester((prompt) => inlineRef.current?.suggest(prompt) ?? Promise.resolve(null)),
+  );
   const languageConfig = useRef({ dialect, schema, defaultSchema, placeholder });
   languageConfig.current = { dialect, schema, defaultSchema, placeholder };
   // Read by the column completion source on each request, so new columns need no reconfigure.
@@ -217,6 +252,14 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
         syntaxHighlighting(highlight),
         bracketMatching(),
         closeBrackets(),
+        // Before autocompletion: Esc clears a suggestion before the popup's own Esc runs.
+        ghostText({
+          suggester,
+          enabled: () => inlineRef.current?.enabled() ?? false,
+          dialect: () => languageConfig.current.dialect,
+          catalog: getCatalog,
+          onAccept: () => handlers.current.onSuggestionAccepted?.(),
+        }),
         autocompletion({ activateOnTyping: true, icons: false }),
         rectangularSelection(),
         crosshairCursor(),
@@ -276,10 +319,17 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
     hasErrors.current = false;
     const saved = states.current.get(docKey);
     view.setState(saved && saved.doc.toString() === value ? saved : createState(value));
-    // Settings may have changed while the tab was away.
-    view.dispatch({ effects: languageRef.current.reconfigure(languageFor(dialect, schema, defaultSchema, getCatalog)) });
+    // Settings may have changed while the tab was away, and a suggestion it showed then is stale.
+    view.dispatch({
+      effects: [languageRef.current.reconfigure(languageFor(dialect, schema, defaultSchema, getCatalog)), setGhost.of(null)],
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey]);
+
+  // Off for this connection now (tagged production): take down what is showing.
+  useEffect(() => {
+    if (!inlineSuggestions) viewRef.current?.dispatch({ effects: setGhost.of(null) });
+  }, [inlineSuggestions]);
 
   // Text replaced from outside (Text to SQL, history, a saved script).
   useEffect(() => {

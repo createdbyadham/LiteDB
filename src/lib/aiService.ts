@@ -13,6 +13,7 @@ import {
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
 import type { DatabaseSchema } from './schemaTypes';
 import { FEW_SHOT, REPLY_TOKENS, knownContextWindow, withoutSampleValues } from './contextBudget';
+import { INLINE_MAX_TOKENS, INLINE_STOP, cleanSuggestion, fimPrompt, inlineChatMessages, type InlinePrompt } from './inlineSuggest';
 
 export type { ColumnSchema, DatabaseSchema, SqlDialect, TableSchema } from './schemaTypes';
 
@@ -23,6 +24,12 @@ export type AIProviderConfig = {
   apiKey: string;
   endpoint?: string;
   modelName?: string;
+  /**
+   * The model for inline suggestions, when it should not be the one above:
+   * a small fill-in-the-middle model (qwen2.5-coder:1.5b) answers in a
+   * fraction of the time a chat model takes. Empty means the same model.
+   */
+  inlineModelName?: string;
 };
 
 export type AISettings = {
@@ -35,6 +42,12 @@ export type AISettings = {
    * values in the prompt — so it is a visible choice, not a silent default.
    */
   includeSampleValues: boolean;
+  /**
+   * Ghost-text suggestions in the SQL editor. Off by default: every pause in
+   * typing sends the statement and table names to the provider, which is
+   * for the user to choose, not to discover.
+   */
+  inlineSuggestions: boolean;
 };
 
 export const defaultSettings: AISettings = {
@@ -42,31 +55,37 @@ export const defaultSettings: AISettings = {
   configs: {
     openai: {
       apiKey: '',
-      modelName: 'gpt-4o-mini'
+      modelName: 'gpt-4o-mini',
+      inlineModelName: ''
     },
     'openai-compatible': {
       apiKey: '',
       endpoint: '',
-      modelName: ''
+      modelName: '',
+      inlineModelName: ''
     },
     ollama: {
       apiKey: 'ollama',
       endpoint: 'http://localhost:11434/v1',
-      modelName: 'llama3'
+      modelName: 'llama3',
+      inlineModelName: ''
     }
   },
-  includeSampleValues: true
+  includeSampleValues: true,
+  inlineSuggestions: false
 };
 
 type StoredProviderConfig = {
   endpoint?: string;
   modelName?: string;
+  inlineModelName?: string;
 };
 
 type StoredAISettings = {
   activeProvider: AIProvider;
   configs: Record<AIProvider, StoredProviderConfig>;
   includeSampleValues?: boolean;
+  inlineSuggestions?: boolean;
 };
 
 /** GitHub Models / Azure used to be first-class; they are just OpenAI-compatible endpoints now. */
@@ -89,6 +108,7 @@ function mergeWithDefaults(stored: Partial<StoredAISettings>): AISettings {
     configs: { ...defaultSettings.configs },
     includeSampleValues:
       stored.includeSampleValues ?? defaultSettings.includeSampleValues,
+    inlineSuggestions: stored.inlineSuggestions ?? defaultSettings.inlineSuggestions,
   };
 
   for (const provider of AI_PROVIDERS) {
@@ -100,6 +120,7 @@ function mergeWithDefaults(stored: Partial<StoredAISettings>): AISettings {
       apiKey: '',
       endpoint: storedConfig.endpoint ?? settings.configs[provider].endpoint,
       modelName: storedConfig.modelName ?? settings.configs[provider].modelName,
+      inlineModelName: storedConfig.inlineModelName ?? settings.configs[provider].inlineModelName,
     };
   }
 
@@ -125,14 +146,17 @@ function readStoredSettings(): StoredAISettings | null {
     openai: {
       endpoint: raw.openai?.endpoint,
       modelName: raw.openai?.modelName,
+      inlineModelName: raw.openai?.inlineModelName,
     },
     'openai-compatible': {
       endpoint: compatible?.endpoint,
       modelName: compatible?.modelName,
+      inlineModelName: compatible?.inlineModelName,
     },
     ollama: {
       endpoint: raw.ollama?.endpoint,
       modelName: raw.ollama?.modelName,
+      inlineModelName: raw.ollama?.inlineModelName,
     },
   } as Record<AIProvider, StoredProviderConfig>;
 
@@ -140,6 +164,7 @@ function readStoredSettings(): StoredAISettings | null {
     activeProvider: coerceProvider(parsed.activeProvider),
     configs,
     includeSampleValues: parsed.includeSampleValues,
+    inlineSuggestions: parsed.inlineSuggestions === true,
   };
 }
 
@@ -152,10 +177,12 @@ export function saveNonSecretSettings(settings: AISettings): void {
         {
           endpoint: settings.configs[provider].endpoint,
           modelName: settings.configs[provider].modelName,
+          inlineModelName: settings.configs[provider].inlineModelName,
         },
       ]),
     ) as Record<AIProvider, StoredProviderConfig>,
     includeSampleValues: settings.includeSampleValues,
+    inlineSuggestions: settings.inlineSuggestions,
   };
 
   localStorage.setItem('aiSettings', JSON.stringify(toStore));
@@ -315,6 +342,7 @@ export interface ConnectionTestResult {
 
 // Re-create client when settings change
 window.addEventListener('aiSettingsChanged', () => {
+  noFillInMiddle.clear();
   void loadAISettingsAsync().then(() => {
     client = createClient();
   });
@@ -391,18 +419,67 @@ async function ollamaWindow(endpoint: string, model: string): Promise<ContextWin
 /** Room for a short explanation of an error: a few sentences, not an essay. */
 const EXPLAIN_TOKENS = 220;
 
-/** One completion with the active provider and model. */
-async function complete(messages: ChatMessage[], maxTokens: number, temperature: number): Promise<string> {
+/** One completion with the active provider, and its model unless another is given. */
+async function complete(
+  messages: ChatMessage[],
+  maxTokens: number,
+  temperature: number,
+  options: { model?: string; stop?: string[]; maxRetries?: number } = {},
+): Promise<string> {
   const settings = getSettings();
-  const model = settings.configs[settings.activeProvider].modelName || defaultModelFor(settings.activeProvider);
-  const response = await client.chat.completions.create({
-    messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-    temperature,
-    top_p: 1.0,
-    max_tokens: maxTokens,
-    model,
-  });
+  const model = options.model || settings.configs[settings.activeProvider].modelName || defaultModelFor(settings.activeProvider);
+  const response = await client.chat.completions.create(
+    {
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      temperature,
+      top_p: 1.0,
+      max_tokens: maxTokens,
+      model,
+      ...(options.stop ? { stop: options.stop } : {}),
+    },
+    options.maxRetries === undefined ? undefined : { maxRetries: options.maxRetries },
+  );
   return response.choices[0]?.message.content ?? '';
+}
+
+/** The model inline suggestions use: their own if one is set, otherwise the provider's. */
+function inlineModelFor(settings: AISettings): string {
+  const config = settings.configs[settings.activeProvider];
+  return config.inlineModelName?.trim() || config.modelName || defaultModelFor(settings.activeProvider);
+}
+
+/**
+ * Endpoint and model pairs that refused fill-in-the-middle while chat
+ * worked: a model without an insert template ("does not support insert"),
+ * or a server without /completions. Asked through chat from then on, so a
+ * pause costs one request, not two.
+ */
+const noFillInMiddle = new Set<string>();
+
+/** A 4xx that means "not like this", unlike 408 and 429, which mean "not now". */
+function refusedRequest(error: unknown): boolean {
+  return (
+    error instanceof OpenAI.APIError &&
+    typeof error.status === 'number' &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.status !== 429
+  );
+}
+
+/** An inline suggestion through chat, for providers and models without fill-in-the-middle. */
+async function chatSuggestion(prompt: InlinePrompt, model: string): Promise<string | null> {
+  const messages = inlineChatMessages(prompt);
+  let text: string;
+  try {
+    text = await complete(messages, INLINE_MAX_TOKENS, 0, { model, stop: INLINE_STOP, maxRetries: 0 });
+  } catch (error) {
+    // Some models refuse `stop`. The answer is cut where the statement ends anyway.
+    if (!refusedRequest(error) || !/\bstop\b/i.test(error instanceof Error ? error.message : '')) throw error;
+    text = await complete(messages, INLINE_MAX_TOKENS, 0, { model, maxRetries: 0 });
+  }
+  return cleanSuggestion(text, prompt.prefix, prompt.suffix);
 }
 
 export const aiService = {
@@ -457,6 +534,51 @@ export const aiService = {
   activeModelName(): string | null {
     const settings = getSettings();
     return settings.configs[settings.activeProvider].modelName ?? null;
+  },
+  /**
+   * Whether inline suggestions are on. Read from storage rather than the
+   * cached settings, which reload asynchronously, so switching them off
+   * applies at the very next pause.
+   */
+  inlineSuggestionsEnabled(): boolean {
+    try {
+      return loadAISettings().inlineSuggestions;
+    } catch {
+      return false;
+    }
+  },
+  /** The model inline suggestions use, for the audit log. */
+  inlineModelName(): string {
+    return inlineModelFor(getSettings());
+  },
+  /**
+   * Ghost text for the cursor: the text to insert there, cleaned, or null
+   * when the model has nothing usable.
+   *
+   * Ollama is asked fill-in-the-middle, with the text after the cursor sent
+   * as `suffix`: FIM-trained models such as qwen2.5-coder complete that far
+   * better than they follow a chat prompt. A model or server that refuses it
+   * is asked through chat instead, as the other providers are.
+   */
+  async suggestInline(prompt: InlinePrompt): Promise<string | null> {
+    const settings = getSettings();
+    const provider = settings.activeProvider;
+    const model = inlineModelFor(settings);
+    const fimKey = `${settings.configs[provider].endpoint ?? ''}|${model}`;
+    if (provider !== 'ollama' || noFillInMiddle.has(fimKey)) return chatSuggestion(prompt, model);
+    try {
+      const fim = fimPrompt(prompt);
+      const response = await client.completions.create(
+        { model, prompt: fim.prompt, suffix: fim.suffix, max_tokens: INLINE_MAX_TOKENS, temperature: 0, stop: INLINE_STOP },
+        { maxRetries: 0 },
+      );
+      return cleanSuggestion(response.choices[0]?.text ?? '', prompt.prefix, prompt.suffix, { fim: true });
+    } catch (error) {
+      if (!refusedRequest(error)) throw error;
+      const text = await chatSuggestion(prompt, model);
+      noFillInMiddle.add(fimKey);
+      return text;
+    }
   },
   /**
    * The models a provider says it has, so they can be picked rather than

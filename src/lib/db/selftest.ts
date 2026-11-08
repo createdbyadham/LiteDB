@@ -1,6 +1,6 @@
 // Self-test for the app's pure database helpers: connection URLs, CSV, SQL
 // literals and copy formats, cell parsing, the statement under the cursor,
-// and the SSL settings handed to the MCP server.
+// inline suggestions, and the SSL settings handed to the MCP server.
 //
 //   npm run test:unit
 //
@@ -17,6 +17,16 @@ import { titleFromSql } from '../editorTabs';
 import { postgresTarget } from '../mcpHandoff';
 import { completionName } from '../types';
 import { columnOptions, tablesIn, type ColumnCatalog } from '../sqlComplete';
+import {
+    InlineSuggester,
+    buildInlinePrompt,
+    cleanSuggestion,
+    inlineContext,
+    reconcile,
+    schemaComment,
+    typeThrough,
+    type InlinePrompt,
+} from '../inlineSuggest';
 
 let failures = 0;
 
@@ -247,6 +257,127 @@ equal(
 );
 equal('tab titles come from the first line of SQL', titleFromSql('-- note\nselect * from orders where id = 1', 'Query 1'), 'select * from orders where i…');
 
+process.stdout.write('\nInline suggestions: what is sent\n');
+/** Prefix and suffix of the statement at the cursor, with the cursor where `|` is. */
+function around(sqlWithCursor: string): [string, string] | null {
+    const context = inlineContext(sqlWithCursor.replace('|', ''), sqlWithCursor.indexOf('|'));
+    return context && [context.prefix, context.suffix];
+}
+equal('the statement the cursor is in, not the one above', around('SELECT 1;\nSELECT * FROM |'), ['SELECT * FROM ', '']);
+equal('a ; in a string does not split, and the suffix keeps its ;', around("SELECT ';' AS x, | FROM t; SELECT 2"), ["SELECT ';' AS x, ", ' FROM t;']);
+equal('a blank line ends a statement on both sides', around('SELECT 1\n\nSELECT * FROM t WHERE |\n\nSELECT 3'), ['SELECT * FROM t WHERE ', '']);
+equal('a comment just above starts the statement', around('-- customers by revenue\n|'), ['-- customers by revenue\n', '']);
+check('nothing in the middle of a word', around('SELECT na|me FROM t') === null);
+check('nothing inside a comment', around('-- top customers|') === null && around('SELECT 1 /* note | */') === null);
+check('nothing after a finished statement', around('SELECT 1;|') === null && around('SELECT 1\n\n|') === null);
+equal(
+    'columns for the tables the statement reads, names for the rest',
+    schemaComment('sqlite', shop, 'SELECT * FROM orders o JOIN customers c ON '),
+    '-- Dialect: SQLite\n-- Table orders (id INTEGER, customer_id INTEGER, status TEXT)\n-- Table customers (id INTEGER, name TEXT)\n-- Other tables: "Order Details"\n',
+);
+equal('with no table yet, names only', schemaComment('sqlite', shop, 'SELECT '), '-- Dialect: SQLite\n-- Tables: orders, customers, "Order Details"\n');
+equal(
+    'Postgres: quoted columns, and a schema on tables outside the default',
+    schemaComment('postgres', pgCatalog, 'SELECT * FROM users'),
+    '-- Dialect: PostgreSQL\n-- Table users ("createdAt" timestamp)\n-- Other tables: auth.sessions\n',
+);
+const wide: ColumnCatalog = {
+    dialect: 'sqlite',
+    defaultSchema: null,
+    tables: Array.from({ length: 300 }, (_, t) => ({
+        schema: null,
+        table: `table_${String(t).padStart(3, '0')}`,
+        columns: Array.from({ length: 60 }, (_, c) => ({ name: `column_${c}`, type: 'INTEGER' })),
+    })),
+};
+const capped = schemaComment('sqlite', wide, 'SELECT * FROM table_000 JOIN table_001 ON ');
+check('300 tables of 60 columns stay short', capped.length < 2000, `${capped.length} characters`);
+check('...and say what was left out', /-- Table table_000 \(.*… \d+ more\)/.test(capped) && /… \d+ more\n$/.test(capped));
+const long = buildInlinePrompt({ from: 0, pos: 6007, prefix: `SELECT\n${'a,\n'.repeat(2000)}`, suffix: '' }, 'sqlite', null);
+check('a long statement is cut from the start, at a line', long.prefix.length <= 1200 && long.prefix.startsWith('a,') && long.prefix.endsWith('a,\n'));
+check(
+    'the cache tells statements apart by what follows the cursor',
+    buildInlinePrompt({ from: 0, pos: 7, prefix: 'SELECT ', suffix: '' }, 'sqlite', shop).key !==
+        buildInlinePrompt({ from: 0, pos: 7, prefix: 'SELECT ', suffix: ' FROM orders' }, 'sqlite', shop).key,
+);
+
+process.stdout.write('\nInline suggestions: what is kept\n');
+const fim = { fim: true };
+equal('code fences are stripped', cleanSuggestion('```sql\nid = 1\n```', 'SELECT * FROM t WHERE ', ''), 'id = 1');
+equal('a restated statement keeps only what is new', cleanSuggestion('SELECT * FROM users WHERE id = 1', 'SELECT * FROM users WHERE ', ''), 'id = 1');
+equal('a restated word keeps only its rest', cleanSuggestion('email FROM users', 'SELECT e', ''), 'mail FROM users');
+equal('fill-in-the-middle keeps a doubled letter', cleanSuggestion('ardvarks', 'SELECT * FROM a', '', fim), 'ardvarks');
+equal('a tail that repeats the suffix goes', cleanSuggestion('id, name FROM users', 'SELECT ', ' FROM users;', fim), 'id, name');
+equal('...and so does one that runs on past it', cleanSuggestion('id FROM users WHERE id = 1', 'SELECT ', ' FROM users', fim), 'id');
+equal('half a word is not a repeat', cleanSuggestion('a, id', 'SELECT ', ' identity_col FROM t', fim), 'a, id');
+equal('a bracket the suffix already closes goes', cleanSuggestion('*) FROM users', 'SELECT COUNT(', ')', fim), '*');
+equal('brackets it opens itself stay', cleanSuggestion('SUM(x)', 'SELECT COALESCE(', ', 0)', fim), 'SUM(x)');
+equal('a quote the suffix already closes goes', cleanSuggestion("pending'", "SELECT * FROM t WHERE status = '", "'", fim), 'pending');
+equal('it stops at a semicolon', cleanSuggestion('id = 1; DROP TABLE t', 'SELECT * FROM t WHERE ', ''), 'id = 1');
+equal('...and at a blank line', cleanSuggestion('1\n\nSELECT 2', 'SELECT * FROM t LIMIT ', '', fim), '1');
+equal('a ; inside a string is not the end', cleanSuggestion("'a;b'", 'SELECT ', '', fim), "'a;b'");
+equal('one space after the prefix, not two', cleanSuggestion(' FROM users', 'SELECT * ', '', fim), 'FROM users');
+equal('a line break to start with stays', cleanSuggestion('\nFROM users', 'SELECT *', '', fim), '\nFROM users');
+check(
+    'nothing left is null',
+    cleanSuggestion('```\n```', 'SELECT ', '') === null && cleanSuggestion(' FROM users', 'SELECT *', ' FROM users', fim) === null,
+);
+const shownGhost = { pos: 10, text: 'FROM users' };
+equal('typing its next letters keeps the rest', typeThrough(shownGhost, 10, 10, 'FR'), { pos: 12, text: 'OM users' });
+check('typing anything else clears it', typeThrough(shownGhost, 10, 10, 'x') === null);
+check('so does deleting, or typing all of it', typeThrough(shownGhost, 9, 10, '') === null && typeThrough(shownGhost, 10, 10, 'FROM users') === null);
+const asked = { from: 0, pos: 11, prefix: 'SELECT * FR', suffix: '' };
+equal('a late answer drops what was typed meanwhile', reconcile(asked, { from: 0, pos: 12, prefix: 'SELECT * FRO', suffix: '' }, 'OM users'), 'M users');
+check('...unless what was typed differs from it', reconcile(asked, { from: 0, pos: 12, prefix: 'SELECT * FRX', suffix: '' }, 'OM users') === null);
+check('...or the text after the cursor changed', reconcile(asked, { from: 0, pos: 11, prefix: 'SELECT * FR', suffix: ' x' }, 'OM users') === null);
+
+/** When to ask: one request at a time, a cache, and a pause after a failure. Async, so it runs last. */
+async function suggesterChecks(): Promise<void> {
+    process.stdout.write('\nInline suggestions: when to ask\n');
+    const prompt = (key: string): InlinePrompt => ({ context: '', prefix: key, suffix: '', key });
+    let clock = 0;
+    let calls = 0;
+    let answer: (p: InlinePrompt) => Promise<string | null> = async (p) => `${p.prefix}!`;
+    const suggester = new InlineSuggester(
+        (p) => {
+            calls++;
+            return answer(p);
+        },
+        { now: () => clock, backoffMs: 30_000 },
+    );
+    equal('a pause asks', await suggester.suggest(prompt('a')), { kind: 'ok', text: 'a!', cached: false });
+    equal('the same statement again comes from the cache', await suggester.suggest(prompt('a')), { kind: 'ok', text: 'a!', cached: true });
+    check('...without asking again', calls === 1, `${calls} calls`);
+
+    let release: (text: string) => void = () => undefined;
+    answer = () =>
+        new Promise<string>((resolve) => {
+            release = resolve;
+        });
+    const slow = suggester.suggest(prompt('b'));
+    equal('one request at a time', await suggester.suggest(prompt('c')), { kind: 'busy' });
+    release('b!');
+    equal('...and its answer still arrives', await slow, { kind: 'ok', text: 'b!', cached: false });
+
+    answer = async () => {
+        throw new Error('down');
+    };
+    check('a failure is reported', (await suggester.suggest(prompt('d'))).kind === 'failed');
+    equal('then it waits before asking again', await suggester.suggest(prompt('e')), { kind: 'cooling' });
+    equal('cached answers still show meanwhile', await suggester.suggest(prompt('a')), { kind: 'ok', text: 'a!', cached: true });
+    clock += 30_001;
+    answer = async (p) => `${p.prefix}!`;
+    equal('30 seconds later it asks again', await suggester.suggest(prompt('e')), { kind: 'ok', text: 'e!', cached: false });
+
+    suggester.reset();
+    const before = calls;
+    await suggester.suggest(prompt('a'));
+    check('another model forgets the cached answers', calls === before + 1, `${calls - before} calls`);
+
+    const hung = new InlineSuggester(() => new Promise<string | null>(() => undefined), { timeoutMs: 20 });
+    check('a request that never answers frees the slot', (await hung.suggest(prompt('f'))).kind === 'failed');
+}
+
 process.stdout.write('\nSSL handed to the MCP server\n');
 const base = { host: 'h', port: 5432, database: 'd', username: 'u', password: 'p', ssl: false };
 check('off sends no sslmode', !postgresTarget({ ...base, sslMode: 'disable' }).includes('sslmode'));
@@ -257,6 +388,13 @@ check(
 );
 check('the old checkbox still means require', postgresTarget({ ...base, ssl: true }).endsWith('?sslmode=no-verify'));
 
-process.stdout.write('\n');
-process.stdout.write(failures === 0 ? 'self-test passed\n' : `self-test FAILED (${failures})\n`);
-process.exitCode = failures === 0 ? 0 : 1;
+void suggesterChecks()
+    .catch((error: unknown) => {
+        failures++;
+        process.stdout.write(`  FAIL the suggester checks threw — ${String(error)}\n`);
+    })
+    .then(() => {
+        process.stdout.write('\n');
+        process.stdout.write(failures === 0 ? 'self-test passed\n' : `self-test FAILED (${failures})\n`);
+        process.exitCode = failures === 0 ? 0 : 1;
+    });

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Inline suggestions** in the SQL editor, off by default (Settings → AI). After a pause in typing, the model's suggestion shows as grey text after the cursor: `Tab` accepts it, `Esc` dismisses it, and typing its next characters keeps the rest. Ollama is asked fill-in-the-middle, which FIM-trained models such as qwen2.5-coder complete best; other providers, and models that refuse it, are asked through chat. Suggestions can have a smaller model of their own. Each pause sends the statement you are writing, your table names and the columns of the tables it reads to the provider. They never appear while the column popup is open or on a connection tagged production, and accepting one marks the tab as written by AI, so its writes still ask first in Unrestricted and the audit log names the model.
+
 ## [2.5.0] - 2026-11-08
 
 ### Added
