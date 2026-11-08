@@ -17,7 +17,7 @@ export function Toaster() {
       {toasts.map(function ({ id, title, description, action, variant, ...props }) {
         const destructive = variant === "destructive"
         return (
-          <Toast key={id} variant={variant} {...props}>
+          <Toast key={id} variant={variant} data-toast-id={id} {...props}>
             <div className="flex min-w-0 items-start gap-2.5">
               <span className="flex h-5 shrink-0 items-center">
                 {destructive ? (

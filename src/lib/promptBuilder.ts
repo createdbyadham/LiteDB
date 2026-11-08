@@ -201,28 +201,10 @@ export function buildRepairMessages(
     ];
 }
 
-/**
- * Messages asking the model to repair SQL the user ran, from the engine's
- * own error. Same schema context as Text to SQL, so it fixes names against
- * what exists rather than guessing.
- */
-export function buildFixMessages(sql: string, errorMessage: string, schema: DatabaseSchema | null): ChatMessage[] {
-    const messages: ChatMessage[] = [
+function schemaContext(schema: DatabaseSchema | null): ChatMessage[] {
+    if (!schema) return [];
+    return [
         {
-            role: 'system',
-            content: `<system_instructions>
-  <role>SQL Expert Assistant</role>
-  <task>Fix a SQL query that failed to run.</task>
-  <constraints>
-    <constraint>Return only the corrected SQL, raw, with no explanation and no code fences.</constraint>
-    <constraint>Change as little as possible: keep the user's intent, formatting and aliases.</constraint>
-    <constraint>Use only tables and columns that exist in the schema.</constraint>
-  </constraints>
-</system_instructions>`,
-        },
-    ];
-    if (schema) {
-        messages.push({
             role: 'system',
             content: `<database_context>
   <dialect>${schema.dialect}</dialect>
@@ -230,25 +212,87 @@ export function buildFixMessages(sql: string, errorMessage: string, schema: Data
 ${serializeSchema(schema)}
   </schema>
 </database_context>`,
-        });
-    }
-    messages.push({
-        role: 'user',
-        content: `<failed_query>
-${sql}
-</failed_query>
-<error>${errorMessage}</error>`,
-    });
-    return messages;
+        },
+    ];
 }
 
 /**
- * Messages asking for a plain-language explanation of a query, with the
- * planner's output when there is one. The plan comes from plain EXPLAIN —
- * never ANALYZE — so asking for an explanation never runs the statement.
+ * Ask for a plain-language explanation of a query the database rejected.
+ *
+ * Grounded in the real engine error and the real schema, so "no such column"
+ * can be answered with the column that does exist rather than a guess.
  */
-export function buildExplainMessages(sql: string, plan: string | null, schema: DatabaseSchema | null): ChatMessage[] {
-    const messages: ChatMessage[] = [
+export function buildExplainErrorMessages(
+    sql: string,
+    errorMessage: string,
+    schema: DatabaseSchema | null,
+): ChatMessage[] {
+    return [
+        {
+            role: 'system',
+            content: `<system_instructions>
+  <role>Database assistant</role>
+  <task>Explain why a SQL query failed, for the person who ran it.</task>
+  <constraints>
+    <constraint>Two or three short sentences of plain prose: what went wrong, then how to fix it.</constraint>
+    <constraint>Name the actual table or column involved, using the schema when it helps.</constraint>
+    <constraint>No headings, no lists, no code blocks, and do not rewrite the whole query.</constraint>
+  </constraints>
+</system_instructions>`,
+        },
+        ...schemaContext(schema),
+        {
+            role: 'user',
+            content: `<failed_query>
+${sql}
+</failed_query>
+<error>${errorMessage}</error>`,
+        },
+    ];
+}
+
+/**
+ * Ask for a corrected version of a query the database rejected, keeping what
+ * it was trying to do. Raw SQL out, like Text to SQL, so the same fence
+ * stripping and validation apply.
+ */
+export function buildFixQueryMessages(
+    sql: string,
+    errorMessage: string,
+    schema: DatabaseSchema | null,
+): ChatMessage[] {
+    return [
+        {
+            role: 'system',
+            content: `<system_instructions>
+  <role>SQL Expert Assistant</role>
+  <task>Correct a SQL query that failed to run.</task>
+  <constraints>
+    <constraint>Keep the query's intent; change only what the error requires.</constraint>
+    <constraint>Use only tables and columns that exist in the schema.</constraint>
+    <constraint>Only respond with the corrected SQL. No explanations, no comments, no markdown code blocks.</constraint>
+  </constraints>
+</system_instructions>`,
+        },
+        ...schemaContext(schema),
+        {
+            role: 'user',
+            content: `<failed_query>
+${sql}
+</failed_query>
+<error>${errorMessage}</error>`,
+        },
+    ];
+}
+
+/**
+ * Ask for a plain-language explanation of a query that has not failed — what
+ * it does and what to watch out for — with the planner's output when there is
+ * one. The plan comes from plain EXPLAIN, never ANALYZE, so asking for an
+ * explanation never runs the statement.
+ */
+export function buildExplainQueryMessages(sql: string, plan: string | null, schema: DatabaseSchema | null): ChatMessage[] {
+    return [
         {
             role: 'system',
             content: `<system_instructions>
@@ -262,23 +306,12 @@ export function buildExplainMessages(sql: string, plan: string | null, schema: D
   </format>
 </system_instructions>`,
         },
-    ];
-    if (schema) {
-        messages.push({
-            role: 'system',
-            content: `<database_context>
-  <dialect>${schema.dialect}</dialect>
-  <schema>
-${serializeSchema(schema)}
-  </schema>
-</database_context>`,
-        });
-    }
-    messages.push({
-        role: 'user',
-        content: `<query>
+        ...schemaContext(schema),
+        {
+            role: 'user',
+            content: `<query>
 ${sql}
 </query>${plan ? `\n<plan>\n${plan}\n</plan>` : ''}`,
-    });
-    return messages;
+        },
+    ];
 }

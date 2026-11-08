@@ -1,4 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { DEFAULT_LOOK, mascot, useMascot, type StarLook } from '@/lib/mascot';
 import { cn } from '@/lib/utils';
 import { AT_REST, makeStar } from './art';
@@ -18,9 +20,9 @@ const MOUTH: [string, string][] = [
   ['off', 'Off'],
 ];
 
-/** Settings → Star: its colour, eyes and mouth, with a preview. Applies right away. */
+/** Settings → Star: whether it shows and talks, and its colour, eyes and mouth, with a preview. Applies right away. */
 export function StarSettings() {
-  const { look } = useMascot();
+  const { look, prefs } = useMascot();
   const preview = useRef<SVGSVGElement>(null);
 
   useLayoutEffect(() => {
@@ -40,6 +42,24 @@ export function StarSettings() {
             The Text to SQL assistant that peeks over the status bar. Changes apply right away and stay on this device.
           </p>
         </div>
+      </div>
+
+      <div className="divide-y rounded-lg border">
+        <Toggle
+          id="star-visible"
+          label="Show Star"
+          hint="Peeks over the status bar while a database is open."
+          checked={prefs.visible}
+          onChange={visible => mascot.setPrefs({ visible })}
+        />
+        <Toggle
+          id="star-bubbles"
+          label="Speech bubbles"
+          hint="Off keeps Star quiet: it still reacts, but says nothing."
+          checked={prefs.bubbles}
+          disabled={!prefs.visible}
+          onChange={bubbles => mascot.setPrefs({ bubbles })}
+        />
       </div>
 
       <Choice label="Colour" options={COLORS} value={look.color} onChange={color => mascot.setLook({ color })} />
@@ -62,6 +82,32 @@ export function StarSettings() {
         >
           Reset to default
         </button>
+      </div>
+    </div>
+  );
+}
+
+function Toggle({
+  id,
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className={cn('flex items-start gap-3 px-4 py-3', disabled && 'opacity-50')}>
+      <Switch id={id} className="mt-0.5" checked={checked} disabled={disabled} onCheckedChange={onChange} />
+      <div className="min-w-0 space-y-1">
+        <Label htmlFor={id}>{label}</Label>
+        <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>
       </div>
     </div>
   );

@@ -289,6 +289,7 @@ const StatusBar = ({
             onClick={() =>
               window.dispatchEvent(new CustomEvent('openSettings', { detail: { tab: 'agents' } }))
             }
+            data-mascot-mcp
             className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
             aria-label="Connect an agent"
             title="Connect an agent"

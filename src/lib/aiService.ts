@@ -1,7 +1,15 @@
 import OpenAI from "openai";
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { loadAllApiKeys, adoptLegacyApiKeys, markLegacyApiKeysMigrated } from './secretStorage';
-import { buildExplainMessages, buildFixMessages, buildRepairMessages, buildTextToSqlMessages, stripSqlFences } from './promptBuilder';
+import {
+  buildExplainErrorMessages,
+  buildExplainQueryMessages,
+  buildFixQueryMessages,
+  buildRepairMessages,
+  buildTextToSqlMessages,
+  stripSqlFences,
+  type ChatMessage,
+} from './promptBuilder';
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
 import type { DatabaseSchema } from './schemaTypes';
 import { FEW_SHOT, REPLY_TOKENS, knownContextWindow, withoutSampleValues } from './contextBudget';
@@ -380,6 +388,23 @@ async function ollamaWindow(endpoint: string, model: string): Promise<ContextWin
   return { tokens: 4096, source: 'assumed Ollama default', modelMax };
 }
 
+/** Room for a short explanation of an error: a few sentences, not an essay. */
+const EXPLAIN_TOKENS = 220;
+
+/** One completion with the active provider and model. */
+async function complete(messages: ChatMessage[], maxTokens: number, temperature: number): Promise<string> {
+  const settings = getSettings();
+  const model = settings.configs[settings.activeProvider].modelName || defaultModelFor(settings.activeProvider);
+  const response = await client.chat.completions.create({
+    messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    temperature,
+    top_p: 1.0,
+    max_tokens: maxTokens,
+    model,
+  });
+  return response.choices[0]?.message.content ?? '';
+}
+
 export const aiService = {
   setSchema(schema: DatabaseSchema) {
     currentSchema = schema;
@@ -563,52 +588,42 @@ export const aiService = {
     }
   },
   /**
-   * Repair SQL that failed when the user ran it, from the engine's message.
-   * Checked the same way generated SQL is — compiled, not run — and given one
-   * more try if the fix does not compile either.
+   * Explain, in two or three sentences, why a query failed. Uses the engine's
+   * real error and the schema, so it can point at the column that does exist.
    */
-  async fixSql(
-    sql: string,
-    error: string,
-    validate?: (sql: string) => Promise<string | null>,
-  ): Promise<string> {
-    const settings = getSettings();
-    const config = settings.configs[settings.activeProvider];
-    const modelName = config.modelName || defaultModelFor(settings.activeProvider);
-    const schema = currentSchema ? withoutSampleValues(currentSchema) : null;
-    let messages = buildFixMessages(sql, error, schema);
-    const maxAttempts = validate ? 2 : 1;
+  async explainError(sql: string, error: string): Promise<string> {
+    const text = await complete(buildExplainErrorMessages(sql, error, currentSchema), EXPLAIN_TOKENS, 0.2);
+    if (!text.trim()) throw new Error('The model returned an empty explanation.');
+    return text.trim();
+  },
+  /**
+   * A corrected version of a query that failed, keeping its intent. When
+   * `validate` is supplied the fix is compiled against the live database and,
+   * if it still fails, sent back once with the new error, as Text to SQL does.
+   */
+  async fixQuery(sql: string, error: string, validate?: (sql: string) => Promise<string | null>): Promise<string> {
+    let messages = buildFixQueryMessages(sql, error, currentSchema);
+    const attempts = validate ? 2 : 1;
     let fixed = '';
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const response = await client.chat.completions.create({
-        messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        temperature: 0,
-        max_tokens: REPLY_TOKENS,
-        model: modelName,
-      });
-      fixed = stripSqlFences(response.choices[0].message.content || '');
-      if (!validate || attempt === maxAttempts - 1) return fixed;
-      const problem = await validate(fixed);
-      if (!problem) return fixed;
-      messages = buildRepairMessages(messages, fixed, problem);
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      fixed = stripSqlFences(await complete(messages, REPLY_TOKENS, 0));
+      if (!fixed) throw new Error('The model returned no SQL.');
+      if (!validate || attempt === attempts - 1) break;
+      const failure = await validate(fixed);
+      if (!failure) break;
+      messages = buildRepairMessages(messages, fixed, failure);
     }
     return fixed;
   },
   /**
-   * Explain a query in plain language. `plan` is plain EXPLAIN output, which
-   * describes the statement without running it.
+   * Explain a query that has not failed: what it does and what to watch out
+   * for. `plan` is plain EXPLAIN output, which describes the statement
+   * without running it. Sample values are left out; the shape is enough.
    */
-  async explainSql(sql: string, plan: string | null): Promise<string> {
-    const settings = getSettings();
-    const config = settings.configs[settings.activeProvider];
-    const modelName = config.modelName || defaultModelFor(settings.activeProvider);
+  async explainQuery(sql: string, plan: string | null): Promise<string> {
     const schema = currentSchema ? withoutSampleValues(currentSchema) : null;
-    const response = await client.chat.completions.create({
-      messages: buildExplainMessages(sql, plan, schema) as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-      temperature: 0.2,
-      max_tokens: 700,
-      model: modelName,
-    });
-    return (response.choices[0].message.content || '').trim();
+    const text = await complete(buildExplainQueryMessages(sql, plan, schema), 700, 0.2);
+    if (!text.trim()) throw new Error('The model returned an empty explanation.');
+    return text.trim();
   }
-}; 
+};
