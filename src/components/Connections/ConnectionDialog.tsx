@@ -154,7 +154,7 @@ export function ColorPicker({ value, onChange }: { value: string | null; onChang
 export function ProductionToggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label className={cn('flex items-start gap-3 rounded-lg border p-3 cursor-pointer transition-colors', checked && 'border-destructive/60 bg-destructive/5')}>
-      <Switch checked={checked} onCheckedChange={onChange} className="mt-0.5" />
+      <Switch checked={checked} onCheckedChange={onChange} className="mt-0.5" aria-label="Production" />
       <div className="grid gap-0.5">
         <span className="flex items-center gap-1.5 text-sm font-medium">
           <ShieldAlert className={cn('h-3.5 w-3.5', checked ? 'text-destructive' : 'text-muted-foreground')} />

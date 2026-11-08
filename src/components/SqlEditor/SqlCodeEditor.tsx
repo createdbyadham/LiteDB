@@ -19,13 +19,14 @@ import {
   rectangularSelection,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { PostgreSQL, SQLite, sql, type SQLNamespace } from '@codemirror/lang-sql';
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
+import { PostgreSQL, SQLDialect, SQLite, sql, type SQLNamespace } from '@codemirror/lang-sql';
+import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap, type CompletionSource } from '@codemirror/autocomplete';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
-import { HighlightStyle, bracketMatching, indentOnInput, syntaxHighlighting } from '@codemirror/language';
+import { HighlightStyle, bracketMatching, indentOnInput, syntaxHighlighting, syntaxTree } from '@codemirror/language';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
 import { tags as t } from '@lezer/highlight';
 import type { SqlDialect } from '@/lib/schemaTypes';
+import { columnOptions, type ColumnCatalog } from '@/lib/sqlComplete';
 
 export interface SqlCodeEditorHandle {
   focus(): void;
@@ -47,6 +48,8 @@ export interface SqlCodeEditorProps {
   dialect: SqlDialect;
   schema: SQLNamespace;
   defaultSchema?: string;
+  /** Tables and columns for bare column completion; see sqlComplete. */
+  catalog?: ColumnCatalog | null;
   placeholder?: string;
   onRunStatement: () => void;
   onRunAll: () => void;
@@ -119,17 +122,60 @@ const theme = EditorView.theme({
   '.cm-diagnostic-error': { borderLeftColor: 'hsl(var(--destructive))' },
 });
 
-function languageFor(dialect: SqlDialect, schema: SQLNamespace, defaultSchema?: string): Extension {
-  return sql({
-    dialect: dialect === 'postgres' ? PostgreSQL : SQLite,
-    schema,
-    defaultSchema,
-    upperCaseKeywords: true,
-  });
+/**
+ * SQLite as lang-sql defines it, except for how completed names are quoted.
+ * Its stock dialect quotes any name with a capital letter in backticks, so
+ * `Suppliers` went in as `` `Suppliers` ``. SQLite names are case-insensitive,
+ * so they go in as written, and a name that does need quoting (a space, say)
+ * gets standard double quotes. Backticks still read as quotes when typed.
+ */
+const SQLiteDialect = SQLDialect.define({ ...SQLite.spec, identifierQuotes: '"`', caseInsensitiveIdentifiers: true });
+
+/**
+ * Bare column names from the tables the statement reads, next to lang-sql's
+ * own completions (keywords, tables, and columns after `table.`).
+ */
+function columnSource(catalog: () => ColumnCatalog | null): CompletionSource {
+  return (context) => {
+    const current = catalog();
+    if (!current || current.tables.length === 0) return null;
+    const word = context.matchBefore(/[A-Za-z_][A-Za-z0-9_$]*/);
+    if (!word && !context.explicit) return null;
+    const from = word ? word.from : context.pos;
+    // After `orders.` lang-sql completes the column; inside quotes a name is being spelled out.
+    const before = context.state.sliceDoc(Math.max(0, from - 1), from);
+    if (before === '.' || before === '"' || before === '`') return null;
+    let node = syntaxTree(context.state).resolveInner(context.pos, -1);
+    while (node.parent && node.name !== 'Statement') node = node.parent;
+    const start = node.name === 'Statement' ? node.from : 0;
+    const end = node.name === 'Statement' ? node.to : context.state.doc.length;
+    const options = columnOptions(current, context.state.sliceDoc(start, end), from - start);
+    if (!options || options.length === 0) return null;
+    return {
+      from,
+      options: options.map((o) => ({
+        label: o.label,
+        ...(o.display ? { displayLabel: o.display } : {}),
+        apply: o.apply,
+        detail: o.detail,
+        boost: o.boost,
+        type: 'property',
+      })),
+      validFor: /^[A-Za-z0-9_$]*$/,
+    };
+  };
+}
+
+function languageFor(dialect: SqlDialect, schema: SQLNamespace, defaultSchema: string | undefined, catalog: () => ColumnCatalog | null): Extension {
+  const lang = dialect === 'postgres' ? PostgreSQL : SQLiteDialect;
+  return [
+    sql({ dialect: lang, schema, defaultSchema, upperCaseKeywords: true }),
+    lang.language.data.of({ autocomplete: columnSource(catalog) }),
+  ];
 }
 
 export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>(function SqlCodeEditor(
-  { docKey, value, onChange, dialect, schema, defaultSchema, placeholder, onRunStatement, onRunAll, onAi, onExplain },
+  { docKey, value, onChange, dialect, schema, defaultSchema, catalog = null, placeholder, onRunStatement, onRunAll, onAi, onExplain },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -150,6 +196,10 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
   handlers.current = { onChange, onRunStatement, onRunAll, onAi, onExplain };
   const languageConfig = useRef({ dialect, schema, defaultSchema, placeholder });
   languageConfig.current = { dialect, schema, defaultSchema, placeholder };
+  // Read by the column completion source on each request, so new columns need no reconfigure.
+  const catalogRef = useRef(catalog);
+  catalogRef.current = catalog;
+  const getCatalog = useRef(() => catalogRef.current).current;
 
   const createState = (doc: string): EditorState => {
     const config = languageConfig.current;
@@ -174,7 +224,7 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
         highlightSelectionMatches(),
         lintGutter(),
         theme,
-        languageRef.current.of(languageFor(config.dialect, config.schema, config.defaultSchema)),
+        languageRef.current.of(languageFor(config.dialect, config.schema, config.defaultSchema, getCatalog)),
         placeholderRef.current.of(placeholderExt(config.placeholder ?? '')),
         // Ahead of the defaults, so Mod-Enter runs instead of inserting a line.
         Prec.highest(
@@ -227,7 +277,7 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
     const saved = states.current.get(docKey);
     view.setState(saved && saved.doc.toString() === value ? saved : createState(value));
     // Settings may have changed while the tab was away.
-    view.dispatch({ effects: languageRef.current.reconfigure(languageFor(dialect, schema, defaultSchema)) });
+    view.dispatch({ effects: languageRef.current.reconfigure(languageFor(dialect, schema, defaultSchema, getCatalog)) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey]);
 
@@ -243,8 +293,8 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
   }, [value]);
 
   useEffect(() => {
-    viewRef.current?.dispatch({ effects: languageRef.current.reconfigure(languageFor(dialect, schema, defaultSchema)) });
-  }, [dialect, schema, defaultSchema]);
+    viewRef.current?.dispatch({ effects: languageRef.current.reconfigure(languageFor(dialect, schema, defaultSchema, getCatalog)) });
+  }, [dialect, schema, defaultSchema, getCatalog]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: placeholderRef.current.reconfigure(placeholderExt(placeholder ?? '')) });
