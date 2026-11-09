@@ -17,7 +17,21 @@ import { INLINE_MAX_TOKENS, INLINE_STOP, cleanSuggestion, fimPrompt, inlineChatM
 
 export type { ColumnSchema, DatabaseSchema, SqlDialect, TableSchema } from './schemaTypes';
 
-export const AI_PROVIDERS = ['openai', 'openai-compatible', 'ollama'] as const;
+export const AI_PROVIDERS = ['openai', 'anthropic', 'gemini', 'openai-compatible', 'ollama'] as const;
+
+/**
+ * Hosted providers with a fixed address. Anthropic and Google both serve the
+ * OpenAI chat API, so they share the client below and only need their key.
+ */
+const HOSTED_ENDPOINTS: Partial<Record<AIProvider, string>> = {
+  anthropic: 'https://api.anthropic.com/v1/',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+};
+
+/** Providers whose address the user types: everything not hosted. */
+export function needsEndpoint(provider: AIProvider): boolean {
+  return provider === 'openai-compatible' || provider === 'ollama';
+}
 export type AIProvider = (typeof AI_PROVIDERS)[number];
 
 export type AIProviderConfig = {
@@ -58,6 +72,16 @@ export const defaultSettings: AISettings = {
       modelName: 'gpt-4o-mini',
       inlineModelName: ''
     },
+    anthropic: {
+      apiKey: '',
+      modelName: 'claude-sonnet-5-5',
+      inlineModelName: 'claude-haiku-5-5'
+    },
+    gemini: {
+      apiKey: '',
+      modelName: 'gemini-2.5-flash',
+      inlineModelName: ''
+    },
     'openai-compatible': {
       apiKey: '',
       endpoint: '',
@@ -90,7 +114,7 @@ type StoredAISettings = {
 
 /** GitHub Models / Azure used to be first-class; they are just OpenAI-compatible endpoints now. */
 function coerceProvider(value: unknown): AIProvider {
-  if (value === 'openai' || value === 'ollama' || value === 'openai-compatible') return value;
+  if (typeof value === 'string' && (AI_PROVIDERS as readonly string[]).includes(value)) return value as AIProvider;
   if (value === 'github' || value === 'azure') return 'openai-compatible';
   return defaultSettings.activeProvider;
 }
@@ -147,6 +171,14 @@ function readStoredSettings(): StoredAISettings | null {
       endpoint: raw.openai?.endpoint,
       modelName: raw.openai?.modelName,
       inlineModelName: raw.openai?.inlineModelName,
+    },
+    anthropic: {
+      modelName: raw.anthropic?.modelName,
+      inlineModelName: raw.anthropic?.inlineModelName,
+    },
+    gemini: {
+      modelName: raw.gemini?.modelName,
+      inlineModelName: raw.gemini?.inlineModelName,
     },
     'openai-compatible': {
       endpoint: compatible?.endpoint,
@@ -238,13 +270,10 @@ function getSettings(): AISettings {
 function clientFor(provider: AIProvider, config: AIProviderConfig) {
   // The OpenAI SDK refuses an empty key even when the server ignores it
   // (Ollama, LM Studio, and some compatible proxies).
-  const apiKey =
-    config.apiKey ||
-    (provider === 'openai' ? '' : 'local');
+  const apiKey = config.apiKey || (needsEndpoint(provider) ? 'local' : '');
 
-  const baseURL =
-    provider === 'openai' ? undefined : config.endpoint?.trim() || undefined;
-  if (provider !== 'openai' && !baseURL) {
+  const baseURL = needsEndpoint(provider) ? config.endpoint?.trim() || undefined : HOSTED_ENDPOINTS[provider];
+  if (needsEndpoint(provider) && !baseURL) {
     throw new Error('Set an endpoint for this provider.');
   }
 
@@ -306,6 +335,10 @@ function defaultModelFor(provider: AIProvider): string {
   switch (provider) {
     case 'ollama':
       return 'llama3';
+    case 'anthropic':
+      return 'claude-sonnet-5-5';
+    case 'gemini':
+      return 'gemini-2.5-flash';
     default:
       return 'gpt-4o-mini';
   }
@@ -432,7 +465,8 @@ async function complete(
     {
       messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
       temperature,
-      top_p: 1.0,
+      // Claude refuses temperature and top_p together.
+      ...(settings.activeProvider === 'anthropic' ? {} : { top_p: 1.0 }),
       max_tokens: maxTokens,
       model,
       ...(options.stop ? { stop: options.stop } : {}),

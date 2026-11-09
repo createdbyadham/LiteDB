@@ -4,7 +4,7 @@ import type { AIProvider } from './aiService';
 const SERVICE = 'LiteDB';
 const LEGACY_KEY_MIGRATION = 'litedb.migrated-legacy-ai-keys';
 
-const PROVIDERS: AIProvider[] = ['openai', 'openai-compatible', 'ollama'];
+const PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'gemini', 'openai-compatible', 'ollama'];
 
 function accountForProvider(provider: AIProvider): string {
   return `ai-api-key-${provider}`;

@@ -15,7 +15,7 @@ import { Settings2, Copy, Download, ChevronDown, RefreshCw, Check, X, Loader2 } 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useToast } from "@/hooks/use-toast"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./dropdown-menu"
-import { aiService, AIProvider, AISettings, defaultSettings, loadAISettingsAsync, saveNonSecretSettings } from "@/lib/aiService"
+import { aiService, AIProvider, AISettings, defaultSettings, loadAISettingsAsync, needsEndpoint, saveNonSecretSettings } from "@/lib/aiService"
 import { storeAllApiKeys } from "@/lib/secretStorage"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs"
 import { AgentsPanel } from "./agents-panel"
@@ -300,6 +300,8 @@ export function SettingsDialog() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                  <SelectItem value="gemini">Google Gemini</SelectItem>
                   <SelectItem value="openai-compatible">OpenAI compatible</SelectItem>
                   <SelectItem value="ollama">Ollama (local)</SelectItem>
                 </SelectContent>
@@ -321,7 +323,7 @@ export function SettingsDialog() {
               </div>
             )}
 
-            {settings.activeProvider !== 'openai' && (
+            {needsEndpoint(settings.activeProvider) && (
               <div className="space-y-1.5">
                 <Label htmlFor="endpoint">Endpoint</Label>
                 <Input
@@ -355,7 +357,11 @@ export function SettingsDialog() {
                       ? 'llama3'
                       : settings.activeProvider === 'openai'
                         ? 'gpt-4o-mini'
-                        : 'model id'
+                        : settings.activeProvider === 'anthropic'
+                          ? 'claude-sonnet-5-5'
+                          : settings.activeProvider === 'gemini'
+                            ? 'gemini-2.5-flash'
+                            : 'model id'
                   }
                 />
                 {/* modal={false}: a modal dropdown + body { overflow: hidden }

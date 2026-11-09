@@ -26,8 +26,6 @@ order changes: if something here matters to you, say so there.
 ## Later
 
 - sqlite-vec, so vector search works on SQLite (today it needs pgvector).
-- First-class Claude and Gemini providers (today: OpenAI, OpenAI-compatible
-  and Ollama).
 - DuckDB: drop in a CSV or Parquet file and ask questions in plain English.
 - MySQL.
 

@@ -53,7 +53,7 @@ The badge above is the GitHub release for this version. The installers are not c
   - **Auto-Layout**: Automatically arranges tables to minimize crossing lines.
   - **Export**: Save your schema diagram as **PNG or SVG** for documentation.
 - **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries.
-  - Settings → **AI**: OpenAI, OpenAI-compatible (LM Studio, vLLM, GitHub Models, Azure, …), or Ollama. Default is Ollama.
+  - Settings → **AI**: OpenAI, Anthropic (Claude), Google Gemini, OpenAI-compatible (LM Studio, vLLM, GitHub Models, Azure, …), or Ollama. Default is Ollama.
   - Same prompt the eval harness measures: schema + sample values (toggle), retrieved few-shot (K=3), one compile-repair pass.
 - **MCP**: Settings → **Agents**, or the status-bar **MCP** chip. Claude Desktop / Claude Code / Cursor / OpenCode / VS Code follow the open connection, [Connect an agent](docs/connect-an-agent.md).
 - **Write Safety**: Generated SQL is classified before it runs.
@@ -149,7 +149,7 @@ LiteDB integrates advanced vector search capabilities powered by **pgvector** an
 
 ## AI Architecture (Text-to-SQL)
 
-Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline** to ensure high-accuracy SQL generation. Settings → **AI** is the live matrix: **OpenAI**, **OpenAI compatible**, **Ollama (local)**. GitHub Models / Azure used to be separate rows; they are OpenAI-compatible endpoints now.
+Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline** to ensure high-accuracy SQL generation. Settings → **AI** is the live matrix: **OpenAI**, **Anthropic (Claude)**, **Google Gemini**, **OpenAI compatible**, **Ollama (local)**. GitHub Models / Azure used to be separate rows; they are OpenAI-compatible endpoints now.
 
 1.  **Schema Extraction**: On connection, the app introspects tables, foreign keys, and types.
 2.  **Dynamic Context Injection**: That metadata goes into the system prompt, dialect-specific (Postgres vs SQLite).

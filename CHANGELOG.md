@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Claude and Gemini** as providers in Settings → AI: paste an Anthropic or Google AI Studio key and pick a model, no endpoint to type. Keys go to the OS keychain like the others. Defaults: Claude Sonnet 5.5 (Haiku 5.5 for inline suggestions) and Gemini 2.5 Flash.
+
 ## [2.5.0] - 2026-11-09
 
 ### Added
