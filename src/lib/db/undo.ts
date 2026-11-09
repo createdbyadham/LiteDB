@@ -49,6 +49,8 @@ export async function runUndo(
         ok: true,
         rows: plan.restore,
     });
+    // The table on screen reloads, as it does after any write the grid did not make.
+    window.dispatchEvent(new CustomEvent('dbExternalChange', { detail: { id: conn.id } }));
     const fs = await import('@tauri-apps/plugin-fs');
     await fs.writeTextFile(`${AUDIT_DIR}/${link}`, serializeUndo({ ...record, undoneAt: new Date().toISOString() }), {
         baseDir: fs.BaseDirectory.AppLocalData,

@@ -50,6 +50,12 @@ const DECISION_LABEL: Record<AuditDecision, string> = {
 
 const rows = (n: number) => `${n.toLocaleString()} row${n === 1 ? '' : 's'}`;
 
+/**
+ * `sqlite:C:\Users\me\data\shop.db` as `sqlite:shop.db`. Agents log the
+ * connection's full id, and a whole path pushed Undo out of the panel.
+ */
+const shortConnection = (connection: string) => connection.replace(/^(sqlite:).*[\\/]/, '$1');
+
 /** What Undo will do, in the words of the write it reverses. */
 function undoSummary(record: UndoRecord, plan: UndoPlan): string {
     const what =
@@ -224,7 +230,9 @@ export function AuditLogView() {
                                 </pre>
 
                                 <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
-                                    <span>{entry.connection}</span>
+                                    <span className="min-w-0 max-w-[14rem] truncate" title={entry.connection}>
+                                        {shortConnection(entry.connection)}
+                                    </span>
                                     {entry.actualRows != null ? (
                                         <span
                                             className={
