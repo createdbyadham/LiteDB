@@ -2,7 +2,22 @@
 # Writes only the Apple credentials that are actually set into GITHUB_ENV.
 # An empty APPLE_ID still counts as "set" to the bundler, and it then skips
 # the API-key path and tries to notarize with a blank password.
+#
+# With none of them set the build goes on unsigned, with a warning: there are
+# no Developer ID keys yet. With some but not all, it stops, because that is a
+# mistake rather than a choice.
 set -euo pipefail
+
+names=(APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD
+  APPLE_TEAM_ID APPLE_API_KEY APPLE_API_ISSUER APPLE_API_PRIVATE_KEY)
+any=0
+for name in "${names[@]}"; do
+  if [ -n "${!name:-}" ]; then any=1; fi
+done
+if [ "$any" -eq 0 ]; then
+  echo "::warning::No Apple signing secrets: this macOS build is not signed or notarized, and Gatekeeper will call it damaged until it is opened with xattr -cr."
+  exit 0
+fi
 
 missing=()
 require() {
@@ -40,7 +55,7 @@ if [ "$apple_id_ready" -eq 0 ] && [ "$api_key_ready" -eq 0 ]; then
 fi
 
 if [ ${#missing[@]} -gt 0 ]; then
-  echo "::error::Missing ${missing[*]}. macOS builds are Developer ID signed and notarized; an unsigned build is the one Gatekeeper calls damaged."
+  echo "::error::Some Apple signing secrets are set but not all: missing ${missing[*]}. Set them all to sign and notarize, or remove them all to build unsigned."
   exit 1
 fi
 

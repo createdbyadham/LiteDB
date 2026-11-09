@@ -33,11 +33,7 @@ yay -S litedb-bin
 flatpak install flathub com.adhamehab.litedb
 ```
 
-The badge above is the GitHub release for this version. macOS builds are Developer ID signed and notarized. Windows builds are Authenticode-signed.
-
-## Code signing policy
-
-Free code signing provided by SignPath.io, certificate by SignPath Foundation
+The badge above is the GitHub release for this version. The installers are not code-signed yet. On Windows, SmartScreen may warn: choose **More info**, then **Run anyway**. On macOS, if LiteDB is called damaged, run `xattr -cr /Applications/LiteDB.app` once and open it again.
 
 ## Features
 

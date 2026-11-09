@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Attach the Authenticode-signed installers to the draft release and point
-# latest.json at the signed NSIS setup. The minisign signature was produced
-# after signing, so it matches the file the updater will download.
+# Attach the Windows installers to the draft release and point latest.json at
+# the NSIS setup. When SignPath is set up they are Authenticode-signed and the
+# minisign signature was made after that, so it matches the file the updater
+# downloads; without it they are the build's own files and signature.
 set -euo pipefail
 
-exe=$(find signed -type f -name '*-setup.exe' -print -quit)
+exe=$(find installers -type f -name '*-setup.exe' -print -quit)
 sig="${exe}.sig"
 if [ -z "$exe" ] || [ ! -f "$sig" ]; then
-  echo "::error::Signed NSIS installer or its updater signature is missing"
+  echo "::error::NSIS installer or its updater signature is missing"
   exit 1
 fi
 
@@ -31,6 +32,6 @@ PY
 files=("$exe" "$sig" latest.json)
 while IFS= read -r msi; do
   files+=("$msi")
-done < <(find signed -type f -name '*.msi' | sort)
+done < <(find installers -type f -name '*.msi' | sort)
 
 gh release upload "$TAG" "${files[@]}" --clobber --repo "$REPO"

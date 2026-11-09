@@ -55,7 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Release assets are published on `v<version>`, the tag the README and changelog link to.
-- macOS installers are Developer ID signed and notarized. Windows installers are Authenticode-signed, so the download is not an unsigned file Gatekeeper or SmartScreen rejects.
 - After an update installs on macOS or Linux, the app restarts into the new version. The restart used to fail without a word, and the old version kept running until you quit it.
 - On PostgreSQL, a query that returns no rows names its columns in one round trip to the server instead of three, which shows on a remote database.
 - Saved passwords, SSH secrets and AI provider keys are now kept in the OS keychain: Windows Credential Manager, the macOS Keychain, or on Linux a Secret Service such as GNOME Keyring or KWallet. Since 2.2.0 they had been held in memory only and never read back, so AI keys were gone after a restart and a saved connection asked for its password every time.

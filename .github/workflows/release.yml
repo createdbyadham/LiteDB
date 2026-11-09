@@ -6,8 +6,9 @@ name: Publish Release
 # installers and leaves the linked tag empty.
 #
 # Secrets:
-#   TAURI_SIGNING_PRIVATE_KEY
+#   TAURI_SIGNING_PRIVATE_KEY          required: the updater checks every download with it
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# Optional, all or none per platform; without them the installers are unsigned:
 #   APPLE_CERTIFICATE                  base64 .p12 of the Developer ID Application cert
 #   APPLE_CERTIFICATE_PASSWORD
 #   APPLE_SIGNING_IDENTITY             Developer ID Application: Name (TEAMID)
@@ -111,11 +112,9 @@ jobs:
           tagName: v__VERSION__
           releaseName: LiteDB v__VERSION__
           releaseBody: |
-            ## Code signing policy
-
-            Free code signing provided by SignPath.io, certificate by SignPath Foundation
-
             Installers for this version are attached to this tag. The README download badge and the changelog use the same tag.
+
+            The installers are not code-signed yet. On Windows, SmartScreen may warn: choose More info, then Run anyway. On macOS, if LiteDB is called damaged, run `xattr -cr /Applications/LiteDB.app` once and open it again.
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
@@ -143,7 +142,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Require signing secrets
+      # The updater key is required. SignPath is all or nothing: both secrets
+      # sign the installers, neither builds them unsigned with a warning.
+      - name: Check signing secrets
+        id: signing
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
           SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
@@ -151,12 +153,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          missing=()
-          for name in SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID TAURI_SIGNING_PRIVATE_KEY; do
-            if [ -z "${!name}" ]; then missing+=("$name"); fi
-          done
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::Missing ${missing[*]}. An unsigned Windows installer is what SmartScreen warns on."
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set."
+            exit 1
+          fi
+          if [ -n "$SIGNPATH_API_TOKEN" ] && [ -n "$SIGNPATH_ORGANIZATION_ID" ]; then
+            echo "authenticode=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$SIGNPATH_API_TOKEN$SIGNPATH_ORGANIZATION_ID" ]; then
+            echo "::warning::No SignPath secrets: the Windows installers are not Authenticode-signed, and SmartScreen will warn on them."
+            echo "authenticode=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Set both SIGNPATH_API_TOKEN and SIGNPATH_ORGANIZATION_ID, or neither."
             exit 1
           fi
 
@@ -178,6 +185,7 @@ jobs:
 
       - name: Upload unsigned installers
         id: unsigned
+        if: steps.signing.outputs.authenticode == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: windows-unsigned
@@ -185,6 +193,7 @@ jobs:
           if-no-files-found: error
 
       - name: Authenticode sign
+        if: steps.signing.outputs.authenticode == 'true'
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -194,17 +203,18 @@ jobs:
           github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
           wait-for-completion: true
           wait-for-completion-timeout-in-seconds: '3600'
-          output-artifact-directory: ${{ runner.temp }}/signed
+          output-artifact-directory: ${{ runner.temp }}/installers
 
       # Authenticode changes the file, so the minisign signature from the
       # build no longer matches. Sign the Authenticode-signed installer.
       - name: Sign the updater artifact
+        if: steps.signing.outputs.authenticode == 'true'
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          $exes = Get-ChildItem -Path "$env:RUNNER_TEMP/signed" -Recurse -Filter '*-setup.exe'
+          $exes = Get-ChildItem -Path "$env:RUNNER_TEMP/installers" -Recurse -Filter '*-setup.exe'
           if ($exes.Count -lt 1) {
             throw 'SignPath returned no NSIS installer. The artifact configuration must sign *.exe and *.msi.'
           }
@@ -212,15 +222,29 @@ jobs:
             npx tauri signer sign "$($exe.FullName)"
           }
 
-      - name: Upload signed installers
+      # Unsigned, the installers and the build's own updater signature are the
+      # files to publish: nothing changed them after the signature was made.
+      - name: Keep the unsigned installers
+        if: steps.signing.outputs.authenticode != 'true'
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'installers'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item windows-bundle/* $out/
+          Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe.sig $out/
+          if (-not (Get-ChildItem $out -Filter *-setup.exe.sig)) {
+            throw 'The build made no updater signature for the NSIS installer'
+          }
+
+      - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
-          name: windows-signed
-          path: ${{ runner.temp }}/signed
+          name: windows-installers
+          path: ${{ runner.temp }}/installers
           if-no-files-found: error
 
   publish-windows:
-    name: Attach signed Windows installers
+    name: Attach Windows installers
     needs: [publish, build-windows]
     runs-on: ubuntu-latest
     steps:
@@ -228,8 +252,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: windows-signed
-          path: signed
+          name: windows-installers
+          path: installers
 
       - name: Upload and point the updater at the signed installer
         env:
