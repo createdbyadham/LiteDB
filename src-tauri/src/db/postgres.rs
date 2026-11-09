@@ -12,7 +12,7 @@ use sqlx::postgres::{
     PgConnectOptions, PgConnection, PgDatabaseError, PgErrorPosition, PgPool, PgPoolOptions, PgRow,
     PgSslMode,
 };
-use sqlx::{Column, Connection as _, Either, Executor, Row, TypeInfo, ValueRef};
+use sqlx::{Column, Connection as _, Either, Executor, Row, Statement as _, TypeInfo, ValueRef};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -391,13 +391,24 @@ fn looks_like_query(sql: &str) -> bool {
         .any(|kw| head.starts_with(kw))
 }
 
+/// Whether a string might hold more than one statement.
+///
+/// Postgres needs a semicolon between two statements, so a string with none,
+/// apart from a trailing one, holds a single statement. One with a semicolon
+/// anywhere else, even inside a string literal or a comment, is checked by the
+/// server instead.
+fn may_hold_several(sql: &str) -> bool {
+    sql.trim_end().trim_end_matches(';').contains(';')
+}
+
 /// A run that changes nothing: in a READ ONLY transaction, always rolled back.
 ///
 /// Each string must be one statement. The simple query protocol runs several,
 /// and a COMMIT among them would end the READ ONLY transaction with the rest
-/// still to come. Parsing each string as a prepared statement first refuses
-/// that before anything runs; the run itself stays on the simple protocol,
-/// which sends values as the text the grid shows.
+/// still to come. A string that might hold several is parsed as a prepared
+/// statement first, which the server refuses for more than one, before
+/// anything runs; the run itself stays on the simple protocol, which sends
+/// values as the text the grid shows.
 ///
 /// A single statement cannot escape: a COMMIT ends a transaction that changed
 /// nothing, and a SET is undone by the rollback.
@@ -411,7 +422,11 @@ fn run_read_only<'a>(
 ) -> BoxFuture<'a, RunResponse> {
     Box::pin(async move {
         for (index, sql) in statements.iter().enumerate() {
-            if let Err(e) = (&mut *conn).describe(sql.as_str()).await {
+            // Most reads have no semicolon, and skip the round trip to the server.
+            if !may_hold_several(sql) {
+                continue;
+            }
+            if let Err(e) = (&mut *conn).prepare(sql.as_str()).await {
                 let mut response = RunResponse::default();
                 response.errors.push(run_error(index, &e, cancelled));
                 return response;
@@ -526,17 +541,19 @@ fn run_statements<'a>(
             }
 
             // An empty result carries no row to read column names from.
+            // Prepared rather than described: describe also asks the catalog
+            // which columns can be null, two more round trips for nothing used.
             if failure.is_none()
                 && response.results.len() == results_before + 1
                 && looks_like_query(sql)
             {
                 let last = response.results.last_mut().expect("one result");
                 if !last.returns_rows {
-                    if let Ok(describe) = (&mut *conn).describe(sql.as_str()).await {
-                        if !describe.columns().is_empty() {
+                    if let Ok(prepared) = (&mut *conn).prepare(sql.as_str()).await {
+                        if !prepared.columns().is_empty() {
                             last.returns_rows = true;
                             last.rows_affected = 0;
-                            for col in describe.columns() {
+                            for col in prepared.columns() {
                                 last.columns.push(col.name().to_string());
                                 last.column_types.push(col.type_info().name().to_string());
                             }
@@ -643,6 +660,17 @@ mod tests {
         assert!(looks_like_query("  select 1"));
         assert!(looks_like_query("WITH x AS (SELECT 1) SELECT * FROM x"));
         assert!(!looks_like_query("DELETE FROM t"));
+    }
+
+    #[test]
+    fn only_a_string_with_a_semicolon_is_checked_for_several_statements() {
+        assert!(!may_hold_several("SELECT 1"));
+        assert!(!may_hold_several("SELECT 1;"));
+        assert!(!may_hold_several("  SELECT 1 ; \n"));
+        assert!(may_hold_several("SELECT 1; DELETE FROM t"));
+        assert!(may_hold_several("COMMIT; DELETE FROM t"));
+        // A semicolon in a literal costs a check, never a miss.
+        assert!(may_hold_several("SELECT ';'"));
     }
 
     /// Skipped unless EVAL_POSTGRES_URL points at a throwaway database.

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - After an update installs on macOS or Linux, the app restarts into the new version. The restart used to fail without a word, and the old version kept running until you quit it.
+- On PostgreSQL, a query that returns no rows names its columns in one round trip to the server instead of three, which shows on a remote database.
 
 ### Security
 
