@@ -29,11 +29,11 @@ import {
 import { mergeLiteDbMcp } from '../../src/lib/mcpAgentConfig';
 import { CLAUDE_STORE_PACKAGE, windowsClaudeConfigPaths } from '../../src/lib/claudeDesktopMcp';
 import * as approvals from './approvals';
-import { installAudit } from './audit';
+import { installFileAudit as installAudit } from './auditFile';
 import { ConfigError, IN_MEMORY_MESSAGE, NO_DATABASE_MESSAGE, defaultAuditPath, loadConfig, type ServerConfig } from './config';
 import { openDatabase, postgresConnectFailure, ReadOnlyServerError, type Database } from './db';
 import { renderTable } from './render';
-import { LiveSession } from './session';
+import { LiveSession, nodeToolContext } from './session';
 import { executeApprovedInput, runApproved, runQuery, type ToolContext } from './tools/query';
 import { describeTable, listTables } from './tools/schema';
 
@@ -379,13 +379,8 @@ async function main(): Promise<void> {
     let harness = buildFixture();
     let config = configFor(harness, 'read-only');
     let db: Database = await openDatabase(config);
-    let ctx: ToolContext = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'read-only',
-        path: harness.auditPath,
-    });
+    let ctx: ToolContext = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const read = await runQuery(ctx, 'SELECT id, status FROM orders ORDER BY id');
@@ -449,13 +444,8 @@ async function main(): Promise<void> {
     harness = buildFixture();
     config = configFor(harness, 'guarded');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'guarded',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const before = countRows(harness, 'orders');
@@ -608,13 +598,8 @@ async function main(): Promise<void> {
     harness = buildFixture();
     config = { ...configFor(harness, 'guarded'), approvalsDir: join(harness.dir, 'approvals'), approvalWaitMs: 300 };
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'guarded',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const dir = join(harness.dir, 'approvals');
@@ -689,13 +674,8 @@ async function main(): Promise<void> {
     harness = buildFixture();
     config = configFor(harness, 'guarded');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'guarded',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const tokenIn = (text: string) => /token: ([0-9a-f-]{36})/.exec(text)?.[1] ?? '';
@@ -776,13 +756,8 @@ async function main(): Promise<void> {
     }
     config = configFor(harness, 'guarded');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'guarded',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const mtimeBefore = statSync(harness.dbPath).mtimeMs;
@@ -815,13 +790,8 @@ async function main(): Promise<void> {
     }
     config = configFor(harness, 'guarded');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'guarded',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
     try {
         const holder = new DatabaseSync(harness.dbPath);
         holder.exec('BEGIN');
@@ -941,13 +911,8 @@ async function main(): Promise<void> {
     harness = buildFixture();
     config = configFor(harness, 'unrestricted');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'unrestricted',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const before = countRows(harness, 'orders');
@@ -1043,13 +1008,8 @@ async function main(): Promise<void> {
     harness = buildFixture();
     config = configFor(harness, 'read-only');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'read-only',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const tables = await listTables(ctx);

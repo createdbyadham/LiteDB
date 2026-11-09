@@ -20,7 +20,6 @@
 //     the row count that justified it goes stale. After TTL_MS the token is
 //     gone and the preview has to be taken again.
 
-import { randomUUID } from 'node:crypto';
 import type { ImpactEstimate } from '../../src/lib/impactPreview';
 import type { GateDecision } from '../../src/lib/sqlPolicy';
 
@@ -82,7 +81,7 @@ export function create(
     }
 
     const approval: PendingApproval = {
-        token: randomUUID(),
+        token: globalThis.crypto.randomUUID(),
         sql,
         connectionId,
         target,

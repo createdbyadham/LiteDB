@@ -13,8 +13,8 @@
 
 import { attachSampleValues } from '../../../src/lib/schemaSamples';
 import type { DatabaseSchema } from '../../../src/lib/schemaTypes';
-import { record } from '../audit';
-import type { Database } from '../db';
+import { record, type AuditScope } from '../audit';
+import type { Database } from '../catalog';
 import { formatCount } from '../render';
 import type { ToolContext, ToolResult } from './query';
 
@@ -28,8 +28,8 @@ import type { ToolContext, ToolResult } from './query';
 const ROW_COUNT_PROBE = 100_000;
 
 /** Schema reads are logged like everything else the model is shown. */
-async function logRead(sql: string, durationMs: number): Promise<void> {
-    await record({
+async function logRead(scope: AuditScope, sql: string, durationMs: number): Promise<void> {
+    await record(scope, {
         statements: [
             {
                 sql,
@@ -63,7 +63,7 @@ export async function listTables(ctx: ToolContext): Promise<ToolResult> {
     const names = await ctx.db.tableNames();
 
     if (names.length === 0) {
-        await logRead('list_tables', Date.now() - started);
+        await logRead(ctx, 'list_tables', Date.now() - started);
         return { text: 'This database has no tables.' };
     }
 
@@ -85,7 +85,7 @@ export async function listTables(ctx: ToolContext): Promise<ToolResult> {
         );
     }
 
-    await logRead('list_tables', Date.now() - started);
+    await logRead(ctx, 'list_tables', Date.now() - started);
     return {
         text: [
             `${names.length} table(s) in ${ctx.config.connectionId}:`,
@@ -171,7 +171,7 @@ export async function describeTable(
         );
     }
 
-    await logRead(`describe_table(${resolved})`, Date.now() - started);
+    await logRead(ctx, `describe_table(${resolved})`, Date.now() - started);
     return { text: sections.join('\n') };
 }
 

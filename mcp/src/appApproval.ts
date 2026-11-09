@@ -1,8 +1,9 @@
-// Asking the LiteDB window before an agent's write runs.
+// Asking the LiteDB window before an agent's write runs, from the npm server.
 //
-// The protocol and its limits are in src/lib/agentApproval.ts. This is the
-// server's half: write the request, with the row count and a sample of the
-// rows it changes, then wait for the decision file the window writes back.
+// The protocol and its limits are in src/lib/agentApproval.ts, and the request
+// itself is built in approvalRequest.ts. This is the file transport: write the
+// request where the app watches, then wait for the decision file it writes
+// back.
 //
 // One call waits at most `approvalWaitMs`. If the person has not answered by
 // then, execute_approved says so and leaves both the token and the request in
@@ -12,29 +13,21 @@
 import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-    buildDiffQuery,
     decisionFileName,
     parseDecision,
-    REQUEST_VERSION,
     requestFileName,
     serializeRequest,
-    shapeDiff,
     type ApprovalAnswer,
-    type ApprovalDiff,
-    type ApprovalRequest,
 } from '../../src/lib/agentApproval';
-import type { StatementClassification } from '../../src/lib/sqlClassifier';
-import { TTL_MS, type PendingApproval } from './approvals';
-import { currentClient } from './audit';
-import { DEFAULT_APPROVAL_WAIT_MS } from './config';
-import type { Database } from './db';
+import { buildRequest, type AppAnswer, type RequestContext } from './approvalRequest';
+import type { PendingApproval } from './approvals';
+import { DEFAULT_APPROVAL_WAIT_MS } from './toolConfig';
+
+export type { AppAnswer } from './approvalRequest';
 
 const POLL_MS = 200;
 
-export type AppAnswer = ApprovalAnswer | 'waiting';
-
-interface AskContext {
-    db: Database;
+interface AskContext extends RequestContext {
     config: { connectionId: string; approvalsDir?: string | null; approvalWaitMs?: number };
 }
 
@@ -47,60 +40,6 @@ async function present(path: string): Promise<boolean> {
     } catch {
         return false;
     }
-}
-
-/** The rows a statement would change, read-only. A failure is shown, not thrown. */
-async function sampleRows(db: Database, statement: StatementClassification): Promise<ApprovalDiff | null> {
-    const query = buildDiffQuery(statement);
-    if (!query) return null;
-    try {
-        return shapeDiff(query, await db.read(query.sql));
-    } catch (error) {
-        return {
-            mode: query.mode,
-            columns: [],
-            rows: [],
-            truncated: false,
-            error: error instanceof Error ? error.message : String(error),
-        };
-    }
-}
-
-export async function buildRequest(ctx: AskContext, approval: PendingApproval): Promise<ApprovalRequest> {
-    const { decision, estimates } = approval;
-    const statements = [];
-    for (const statement of decision.statements) {
-        const estimate = estimates.find((e) => e.statement === statement);
-        statements.push({
-            sql: statement.sql,
-            kind: statement.kind,
-            verb: statement.verb,
-            table: statement.table,
-            unbounded: statement.unbounded,
-            reason: statement.reason,
-            affectedRows: estimate?.exactRows ?? null,
-            estimatedRows: estimate?.estimatedRows ?? null,
-            tableRows: estimate?.tableRows ?? null,
-            tableRowsCapped: estimate?.tableRowsCapped ?? false,
-            diff: statement.kind === 'read' ? null : await sampleRows(ctx.db, statement),
-        });
-    }
-    return {
-        version: REQUEST_VERSION,
-        token: approval.token,
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(approval.createdAt + TTL_MS).toISOString(),
-        client: currentClient(),
-        connection: ctx.config.connectionId,
-        connectionId: ctx.config.connectionId,
-        dialect: ctx.db.dialect,
-        policy: decision.appliedPolicy,
-        reason: decision.reason,
-        destructive: decision.kind === 'destructive',
-        requireTypedConfirmation: decision.requireTypedConfirmation,
-        confirmPhrase: decision.worst?.table ?? decision.worst?.verb ?? 'RUN',
-        statements,
-    };
 }
 
 async function readAnswer(path: string, token: string): Promise<ApprovalAnswer | null> {

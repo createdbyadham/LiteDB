@@ -27,6 +27,9 @@ import {
 } from '../../src/lib/mcpHandoff';
 import type { SqlDialect } from '../../src/lib/schemaTypes';
 import type { SafetyPolicy } from '../../src/lib/sqlPolicy';
+import { DEFAULT_APPROVAL_WAIT_MS, type ToolConfig } from './toolConfig';
+
+export { DEFAULT_APPROVAL_WAIT_MS } from './toolConfig';
 
 /** Bundle identifier from src-tauri/tauri.conf.json. Keep the two in step. */
 const APP_IDENTIFIER = 'com.adhamehab.litedb';
@@ -47,19 +50,12 @@ export class ConfigError extends Error {
     }
 }
 
-export interface ServerConfig {
-    dialect: SqlDialect;
+/** What the tools need (toolConfig.ts), plus what only this server uses. */
+export interface ServerConfig extends ToolConfig {
     /** Postgres connection string, or an absolute path to a SQLite file. */
     target: string;
-    /** Stable identity, shared with the desktop app. Never holds credentials. */
-    connectionId: string;
-    policy: SafetyPolicy;
-    /** Hard cap on rows returned by one tool call. */
-    maxRows: number;
     /** Where audit entries are appended. */
     auditPath: string;
-    /** Which local embedding model semantic_search uses for text queries. */
-    embeddingModelId: string;
     /** Directory the embedding model is downloaded to and reused from. */
     modelCachePath: string;
     /** Where the target came from. Controls the read-only refusal copy. */
@@ -309,12 +305,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     };
 }
 
-/**
- * How long execute_approved waits on the window before answering "still
- * waiting". Under the 60-second request timeout most MCP clients use, so the
- * call comes back on its own instead of being cut off.
- */
-export const DEFAULT_APPROVAL_WAIT_MS = 50_000;
 
 function parseApprovalWait(raw: string | undefined): number {
     if (raw === undefined || raw.trim() === '') return DEFAULT_APPROVAL_WAIT_MS;
