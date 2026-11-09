@@ -1,31 +1,48 @@
 // Snippets and the Claude Desktop merge shape. Host-specific files stay out
 // of this module so the copy buttons still work in `npm run dev`.
+//
+// The server an agent's app starts is this app: `LiteDB --mcp`, a bridge into
+// the running window (src-tauri/src/mcp.rs). The npm package is the same
+// tools for a machine without LiteDB, and what `npm run dev` shows.
 
 export const MCP_PACKAGE = 'litedb-mcp';
+
+/** How an MCP host starts a stdio server. */
+export interface ServerEntry {
+    command: string;
+    args: string[];
+}
 
 export function isWindowsHost(): boolean {
     if (typeof navigator === 'undefined') return false;
     return navigator.userAgent.includes('Windows') || navigator.platform.startsWith('Win');
 }
 
-/** What Claude Desktop / Cursor / most stdio hosts expect. */
-export function stdioServerEntry(): { command: string; args: string[] } {
+/** The npm package through npx, which needs Node 22.5+ where the host runs. */
+export function npxServerEntry(): ServerEntry {
     if (isWindowsHost()) {
         return { command: 'cmd', args: ['/c', 'npx', '-y', MCP_PACKAGE] };
     }
     return { command: 'npx', args: ['-y', MCP_PACKAGE] };
 }
 
-export function claudeDesktopSnippet(): string {
-    return JSON.stringify({ mcpServers: { litedb: stdioServerEntry() } }, null, 2) + '\n';
+/** This app as the server, as installed here. The npm package outside the app. */
+export async function appServerEntry(): Promise<ServerEntry> {
+    if (!('__TAURI_INTERNALS__' in globalThis)) return npxServerEntry();
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<ServerEntry>('mcp_command');
 }
 
-export function cursorSnippet(): string {
-    return claudeDesktopSnippet();
+export function claudeDesktopSnippet(entry: ServerEntry): string {
+    return JSON.stringify({ mcpServers: { litedb: entry } }, null, 2) + '\n';
 }
 
-export function vsCodeSnippet(): string {
-    const { command, args } = stdioServerEntry();
+export function cursorSnippet(entry: ServerEntry): string {
+    return claudeDesktopSnippet(entry);
+}
+
+export function vsCodeSnippet(entry: ServerEntry): string {
+    const { command, args } = entry;
     return (
         JSON.stringify(
             {
@@ -39,8 +56,8 @@ export function vsCodeSnippet(): string {
     );
 }
 
-export function openCodeSnippet(): string {
-    const { command, args } = stdioServerEntry();
+export function openCodeSnippet(entry: ServerEntry): string {
+    const { command, args } = entry;
     return (
         JSON.stringify(
             {
@@ -58,8 +75,14 @@ export function openCodeSnippet(): string {
     );
 }
 
-export function claudeCodeCommand(): string {
-    return `claude mcp add litedb --scope user -- npx -y ${MCP_PACKAGE}`;
+/** Quoted for a shell when it has to be: an install path with a space in it. */
+function shellWord(word: string): string {
+    return /^[\w@%+=:,./\\-]+$/.test(word) ? word : `"${word.replace(/(["$`])/g, '\\$1')}"`;
+}
+
+export function claudeCodeCommand(entry: ServerEntry): string {
+    const command = [entry.command, ...entry.args].map(shellWord).join(' ');
+    return `claude mcp add litedb --scope user -- ${command}`;
 }
 
 /**

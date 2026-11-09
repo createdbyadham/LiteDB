@@ -1,6 +1,8 @@
 // Agents' writes waiting for a yes in this window.
 //
-// litedb-mcp writes a request into <app data>/approvals and waits; this polls
+// Two ways in. An agent this window serves itself (`LiteDB --mcp`, see
+// src/lib/mcp/host.ts) asks in-process, through askInWindow. The npm server,
+// litedb-mcp, writes a request into <app data>/approvals and waits; this polls
 // the folder, hands the requests to the approval card, and writes the answer
 // back. The protocol, and what it does not protect against, is in
 // agentApproval.ts.
@@ -39,7 +41,22 @@ export function setApproveInApp(on: boolean): void {
     window.dispatchEvent(new CustomEvent('agentApprovalSettingChanged'));
 }
 
+/** What the approval card shows, oldest first. */
 let requests: ApprovalRequest[] = [];
+/** Requests found in the approvals folder. */
+let fromFiles: ApprovalRequest[] = [];
+
+interface InWindow {
+    /** Null while the request is still being built. */
+    request: ApprovalRequest | null;
+    resolve: (answer: ApprovalAnswer) => void;
+    answer: Promise<ApprovalAnswer>;
+}
+/** Requests from agents this window serves, by token. */
+const inWindow = new Map<string, InWindow>();
+/** Answers given here that the agent has not come back for yet. */
+const decided = new Map<string, { answer: ApprovalAnswer; expiresAt: number }>();
+
 const listeners = new Set<() => void>();
 /** Answered here; hidden at once instead of when the server cleans up. */
 const answered = new Set<string>();
@@ -52,7 +69,17 @@ function inTauri(): boolean {
     return '__TAURI_INTERNALS__' in globalThis;
 }
 
-function publish(next: ApprovalRequest[]): void {
+function publish(): void {
+    const now = Date.now();
+    // The token is gone after its expiry, so the request can only mislead.
+    for (const [token, entry] of inWindow) {
+        if (entry.request && Date.parse(entry.request.expiresAt) <= now) inWindow.delete(token);
+    }
+    for (const [token, entry] of decided) {
+        if (entry.expiresAt <= now) decided.delete(token);
+    }
+    const local = [...inWindow.values()].flatMap((entry) => (entry.request ? [entry.request] : []));
+    const next = [...fromFiles, ...local].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const same = next.length === requests.length && next.every((r, i) => r.token === requests[i].token);
     if (same) return;
     requests = next;
@@ -82,7 +109,8 @@ async function poll(): Promise<void> {
         const fs = await import('@tauri-apps/plugin-fs');
         const base = { baseDir: fs.BaseDirectory.AppLocalData };
         if (!(await fs.exists(APPROVALS_DIR, base))) {
-            publish([]);
+            fromFiles = [];
+            publish();
             return;
         }
         const entries = await fs.readDir(APPROVALS_DIR, base);
@@ -105,8 +133,8 @@ async function poll(): Promise<void> {
             if (names.has(decisionFileName(token))) continue;
             next.push(request);
         }
-        next.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-        publish(next);
+        fromFiles = next;
+        publish();
     } catch (error) {
         console.error('Checking for agent approvals failed:', error);
     } finally {
@@ -134,10 +162,56 @@ export function onApprovalsChange(fn: () => void): () => void {
     };
 }
 
-/** Write the answer the waiting server reads. */
+/**
+ * Put a write from an agent this window serves in front of the person, and
+ * resolve with their answer. Asking again for the same token waits on the
+ * request already showing, or gets the answer given while the agent was away;
+ * `build` runs once.
+ */
+export function askInWindow(token: string, build: () => Promise<ApprovalRequest>): Promise<ApprovalAnswer> {
+    const given = decided.get(token);
+    if (given) {
+        decided.delete(token);
+        return Promise.resolve(given.answer);
+    }
+    const existing = inWindow.get(token);
+    if (existing) return existing.answer;
+
+    let resolve!: (answer: ApprovalAnswer) => void;
+    let reject!: (error: unknown) => void;
+    const answer = new Promise<ApprovalAnswer>((ok, fail) => {
+        resolve = ok;
+        reject = fail;
+    });
+    const entry: InWindow = { request: null, resolve, answer };
+    inWindow.set(token, entry);
+    build().then(
+        (request) => {
+            entry.request = request;
+            publish();
+        },
+        (error: unknown) => {
+            inWindow.delete(token);
+            reject(error);
+        },
+    );
+    return answer;
+}
+
+/** Answer a request: in-process for this window's own agents, else the file the server reads. */
 export async function answerApproval(token: string, decision: ApprovalAnswer): Promise<void> {
+    const local = inWindow.get(token);
+    if (local) {
+        inWindow.delete(token);
+        const expiresAt = local.request ? Date.parse(local.request.expiresAt) : Date.now();
+        decided.set(token, { answer: decision, expiresAt });
+        publish();
+        local.resolve(decision);
+        return;
+    }
     answered.add(token);
-    publish(requests.filter((r) => r.token !== token));
+    fromFiles = fromFiles.filter((r) => r.token !== token);
+    publish();
     if (!inTauri()) return;
     const fs = await import('@tauri-apps/plugin-fs');
     await fs.writeTextFile(

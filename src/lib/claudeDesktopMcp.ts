@@ -1,4 +1,4 @@
-// Merge litedb-mcp into Claude Desktop's config.
+// Add LiteDB to Claude Desktop's MCP servers.
 //
 // Two files on Windows: the documented Roaming path, and the MSIX virtualized
 // copy the store install actually reads. Writing only the first is how a valid
@@ -6,7 +6,7 @@
 // Writing the second when the Store app is not installed is how LiteDB ends up
 // creating a fake package folder under %LOCALAPPDATA%\Packages.
 
-import { mergeLiteDbMcp, stdioServerEntry } from './mcpAgentConfig';
+import { appServerEntry, mergeLiteDbMcp } from './mcpAgentConfig';
 
 function join(base: string, ...parts: string[]): string {
     const sep = base.includes('\\') ? '\\' : '/';
@@ -113,7 +113,7 @@ export interface ClaudeInstallResult {
 
 export async function installClaudeDesktopMcp(): Promise<ClaudeInstallResult> {
     const { mkdir, readTextFile, writeTextFile } = await import('@tauri-apps/plugin-fs');
-    const entry = stdioServerEntry();
+    const entry = await appServerEntry();
     const paths = await claudeDesktopConfigPaths();
     if (paths.length === 0) {
         throw new Error('Could not resolve Claude Desktop config paths.');

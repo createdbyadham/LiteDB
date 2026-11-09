@@ -338,35 +338,36 @@ bundle.
 
 The same write-safety layer, exposed over the Model Context Protocol, so an
 agent can drive a local database through the guardrails instead of around them.
-That is the reason to point it at [`litedb-mcp`](mcp/README.md) rather than at
-a raw Postgres MCP server.
+That is the reason to point an agent at LiteDB rather than at a raw Postgres
+MCP server.
 
-If LiteDB is running, the server follows whatever you have open. No paths in
-the config, no restart when you switch database. Quitting the app clears that
-handoff — including a stored Postgres password — so an agent cannot keep using
-the last connection. Fastest path: Settings →
-**Agents**, or the status-bar **MCP** chip. Host-by-host:
-[Connect an agent](docs/connect-an-agent.md). Requires **Node.js 22.5+** with
-`npx` on the PATH that Claude, Cursor, or VS Code uses (`node:sqlite`). LiteDB
-does not install Node.
+LiteDB is the server. The agent's app starts `LiteDB --mcp`, which connects to
+the running window, so there is nothing else to install: no Node, no package.
+The agent follows whatever you have open — no paths in the config, no restart
+when you switch database — and its queries run on the app's own connection, so
+a Postgres password never leaves the app. While LiteDB is closed the agent
+still sees its tools, and every call says to open LiteDB. Fastest path:
+Settings → **Agents**, or the status-bar **MCP** chip, which copies the command
+for this install. Host-by-host: [Connect an agent](docs/connect-an-agent.md).
 
-Windows (what the app copies):
+Windows (the default install path; the app copies yours):
 
 ```json
 {
   "mcpServers": {
     "litedb": {
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "litedb-mcp"]
+      "command": "C:\\Users\\you\\AppData\\Local\\LiteDB\\LiteDB.exe",
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-macOS / Linux: `"command": "npx", "args": ["-y", "litedb-mcp"]`.
+macOS: `"command": "/Applications/LiteDB.app/Contents/MacOS/LiteDB"`. Linux: the
+AppImage's path, or `litedb` from the AUR package.
 
 ```bash
-claude mcp add litedb --scope user -- npx -y litedb-mcp
+claude mcp add litedb --scope user -- /Applications/LiteDB.app/Contents/MacOS/LiteDB --mcp
 ```
 
 The status-bar policy is the agent's policy. Set the connection read-only in
@@ -374,8 +375,9 @@ the UI and the next tool call is read-only. YOLO is the one exception: it maps
 down to guarded, because YOLO means a human is watching this window, which is
 exactly what isn't true over MCP.
 
-Without the app — CI, a box that has never launched LiteDB — set
-`LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`. Env wins when both are present.
+Without the app — CI, a box that has never launched LiteDB — the same tools
+ship as [`litedb-mcp`](mcp/README.md) on npm (Node 22.5+): set
+`LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`.
 
 Seven tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
 `list_vector_columns`, `semantic_search`, `audit_log` — plus a `litedb://schema`
@@ -420,7 +422,7 @@ own statements.
 
 ### Prerequisites
 
-- Node.js **22.5+** (MCP uses `node:sqlite`; evals want **24+**)
+- Node.js **22.5+** (the npm MCP server and the self-tests use `node:sqlite`; evals want **24+**)
 - Rust (latest stable)
 - PostgreSQL (if using PostgreSQL features)
 

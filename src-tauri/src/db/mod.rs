@@ -42,6 +42,12 @@ pub struct RunOptions {
     pub full_blobs: bool,
     /// Postgres: run on the editor's own session instead of the pool.
     pub session: bool,
+    /// Change nothing, whatever the SQL says. SQLite refuses any statement
+    /// that would write and sets `query_only` for the run; Postgres runs on
+    /// the pool in a READ ONLY transaction that is always rolled back, one
+    /// statement per string. For agents' reads, where the classifier that
+    /// decided this was a read is the thing being guarded against.
+    pub read_only: bool,
 }
 
 #[derive(Serialize, Default, Clone, Debug)]
@@ -244,13 +250,16 @@ pub async fn db_open_sqlite(
     id: String,
     path: String,
     create: Option<bool>,
+    read_only: Option<bool>,
 ) -> Result<OpenInfo, String> {
     let path = check_sqlite_path(&app, &path)?;
     let create = create.unwrap_or(false);
-    let (conn, info) =
-        tauri::async_runtime::spawn_blocking(move || sqlite::SqliteConn::open(&path, create))
-            .await
-            .map_err(|e| e.to_string())??;
+    let read_only = read_only.unwrap_or(false);
+    let (conn, info) = tauri::async_runtime::spawn_blocking(move || {
+        sqlite::SqliteConn::open(&path, create, read_only)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let info = OpenInfo {
         id: id.clone(),
         ..info

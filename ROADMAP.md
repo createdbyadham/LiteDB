@@ -10,17 +10,14 @@ order changes: if something here matters to you, say so there.
   click Approve — even when the agent's app runs tools without asking.
 - **Undo for agent writes**, from the audit log.
 - **Inline suggestions** in the SQL editor, from a local or hosted model.
+- **MCP without Node.** The app is the server: agents start `LiteDB --mcp`,
+  so *Add to Claude Desktop* points at a file that is guaranteed to exist, and
+  approval is a call inside the app instead of a file handshake.
 
 ## Next
 
-- **MCP without Node.** Today the server needs Node 22.5+ with `npx` on the
-  agent's PATH, the most common way setups break (macOS apps do not see your
-  shell's PATH, and nvm makes it worse). Ship the server inside the app, as a
-  compiled sidecar or in Rust with `rmcp`, so *Add to Claude Desktop* points at
-  a file that is guaranteed to exist and approval becomes a call inside the
-  app instead of a file handshake. Then list it in the MCP Registry, Glama,
-  Smithery and awesome-mcp-servers, and ship a Claude Desktop extension
-  (`.mcpb`).
+- **List the server** in the MCP Registry, Glama, Smithery and
+  awesome-mcp-servers, and ship a Claude Desktop extension (`.mcpb`).
 - **A public leaderboard: the best local model for Text-to-SQL.** The
   benchmark in [`evals/`](./evals) is rerunnable and has a held-out split.
   Publish rankings by GPU memory ("best for 8 GB"), rerun them when a big open

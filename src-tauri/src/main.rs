@@ -4,6 +4,7 @@
 )]
 
 mod db;
+mod mcp;
 
 use keyring::Entry;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -204,6 +205,17 @@ fn install_crypto_provider() {
 }
 
 fn main() {
+    let context = tauri::generate_context!();
+
+    // Started by an MCP host as its server: a bridge to the running app, with
+    // no window and no Tauri.
+    if mcp::requested() {
+        if let Some(dir) = mcp::data_dir(&context.config().identifier) {
+            mcp::run_bridge(dir);
+        }
+        return;
+    }
+
     install_crypto_provider();
 
     tauri::Builder::default()
@@ -214,6 +226,7 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(db::DbState::default())
+        .manage(mcp::McpState::default())
         .setup(|app| {
             // A crash or a killed process never reaches the window and exit
             // events below, which would leave the last connection — Postgres
@@ -229,6 +242,10 @@ fn main() {
             db::db_run,
             db::db_cancel,
             db::db_data_version,
+            mcp::mcp_listen,
+            mcp::mcp_send,
+            mcp::mcp_close,
+            mcp::mcp_command,
             proxy_request,
             store_secret,
             get_secret,
@@ -237,15 +254,17 @@ fn main() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 clear_mcp_handoff(window.app_handle());
+                mcp::clear_endpoint(window.app_handle());
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             // Second delete after every window is gone, in case a plugin-fs
             // write that was already in flight completed after Destroyed.
             if let tauri::RunEvent::Exit = event {
                 clear_mcp_handoff(app);
+                mcp::clear_endpoint(app);
             }
         });
 }

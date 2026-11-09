@@ -20,6 +20,9 @@ import { THEME_STORAGE_KEY } from '@/lib/theme';
 const App = () => {
   useEffect(() => {
     if (!inTauri()) return;
+    // Agents reach the database through this window: `LiteDB --mcp`. Loaded
+    // after startup; the MCP SDK is not needed to draw the first screen.
+    void import('@/lib/mcp/host').then(({ startMcpHost }) => startMcpHost());
     const checkForAppUpdates = async () => {
       try {
         const update = await check();

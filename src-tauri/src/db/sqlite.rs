@@ -28,11 +28,19 @@ impl SqliteConn {
     /// A write-protected file opens read-only rather than failing (SQLite does
     /// this itself for READ_WRITE); the caller is told so it can say why
     /// edits will be refused.
-    pub fn open(path: &Path, create: bool) -> Result<(Self, OpenInfo), String> {
-        let mut flags = OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_URI
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        if create {
+    ///
+    /// `read_only` opens a connection that cannot write at all, for agents'
+    /// reads. Databases it ATTACHes inherit that, and URI filenames are off so
+    /// none can ask for more.
+    pub fn open(path: &Path, create: bool, read_only: bool) -> Result<(Self, OpenInfo), String> {
+        let mut flags = if read_only {
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        } else {
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_URI
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        };
+        if create && !read_only {
             flags |= OpenFlags::SQLITE_OPEN_CREATE;
         }
         let conn = Connection::open_with_flags(path, flags).map_err(|e| e.to_string())?;
@@ -50,12 +58,12 @@ impl SqliteConn {
             _ => e.to_string(),
         })?;
 
-        let read_only = conn.is_readonly(DatabaseName::Main).unwrap_or(false);
+        let read_only = read_only || conn.is_readonly(DatabaseName::Main).unwrap_or(false);
         let version: String = conn
             .query_row("SELECT sqlite_version()", [], |r| r.get(0))
             .unwrap_or_default();
         let mut notices = Vec::new();
-        if read_only {
+        if read_only && flags.contains(OpenFlags::SQLITE_OPEN_READ_WRITE) {
             notices.push(
                 "The file is write-protected, so it opened read-only. Edits will be refused."
                     .into(),
@@ -176,9 +184,40 @@ fn run_statement(
     Ok(result)
 }
 
+fn query_only(conn: &Connection) -> bool {
+    conn.query_row("PRAGMA query_only", [], |r| r.get::<_, i64>(0))
+        .map(|v| v != 0)
+        .unwrap_or(false)
+}
+
 /// Run each string in order. A string may hold several statements; each one
 /// that SQLite parses becomes its own result.
+///
+/// `read_only` refuses every statement SQLite says would write, before it
+/// runs, and sets `query_only` for the run. The check is per statement, so a
+/// string that turns `query_only` off and then writes still meets it.
 pub fn run(
+    conn: &Connection,
+    statements: &[String],
+    opts: &RunOptions,
+    cancelled: &AtomicBool,
+) -> RunResponse {
+    let restore = opts.read_only && !query_only(conn);
+    if restore {
+        if let Err(e) = conn.execute_batch("PRAGMA query_only = ON") {
+            let mut response = RunResponse::default();
+            response.errors.push(run_error(0, &e, cancelled));
+            return response;
+        }
+    }
+    let response = run_all(conn, statements, opts, cancelled);
+    if restore {
+        let _ = conn.execute_batch("PRAGMA query_only = OFF");
+    }
+    response
+}
+
+fn run_all(
     conn: &Connection,
     statements: &[String],
     opts: &RunOptions,
@@ -211,6 +250,17 @@ pub fn run(
                 break 'statements;
             }
             let outcome = match batch.next() {
+                Ok(Some(stmt)) if opts.read_only && !stmt.readonly() => {
+                    response.errors.push(RunError {
+                        statement: index,
+                        message: "This statement would change the database, and this run is read-only. Nothing ran."
+                            .into(),
+                        code: Some("ReadOnly".into()),
+                        cancelled: false,
+                        position: None,
+                    });
+                    break 'statements;
+                }
                 Ok(Some(mut stmt)) => run_statement(conn, &mut stmt, index, opts).map(Some),
                 Ok(None) => Ok(None),
                 Err(e) => Err(e),
@@ -264,7 +314,7 @@ mod tests {
 
     fn open(name: &str) -> (SqliteConn, std::path::PathBuf) {
         let path = temp_db(name);
-        let (conn, _) = SqliteConn::open(&path, true).unwrap();
+        let (conn, _) = SqliteConn::open(&path, true, false).unwrap();
         (conn, path)
     }
 
@@ -395,6 +445,100 @@ mod tests {
         assert!(!r.in_transaction);
     }
 
+    fn read_only() -> RunOptions {
+        RunOptions {
+            read_only: true,
+            ..Default::default()
+        }
+    }
+
+    fn count(conn: &SqliteConn) -> serde_json::Value {
+        exec(conn, &["SELECT count(*) FROM t"], RunOptions::default()).results[0].rows[0][0].clone()
+    }
+
+    #[test]
+    fn a_read_only_run_reads_and_refuses_writes() {
+        let (conn, _) = open("readonly-run");
+        exec(
+            &conn,
+            &[
+                "CREATE TABLE t (id INTEGER PRIMARY KEY)",
+                "INSERT INTO t VALUES (1), (2)",
+            ],
+            RunOptions::default(),
+        );
+
+        let read = exec(&conn, &["SELECT id FROM t ORDER BY id"], read_only());
+        assert!(read.errors.is_empty(), "{:?}", read.errors);
+        assert_eq!(read.results[0].rows, vec![vec![json!(1)], vec![json!(2)]]);
+
+        let write = exec(&conn, &["DELETE FROM t"], read_only());
+        assert_eq!(write.errors.len(), 1);
+        assert!(write.results.is_empty(), "nothing ran");
+
+        // The check is per statement, so switching query_only off first
+        // does not open a way through.
+        let sneaky = exec(
+            &conn,
+            &["PRAGMA query_only = OFF; DELETE FROM t"],
+            read_only(),
+        );
+        assert_eq!(sneaky.errors.len(), 1, "{:?}", sneaky.results);
+        assert_eq!(count(&conn), json!(2));
+
+        // And the option lasts for its run only.
+        let after = exec(
+            &conn,
+            &["DELETE FROM t WHERE id = 2"],
+            RunOptions::default(),
+        );
+        assert!(after.errors.is_empty(), "{:?}", after.errors);
+        assert_eq!(count(&conn), json!(1));
+    }
+
+    #[test]
+    fn a_read_only_connection_cannot_write_or_attach_new_files() {
+        let (writer, path) = open("readonly-open");
+        exec(
+            &writer,
+            &[
+                "CREATE TABLE t (id INTEGER PRIMARY KEY)",
+                "INSERT INTO t VALUES (1)",
+            ],
+            RunOptions::default(),
+        );
+        let (reader, info) = SqliteConn::open(&path, false, true).unwrap();
+        assert!(info.read_only);
+        assert!(
+            info.notices.is_empty(),
+            "nothing to explain: it was asked for"
+        );
+
+        let read = exec(&reader, &["SELECT id FROM t"], RunOptions::default());
+        assert!(read.errors.is_empty(), "{:?}", read.errors);
+
+        let write = exec(
+            &reader,
+            &["INSERT INTO t VALUES (2)"],
+            RunOptions::default(),
+        );
+        assert_eq!(
+            write.errors.len(),
+            1,
+            "the engine refuses, not the classifier"
+        );
+
+        let elsewhere = path.with_file_name("attached.db");
+        let attach = exec(
+            &reader,
+            &[&format!("ATTACH '{}' AS other", elsewhere.display())],
+            RunOptions::default(),
+        );
+        assert_eq!(attach.errors.len(), 1);
+        assert!(!elsewhere.exists());
+        assert_eq!(count(&writer), json!(1));
+    }
+
     #[test]
     fn interrupt_cancels_a_running_statement() {
         let (conn, _) = open("interrupt");
@@ -438,7 +582,9 @@ mod tests {
     fn not_a_database_is_refused_at_open() {
         let path = temp_db("garbage");
         std::fs::write(&path, b"this is not a database at all, not even close....").unwrap();
-        let err = SqliteConn::open(&path, false).err().expect("should refuse");
+        let err = SqliteConn::open(&path, false, false)
+            .err()
+            .expect("should refuse");
         assert!(err.contains("not a SQLite database"), "{err}");
     }
 }

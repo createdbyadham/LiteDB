@@ -1,10 +1,11 @@
 # Architecture
 
 LiteDB is a Tauri v2 app: a React + TypeScript front end in a webview, and a
-Rust back end that owns every database connection. A separate Node process,
-`litedb-mcp`, lets AI agents use the same database through the same safety
-rules. This page is the map; the files it names explain themselves in their
-header comments.
+Rust back end that owns every database connection. AI agents reach the same
+database through the same safety rules over MCP: the app serves them itself
+(`LiteDB --mcp`), and the same tools ship as the npm package `litedb-mcp` for
+machines without the app. This page is the map; the files it names explain
+themselves in their header comments.
 
 ## The safety pipeline
 
@@ -31,32 +32,45 @@ Two layers do not depend on the classifier being right:
 
 - `assertWritable` in `src/lib/queryGate.ts` refuses writes on a read-only
   connection again at the client, whatever path they took.
-- The MCP server reads through connections the engine will not let write
-  (SQLite opened read-only, Postgres inside `BEGIN READ ONLY` that is always
-  rolled back). A statement that beats the parser still meets
-  `cannot execute UPDATE in a read-only transaction`.
+- Agents read through connections the engine will not let write (SQLite
+  opened read-only, Postgres inside `BEGIN READ ONLY` that is always rolled
+  back, one statement at a time). A statement that beats the parser still
+  meets `cannot execute UPDATE in a read-only transaction`.
 
-## Agents: litedb-mcp
+## Agents: MCP
 
-`mcp/` is an MCP server that agents (Claude, Cursor, VS Code) launch over
-stdio. It does not open a database of its own choosing: it follows the one open
-in LiteDB, through the handoff file the app writes (`src/lib/mcpHandoff.ts`,
-read by `mcp/src/config.ts`). Quitting the app removes the handoff.
+The tools live in `mcp/src/tools/` and register on an MCP server through
+`mcp/src/tools/register.ts`, free of Node imports, so two hosts serve them:
+
+- **The app.** An agent's app starts `LiteDB --mcp` (`src-tauri/src/mcp.rs`).
+  That process never starts Tauri: it reads `mcp-endpoint.json` from the app's
+  data directory, connects to the running window over loopback, proves it read
+  the file, and copies JSON-RPC lines both ways. The window hands each line to
+  `src/lib/mcp/host.ts`, which runs the tools against the connection on screen
+  through `src/lib/mcp/appDatabase.ts` (its own read-only SQLite connections, or
+  the Postgres pool), shows approvals in its own dialog, and writes the app's
+  audit log. While the app is closed, the bridge answers the handshake from
+  `mcp-server.json`, which the app leaves behind, and tells every call to open
+  LiteDB.
+- **The npm package** (`mcp/src/index.ts`), for machines without the app. It
+  opens the database itself, from `LITEDB_SQLITE_PATH` / `LITEDB_DATABASE_URL`
+  or the handoff file the app writes (`src/lib/mcpHandoff.ts`, read by
+  `mcp/src/config.ts`).
 
 - `mcp/src/tools/query.ts`: `query` runs reads and turns writes into a preview
   with a single-use token (`mcp/src/approvals.ts`); `execute_approved` runs
   exactly the previewed SQL, byte for byte.
-- `mcp/src/appApproval.ts` + `src/lib/agentApproval.ts`: while the app is
-  open, `execute_approved` writes the request to `<app data>/approvals/` and
-  waits for the window's answer (`src/lib/agentApprovals.ts` polls, the card
-  decides). Older apps leave out `approveInApp` in the handoff, and the asking
-  stays with the MCP host.
-- `mcp/src/undo.ts`: saves the rows an approved write touches, for Undo.
+- `mcp/src/approvalRequest.ts` + `src/lib/agentApproval.ts`: before an
+  approved write runs, the window is asked, with the row count and the rows it
+  changes. Served from the app, that is a call (`askInWindow` in
+  `src/lib/agentApprovals.ts`); from the npm package, a request file in
+  `<app data>/approvals/` that the window answers (`mcp/src/appApproval.ts`).
+- `mcp/src/undoCapture.ts`: saves the rows an approved write touches, for Undo.
 - `mcp/src/audit.ts`: writes to the same audit log, with the host's name.
 
-The app and the server share code: everything in `src/lib/` that the server
-imports is kept free of browser and Tauri imports, and the self-tests run it in
-Node.
+Shared code stays host-neutral: everything in `src/lib/` that the npm server
+imports is free of browser and Tauri imports, everything in `mcp/src/` that the
+app imports is free of Node, and the self-tests run the shared parts in Node.
 
 ## The desktop app
 

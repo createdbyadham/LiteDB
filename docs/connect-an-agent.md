@@ -1,60 +1,68 @@
 # Connect an agent
 
-LiteDB already has the database open. The MCP server follows that connection —
-no path, no URL, no restart when you switch databases. The status-bar policy is
-the agent's policy (YOLO maps down to guarded), and a connection tagged
-production starts read-only for the agent as well. Quitting the app removes the
-handoff, including any Postgres password, so the agent cannot keep using the
-last database.
+LiteDB is the MCP server. Your agent's app — Claude Desktop, Claude Code,
+Cursor, VS Code — starts `LiteDB --mcp`, which connects to the LiteDB window
+you have open. There is nothing else to install: no Node, no npm package.
 
-The handoff carries the connection's SSL mode and CA certificate. A Postgres
-connection behind SSH goes through the app's tunnel, so the agent reaches that
-database only while LiteDB has it open.
+The agent follows the connection on screen — no path, no URL, no restart when
+you switch databases. The status-bar policy is the agent's policy (YOLO maps
+down to guarded), and a connection tagged production starts read-only for the
+agent as well. Its queries run on the app's own connection, so a Postgres
+password stays in the app, and a database behind SSH is reached through the
+app's tunnel while LiteDB has it open.
 
-Requires Node.js 22.5+ with `npx` on the PATH that Claude, Cursor, or VS Code uses. LiteDB does not install Node.
+While LiteDB is closed, the agent still sees its tools, and every call says to
+open LiteDB. Once the window is up, the next call goes through.
 
 ## In the app
 
 Settings → **Agents**, or the **MCP** chip in the status bar.
 
-- Green “Agents can see this connection” means the handoff file is on disk.
-  It is removed when you disconnect or quit.
+- Green “Agents can see this connection” means a database is open for agents.
 - **Add to Claude Desktop** merges `mcpServers.litedb` into
   `claude_desktop_config.json` — always the documented file, plus the Windows
   Store copy when the Store version is installed. Fully quit Claude — tray too —
   then a new chat.
 - Everyone else: copy the snippet for Claude Code, Cursor, OpenCode, or VS Code.
+  The snippets carry this install's path.
 
 `mcpServers` is a **top-level** key, sibling of `preferences`. Nesting it inside
 `preferences` is invalid JSON and Claude will ignore it.
 
 ## The 15-second config
 
-Windows:
+Windows (the default install path; Settings → Agents copies yours):
 
 ```json
 {
   "mcpServers": {
     "litedb": {
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "litedb-mcp"]
+      "command": "C:\\Users\\you\\AppData\\Local\\LiteDB\\LiteDB.exe",
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-macOS / Linux: `"command": "npx", "args": ["-y", "litedb-mcp"]`.
+macOS: `"command": "/Applications/LiteDB.app/Contents/MacOS/LiteDB"`.
+Linux: the AppImage's path, or `litedb` from the AUR package. Flatpak:
+`"command": "flatpak", "args": ["run", "--command=litedb", "com.adhamehab.litedb", "--mcp"]`.
 
 Claude Code:
 
 ```bash
-claude mcp add litedb --scope user -- npx -y litedb-mcp
+claude mcp add litedb --scope user -- /Applications/LiteDB.app/Contents/MacOS/LiteDB --mcp
 ```
 
 MCP servers load at host startup. Add the entry, then start a **new** session.
 
-Without the app (CI), set `LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`. Env
-wins over the handoff. Details: [`mcp/README.md`](../mcp/README.md).
+## Without the app
+
+On a machine without LiteDB — CI, a server — the same tools ship as the npm
+package `litedb-mcp` (Node 22.5+ with `npx` on the host's PATH): set
+`LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`. Run alongside the app, it
+follows the window through a handoff file instead. Details:
+[`mcp/README.md`](../mcp/README.md).
 
 ## Tutorial: two prompts
 

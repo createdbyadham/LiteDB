@@ -31,6 +31,11 @@ To run exactly the statements above, call execute_approved with:
 
 ## Install
 
+**Using the LiteDB app? You do not need this package.** The app serves these
+same tools itself: point your agent at `LiteDB --mcp` (Settings → **Agents**
+copies the command for your install), with no Node involved. This package is
+for machines without the app — CI, a server — and keeps working alongside it.
+
 If LiteDB is running, the server follows whatever you have open. Quitting the
 app clears the handoff (and any Postgres password in it). In the app:
 Settings → **Agents**, or the status-bar **MCP** chip. Step-by-step for each
