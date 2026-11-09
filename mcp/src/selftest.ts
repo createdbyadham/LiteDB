@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { decisionFileName, parseRequest, requestFileName, serializeDecision } from '../../src/lib/agentApproval';
+import { currentStateQueries, parseUndo, planUndo } from '../../src/lib/undoWrite';
 import { parseLog } from '../../src/lib/auditLog';
 import { pgSslHint } from '../../src/lib/pgSslHint';
 import {
@@ -675,6 +676,88 @@ async function main(): Promise<void> {
         check(
             "an answer naming another token does not count",
             forged.text.startsWith('WAITING') && countRows(harness, 'orders', 'id = 3') === 1,
+        );
+    } finally {
+        await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
+    // -------------------------------------------------------------- undo ---
+    process.stdout.write('\nundo\n');
+
+    approvals.reset();
+    harness = buildFixture();
+    config = configFor(harness, 'guarded');
+    db = await openDatabase(config);
+    ctx = { db, config };
+    installAudit({
+        connection: config.connectionId,
+        dialect: 'sqlite',
+        policy: 'guarded',
+        path: harness.auditPath,
+    });
+
+    try {
+        const tokenIn = (text: string) => /token: ([0-9a-f-]{36})/.exec(text)?.[1] ?? '';
+        const approve = async (sql: string) => runApproved(ctx, tokenIn((await runQuery(ctx, sql)).text));
+        const lastUndo = () => {
+            const link = auditEntries(harness).filter((e) => e.decision === 'approved').pop()?.undo;
+            return link ? parseUndo(readFileSync(join(dirname(harness.auditPath), link), 'utf8')) : null;
+        };
+        // What the app does: read what is there now, plan, run the plan.
+        const undoIt = () => {
+            const record = lastUndo();
+            if (!record) return null;
+            const own = new DatabaseSync(harness.dbPath);
+            try {
+                const current = currentStateQueries(record).flatMap(
+                    (sql) => own.prepare(sql).all().map((row) => Object.values(row as Record<string, unknown>)),
+                );
+                const plan = planUndo(record, current);
+                for (const sql of plan.statements) own.exec(sql);
+                return plan;
+            } finally {
+                own.close();
+            }
+        };
+
+        await approve("DELETE FROM orders WHERE status = 'shipped'");
+        const deleted = lastUndo();
+        check('a DELETE saves the rows it removed', deleted?.kind === 'delete' && deleted.rows.length === 2);
+        check('keyed by the primary key', deleted?.key.join() === 'id');
+        const restored = undoIt();
+        check('undo puts them back', restored?.restore === 2 && countRows(harness, 'orders', "status = 'shipped'") === 2);
+
+        await approve("UPDATE orders SET status = 'refunded' WHERE customer_id = 1");
+        const updated = lastUndo();
+        check(
+            'an UPDATE saves the old values and the new',
+            updated?.kind === 'update' && updated.assigned?.join() === 'status' && updated.after?.every((v) => v[0] === 'refunded') === true,
+        );
+        // Someone changes one of the rows again before the undo.
+        const other = new DatabaseSync(harness.dbPath);
+        other.exec("UPDATE orders SET status = 'disputed' WHERE id = 2");
+        other.close();
+        const reverted = undoIt();
+        check(
+            'undo reverts what is still as the write left it, and leaves newer work alone',
+            reverted?.restore === 1 &&
+                reverted.skipped === 1 &&
+                countRows(harness, 'orders', "id = 1 AND status = 'shipped'") === 1 &&
+                countRows(harness, 'orders', "id = 2 AND status = 'disputed'") === 1,
+        );
+
+        const before = countRows(harness, 'customers');
+        await approve("INSERT INTO customers (email, country) VALUES ('new@example.com', 'FR'), ('two@example.com', 'FR')");
+        const inserted = lastUndo();
+        check('a SQLite INSERT notes the new rowids', inserted?.kind === 'insert' && inserted.rowids?.upTo === (inserted.rowids?.after ?? 0) + 2);
+        undoIt();
+        check('undo removes the rows it added', countRows(harness, 'customers') === before);
+
+        await approve("UPDATE orders SET total = total + 1 WHERE id = 1; UPDATE orders SET total = total + 1 WHERE id = 2");
+        check(
+            'a script is not saved for undo: its statements depend on each other',
+            auditEntries(harness).filter((e) => e.decision === 'approved').slice(-2).every((e) => !e.undo),
         );
     } finally {
         await db.close();

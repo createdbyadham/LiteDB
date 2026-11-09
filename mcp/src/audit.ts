@@ -89,6 +89,8 @@ export interface DecisionRecord {
     estimatedRows?: number | null;
     actualRows?: number | null;
     durationMs?: number | null;
+    /** The Undo file for this write, relative to the audit folder. */
+    undo?: string | null;
 }
 
 /**
@@ -129,6 +131,7 @@ export async function record(entry: DecisionRecord): Promise<void> {
             // The host's own name for itself (clientInfo.name). Unlike a model
             // name this is something the protocol does tell us.
             client: clientName(),
+            ...(entry.undo ? { undo: entry.undo } : {}),
         };
         await recordAudit(row);
     }

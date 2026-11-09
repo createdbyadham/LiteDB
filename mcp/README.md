@@ -221,6 +221,17 @@ An app that does not show requests (older versions, or Settings → Agents
 turned off) does not ask for them, and the server leaves the asking to the MCP
 client, as before.
 
+### Undo
+
+Before an approved UPDATE or DELETE runs, the server saves the rows it is about
+to touch — up to 5,000, keyed by primary key or SQLite's rowid, and for an
+UPDATE the values it is about to write — to `undo/<id>.json` beside the audit
+log, and the audit entry links to it. For a SQLite INSERT it notes the rowids
+the new rows get. **Undo** in the app's Audit panel puts the rows back, leaving
+alone any row that changed again since. Scripts of several statements, upserts,
+Postgres INSERTs and Postgres tables without a primary key are not saved, and
+cascades and triggers are not undone.
+
 ### What it does not do
 
 Without the app, LiteDB cannot make your MCP client ask you. A client that has

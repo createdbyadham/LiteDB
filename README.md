@@ -86,6 +86,7 @@ unattended — even on a connection you have set to unrestricted.
   - Generated SQL is **compiled before you see it**, so the model fixes its own
     unknown columns and syntax errors — writes included.
   - Append-only audit log of every statement that ran — including edits, inserts, deletes and imports made in the grid — and who authorised it.
+  - An agent's writes wait for **your Approve in the LiteDB window**, with the rows they change, and can be **undone** from the audit log.
 - **Export**: tables or query results to **CSV, Excel, JSON or INSERT statements**.
 - **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
 
@@ -304,6 +305,14 @@ Every generated statement and every hand-made change is appended to
 editor's **Audit** tab. Entries record the SQL, the natural-language prompt it
 came from, the model that wrote it, the policy in force, whether it was
 allowed, approved, blocked or declined, and what actually happened.
+
+**Undo for agent writes.** Before an approved UPDATE or DELETE from an agent
+runs, the rows it touches (up to 5,000, keyed by primary key or SQLite's rowid)
+are saved next to the log, and **Undo** on the entry puts them back; a SQLite
+INSERT's new rows can be removed the same way. Undo leaves alone any row that
+changed again after the write, so it never overwrites newer work. It does not
+cover scripts of several statements, upserts, Postgres INSERTs, Postgres tables
+without a primary key, or rows changed by cascades and triggers.
 
 Two limits, stated because a safety feature that overclaims is worse than none:
 append-only is a property of the API, not of the file — the file is yours and

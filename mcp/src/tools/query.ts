@@ -36,6 +36,7 @@ import { evaluateScript, type GateDecision } from '../../../src/lib/sqlPolicy';
 import { askApp } from '../appApproval';
 import * as approvals from '../approvals';
 import { record } from '../audit';
+import { prepareUndo } from '../undo';
 import type { ServerConfig } from '../config';
 import type { Database, QueryResult } from '../db';
 import { formatCount, pluralRows, renderTable } from '../render';
@@ -363,11 +364,19 @@ export async function runApproved(ctx: ToolContext, token: string): Promise<Tool
 
     const { decision, estimates } = approval;
     const estimated = totalEstimate(estimates);
+    // Saved for Undo before it runs. A failure here only means no Undo.
+    const undo =
+        decision.statements.length === 1
+            ? await prepareUndo(ctx.db, decision.statements[0], ctx.config.connectionId, ctx.config.auditPath).catch(
+                  () => null,
+              )
+            : null;
     const started = Date.now();
 
     try {
         const results = await runApprovedStatements(ctx.db, decision.statements);
         const actualRows = results.reduce((sum, r) => sum + r.rowsAffected, 0);
+        const undoLink = undo && actualRows > 0 ? await undo.save().catch(() => null) : null;
         let flushNote = '';
         try {
             await ctx.db.flushWrites();
@@ -387,6 +396,7 @@ export async function runApproved(ctx: ToolContext, token: string): Promise<Tool
             durationMs: Date.now() - started,
             estimatedRows: estimated,
             actualRows,
+            undo: undoLink,
         });
 
         // Saying so when the two disagree is the point of keeping both. A log

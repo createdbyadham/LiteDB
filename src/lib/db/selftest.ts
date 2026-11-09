@@ -18,6 +18,7 @@ import { postgresTarget } from '../mcpHandoff';
 import { completionName } from '../types';
 import { columnOptions, tablesIn, type ColumnCatalog } from '../sqlComplete';
 import { classifyStatement } from '../sqlClassifier';
+import { currentStateQueries, decodeValue, encodeValue, planUndo, type UndoRecord } from '../undoWrite';
 import {
     buildDiffQuery,
     columnIndex,
@@ -288,6 +289,46 @@ equal('a request reads back as written', parseRequest(serializeRequest(sample)),
 check('a request from a newer version is ignored', parseRequest(JSON.stringify({ ...sample, version: 2 })) === null);
 check('an answer for another token does not count', parseDecision(JSON.stringify({ token: 'x', decision: 'approved' }), 't1') === null);
 check('an answer must say approved or declined', parseDecision(JSON.stringify({ token: 't1', decision: 'yes' }), 't1') === null);
+
+process.stdout.write('\nUndo for agent writes\n');
+const blob = decodeValue(encodeValue(new Uint8Array([1, 2, 255]))!);
+check('blobs survive the file', blob instanceof Uint8Array && Array.from(blob).join() === '1,2,255');
+check('big integers survive the file', decodeValue(encodeValue(9007199254740993n)!) === 9007199254740993n);
+check('an array column is not saved: it would not come back faithfully', encodeValue(['a']) === undefined);
+const undoBase = { version: 1, id: 'u', table: 'lines', dialect: 'sqlite', connectionId: 'c', sql: '', capturedAt: '' } as const;
+const composite: UndoRecord = {
+    ...undoBase,
+    kind: 'delete',
+    key: ['order_id', 'line'],
+    columns: ['order_id', 'line', 'qty'],
+    rows: [[1, 1, 5], [1, 2, 7]],
+};
+equal('a composite key is looked up as a row value', currentStateQueries(composite), [
+    'SELECT "order_id", "line" FROM lines WHERE ("order_id", "line") IN (VALUES (1, 1), (1, 2))',
+]);
+const reused = planUndo(composite, [[1, 2]]);
+equal('a deleted row whose key is in use again is left alone', [reused.restore, reused.skipped, reused.statements], [
+    1,
+    1,
+    ['INSERT INTO lines ("order_id", "line", "qty") VALUES (1, 1, 5)'],
+]);
+const rowidRecord: UndoRecord = { ...undoBase, kind: 'delete', key: ['rowid'], columns: ['rowid', 'body'], rows: [[7, 'note']] };
+equal('a table without a key comes back at its rowid', planUndo(rowidRecord, []).statements, [
+    "INSERT INTO lines (rowid, \"body\") VALUES (7, 'note')",
+]);
+const priced: UndoRecord = {
+    ...undoBase,
+    dialect: 'postgres',
+    kind: 'update',
+    key: ['id'],
+    columns: ['id', 'price'],
+    rows: [[1, '10.00']],
+    assigned: ['price'],
+    after: [[12.5]],
+};
+equal('12.5 and "12.50" are the same number, whichever driver read them', planUndo(priced, [[1, '12.50']]).statements, [
+    'UPDATE lines SET "price" = \'10.00\' WHERE "id" = 1',
+]);
 
 process.stdout.write('\nWhere Text to SQL puts its SQL\n');
 /** The script after placing `sql` with the cursor at `offset`, and the placed text read back. */
