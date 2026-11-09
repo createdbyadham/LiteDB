@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Self-test for the MCP server. No model, no API key, no cost — CI can run it
+// Self-test for the MCP server. No model, no API key, no cost, CI can run it
 // on every pull request.
 //
 // What it is actually protecting: this server's whole claim is that a write
 // cannot run without being previewed first, and that claim is made of several
-// separate pieces — the classifier, the policy floor, the token store, the
+// separate pieces, the classifier, the policy floor, the token store, the
 // read-only connection. Any one of them silently degrading leaves a server
 // that still answers every question correctly and no longer guards anything.
-// So the assertions below check the *outcome* — did the row change? — rather
+// So the assertions below check the *outcome*, did the row change?, rather
 // than checking that the right function was called.
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -44,7 +44,7 @@ function check(name: string, condition: boolean, detail = ''): void {
         process.stdout.write(`  ok   ${name}\n`);
     } else {
         failures++;
-        process.stdout.write(`  FAIL ${name}${detail ? ` — ${detail}` : ''}\n`);
+        process.stdout.write(`  FAIL ${name}${detail ? `, ${detail}` : ''}\n`);
     }
 }
 
@@ -461,7 +461,7 @@ async function main(): Promise<void> {
         check(
             'the exact row count is shown',
             preview.text.includes('2 rows of 4 in orders'),
-            'two shipped orders out of four — measured, not estimated',
+            'two shipped orders out of four, measured, not estimated',
         );
         check('a token is offered', /token: [0-9a-f-]{36}/.test(preview.text));
 
@@ -487,7 +487,7 @@ async function main(): Promise<void> {
         check('an unknown token is refused', (await runApproved(ctx, 'not-a-token')).isError === true);
 
         // The agent that skips the preview and calls execute_approved with SQL
-        // in hand. It must be refused, and told which step it missed — a
+        // in hand. It must be refused, and told which step it missed, a
         // generic "Required" had one guessing at empty tokens.
         const skipped = z
             .object(executeApprovedInput)
@@ -535,7 +535,7 @@ async function main(): Promise<void> {
         check('reads still run without a prompt', !reads.isError && /3/.test(reads.text));
 
         // Approved as a unit, so a failure halfway must undo the half that
-        // worked — otherwise "Execution failed" describes a database that did
+        // worked, otherwise "Execution failed" describes a database that did
         // in fact change.
         const partial = await runQuery(
             ctx,
@@ -1177,7 +1177,7 @@ async function main(): Promise<void> {
                 maxRows: 1,
             }),
         ),
-        'pgvector returns a string, not an array — this is the shape that actually arrives',
+        'pgvector returns a string, not an array, this is the shape that actually arrives',
     );
 
     check(

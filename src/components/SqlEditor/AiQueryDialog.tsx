@@ -15,7 +15,7 @@ interface AiQueryDialogProps {
   /**
    * Receives the generated SQL and the request it came from. The prompt is
    * passed through so the audit log can record what was asked for, not just
-   * what was produced — an entry saying the model removed rows from `orders`
+   * what was produced, an entry saying the model removed rows from `orders`
    * is far less useful than one that also says the user asked to "clear out
    * the old orders".
    */
@@ -26,7 +26,7 @@ interface AiQueryDialogProps {
    * compile is sent back to the model once with the real error, before it
    * reaches the editor.
    *
-   * It compiles rather than executes, so it checks writes as well as reads —
+   * It compiles rather than executes, so it checks writes as well as reads,
    * catching an unknown column in an UPDATE is the whole point, and that is
    * exactly what a read-only dry run could never do.
    */
@@ -131,7 +131,7 @@ export function AiQueryDialog({
           <DialogTitle>Text to SQL</DialogTitle>
           <DialogDescription>
             {runsImmediately
-              ? "Describe what you want. In YOLO mode the generated SQL runs straight away — you won't see it first."
+              ? "Describe what you want. In YOLO mode the generated SQL runs straight away, you won't see it first."
               : "Describe what you want in plain words, and I'll write the SQL."}
           </DialogDescription>
         </DialogHeader>

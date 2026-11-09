@@ -81,7 +81,7 @@ const WORD_RE = /[a-z]+/g;
  * keeps eval runs reproducible, and it adds no model load to a client that may
  * be running entirely on CPU. LiteDB already ships on-device embeddings
  * (Transformers.js, MiniLM/BGE) for vector search, so swapping in semantic
- * retrieval later is a drop-in replacement for this function — worth doing
+ * retrieval later is a drop-in replacement for this function, worth doing
  * only if the cheap version proves the exemplars help at all.
  */
 export function selectExemplars(question: string, k: number): Exemplar[] {

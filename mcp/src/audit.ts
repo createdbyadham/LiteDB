@@ -53,7 +53,7 @@ export interface DecisionRecord {
  * One entry per statement, mirroring `queryGate.recordDecision`.
  *
  * Provenance is hard-coded to `ai` and never passed in. Over MCP the caller is
- * a model by construction — that is what the protocol is for — so offering a
+ * a model by construction, that is what the protocol is for, so offering a
  * `user` option would only create a way to mislabel the log.
  */
 export async function record(scope: AuditScope, entry: DecisionRecord): Promise<void> {

@@ -2,8 +2,8 @@
 // mistakes before a human ever sees them.
 //
 // The repair loop this feeds used to depend on *executing* the query and
-// catching the engine's error. That only ever helped read-only queries — the
-// guard refused to speculatively execute anything else — which meant the
+// catching the engine's error. That only ever helped read-only queries, the
+// guard refused to speculatively execute anything else, which meant the
 // failure people actually hit went uncaught: the model writes an UPDATE, it
 // lands in the editor, you click Execute, and *then* it turns out `orders` has
 // no column called `customer_name`.
@@ -47,7 +47,7 @@ export interface ValidationFailure {
  *
  * There is no "cannot explain this" wording to key off. So a kind-based
  * denylist got this wrong in both directions: TRUNCATE classifies as
- * destructive and COPY as write, both of which it let through — meaning a
+ * destructive and COPY as write, both of which it let through, meaning a
  * valid TRUNCATE was reported to the model as a syntax error and sent back to
  * be "fixed".
  */
@@ -66,7 +66,7 @@ const POSTGRES_EXPLAINABLE = new Set([
  * is: `SELEC * FROM orders` has no recognisable verb, so it classified as
  * unknown and sailed through unchecked. A verb the classifier cannot read is
  * far more likely to be a typo than a valid utility statement it has never
- * heard of — and when it is wrong, the cost is one wasted repair attempt, not
+ * heard of, and when it is wrong, the cost is one wasted repair attempt, not
  * a wrong answer.
  */
 export function canValidate(statement: StatementClassification, dialect: SqlDialect): boolean {
@@ -80,7 +80,7 @@ export function canValidate(statement: StatementClassification, dialect: SqlDial
 /**
  * The compile-only form of a statement.
  *
- * Plain `EXPLAIN`, never `EXPLAIN ANALYZE`, and never the JSON variant — the
+ * Plain `EXPLAIN`, never `EXPLAIN ANALYZE`, and never the JSON variant, the
  * output is discarded, so the cheapest form that still compiles the statement
  * is the right one.
  */
@@ -110,7 +110,7 @@ export async function validateScript(
             // No message-based escape hatch here, deliberately. An earlier
             // version skipped errors matching /cannot|not supported/, on the
             // assumption that Postgres says something like "cannot EXPLAIN this
-            // statement". It does not — it reports `syntax error at or near
+            // statement". It does not, it reports `syntax error at or near
             // "TRUNCATE"`, which is exactly what a genuine defect looks like.
             // The pattern could never fire, and widening it to catch "syntax
             // error" would swallow the errors this exists to find. Knowing

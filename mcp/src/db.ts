@@ -2,7 +2,7 @@
 // wrong.
 //
 // Layer one of the safety model is `sqlClassifier` deciding what a statement
-// is. That is parsing, and parsing can be beaten — a dialect quirk, a syntax
+// is. That is parsing, and parsing can be beaten, a dialect quirk, a syntax
 // nobody anticipated. So layer two does not read the SQL at all: reads run on
 // a connection that is *physically* incapable of writing. SQLite gets a
 // connection opened read-only; Postgres runs every read inside a READ ONLY
@@ -59,7 +59,7 @@ function openSqlite(path: string, readOnly: boolean): DatabaseSync {
  *
  * The desktop app now opens the file natively and shares it through SQLite's
  * own locking. Before 2.5 it saved by writing a whole file image, which a
- * long-lived connection here did not notice — so this server opened per call
+ * long-lived connection here did not notice, so this server opened per call
  * to be safe with those versions. That is still the right shape: every call
  * starts from the file as it is now, and holds no handle anything else has
  * to wait for.
@@ -83,14 +83,14 @@ class SqliteDatabase extends SqliteCatalog {
             // itself did, and everything below depends on it to tell a query from
             // a statement that only reports `changes`. Degrading gracefully was
             // the first instinct and the wrong one: without it every SELECT falls
-            // through to the write branch and comes back as "0 rows changed" —
+            // through to the write branch and comes back as "0 rows changed",
             // an answer that looks like data rather than like a failure. A server
             // that cannot read correctly should say so at startup.
             if (typeof probe.prepare('SELECT 1').columns !== 'function') {
                 throw new Error(
                     `This Node (${process.version}) provides node:sqlite without ` +
                         'StatementSync.columns(), so LiteDB cannot distinguish a query from a ' +
-                        'write and would report every read as 0 rows changed. Upgrade Node — ' +
+                        'write and would report every read as 0 rows changed. Upgrade Node, ' +
                         '24 LTS or newer is safest.',
                 );
             }
@@ -275,7 +275,7 @@ class PostgresDatabase extends PostgresCatalog {
 
 /**
  * A refused connection to `localhost` tries ::1 and 127.0.0.1 and rejects with
- * an AggregateError whose own message is empty — which reached the agent as a
+ * an AggregateError whose own message is empty, which reached the agent as a
  * blank error. Name the server (never the password) and the real causes.
  */
 export function postgresConnectFailure(target: string, error: unknown): string {

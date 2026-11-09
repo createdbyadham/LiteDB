@@ -1,4 +1,4 @@
-// Changes made by hand in the grid — edits, inserts, deletes, imports — go in
+// Changes made by hand in the grid, edits, inserts, deletes, imports, go in
 // the audit log next to the editor's statements, so "every hand-made change"
 // in the README is true of the table editor as well.
 

@@ -4,14 +4,14 @@
 // could write itself: a similarity query needs a query *vector*, and a model
 // producing SQL has no way to produce one. Asking it to would mean sending the
 // search text to an embedding API. Here the text is embedded locally by
-// transformers.js — the same MiniLM/BGE models the desktop app loads — so
+// transformers.js, the same MiniLM/BGE models the desktop app loads, so
 // "find rows about billing errors" never leaves the machine, which is the
 // whole premise of a local-first database client.
 //
 // Everything the model supplies that ends up in an identifier position is
 // resolved against the live catalogue first: a table name must match a real
-// table, a column name a real vector column of it. The part it cannot supply —
-// the vector — is numbers this file generated.
+// table, a column name a real vector column of it. The part it cannot supply,
+// the vector, is numbers this file generated.
 
 import { record } from '../audit';
 import { literal, type Database } from '../catalog';
@@ -35,8 +35,8 @@ export interface VectorColumn {
 /**
  * pgvector columns and their declared width.
  *
- * `format_type` is the only place the dimension is recorded — information_schema
- * reports the type as USER-DEFINED and nothing else — so it is parsed back out
+ * `format_type` is the only place the dimension is recorded, information_schema
+ * reports the type as USER-DEFINED and nothing else, so it is parsed back out
  * of `vector(384)`.
  */
 export async function findVectorColumns(db: Database): Promise<VectorColumn[]> {
@@ -89,7 +89,7 @@ export async function listVectorColumns(ctx: ToolContext): Promise<ToolResult> {
         text: [
             `${columns.length} vector column(s):`,
             '',
-            ...columns.map((c) => `  ${c.table}.${c.column} — ${c.dimensions} dimensions`),
+            ...columns.map((c) => `  ${c.table}.${c.column}, ${c.dimensions} dimensions`),
             '',
             'semantic_search takes either a text query (embedded locally) or the id of ' +
                 'an existing row to find neighbours of.',
@@ -116,7 +116,7 @@ async function embed(
     } catch {
         throw new Error(
             "Text search needs the '@xenova/transformers' package. Run: npm install " +
-                '@xenova/transformers — or search by row_id instead, which needs no model.',
+                '@xenova/transformers, or search by row_id instead, which needs no model.',
         );
     }
     const { configureEmbeddingCache, localEmbeddings } = module;

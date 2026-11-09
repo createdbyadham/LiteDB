@@ -1,8 +1,8 @@
 // An agent wants to change the database: the card that decides.
 //
 // litedb-mcp holds the write and waits (see src/lib/agentApproval.ts). This
-// shows what it would do — the statement, the exact row count, the rows it
-// deletes, changes or adds — and nothing runs until someone clicks Approve.
+// shows what it would do, the statement, the exact row count, the rows it
+// deletes, changes or adds, and nothing runs until someone clicks Approve.
 // Closing the card declines: the safe way to be wrong is that nothing runs.
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
@@ -46,7 +46,7 @@ function ImpactLine({ statement }: { statement: ApprovalStatement }) {
         Affects {count(affectedRows)}
         {of}
         {where}
-        {all ? ' — every row in the table' : ''}
+        {all ? ', every row in the table' : ''}
       </span>
     );
   }
@@ -65,7 +65,7 @@ function DiffTable({ diff, affected }: { diff: ApprovalDiff; affected: number | 
   const label =
     diff.mode === 'update' ? 'Rows it changes' : diff.mode === 'insert' ? 'Rows it adds' : 'Rows it deletes';
   const shown = diff.truncated
-    ? ` — the first ${count(diff.rows.length)}${affected !== null ? ` of ${count(affected)}` : ''}`
+    ? `, the first ${count(diff.rows.length)}${affected !== null ? ` of ${count(affected)}` : ''}`
     : '';
 
   // An UPDATE shows the first column, to say which row, and every column it sets.

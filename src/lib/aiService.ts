@@ -39,7 +39,7 @@ export type AISettings = {
    * Whether to include a few distinct values of low-cardinality text columns
    * in the schema sent to the model. Materially improves accuracy on
    * enumerated columns ('DE' vs 'Germany'), at the cost of putting real cell
-   * values in the prompt — so it is a visible choice, not a silent default.
+   * values in the prompt, so it is a visible choice, not a silent default.
    */
   includeSampleValues: boolean;
   /**
@@ -334,7 +334,7 @@ async function pingModel(client: OpenAI, model: string): Promise<void> {
 
 export interface ConnectionTestResult {
   ok: boolean;
-  /** The provider's own message. Shown verbatim — it is usually specific. */
+  /** The provider's own message. Shown verbatim, it is usually specific. */
   error?: string;
   /** The model actually tested, after defaulting. */
   model?: string;
@@ -386,7 +386,7 @@ async function proxyJson(url: string, method: 'GET' | 'POST', body?: unknown): P
 
 /**
  * Ollama's window is a runtime setting (num_ctx), not a property of the
- * model, and a prompt longer than it is cut from the start — which drops the
+ * model, and a prompt longer than it is cut from the start, which drops the
  * schema first. Ask the server rather than assume: a loaded model reports
  * the window it runs with, and a Modelfile may set num_ctx.
  */
@@ -498,7 +498,7 @@ export const aiService = {
   },
   /**
    * The active model's context window. Asked of Ollama, looked up by name
-   * otherwise, and null when unknown — the meter then shows usage without
+   * otherwise, and null when unknown, the meter then shows usage without
    * inventing a limit to warn about.
    */
   async contextWindow(): Promise<ContextWindow> {
@@ -600,7 +600,7 @@ export const aiService = {
    * Check that the configured provider, key and model actually work, by
    * doing the smallest real thing: a one-token completion.
    *
-   * Listing models is not enough — it proves the key is valid but not that
+   * Listing models is not enough, it proves the key is valid but not that
    * the chosen model exists or is accessible to this account, which is the
    * failure people actually hit.
    */
@@ -644,13 +644,13 @@ export const aiService = {
    *
    * When `validate` is supplied, a statement that fails to compile is fed back
    * to the model once with the engine's own error message. This recovers a
-   * failure class no prompt wording fixed — hallucinated column names, which
+   * failure class no prompt wording fixed, hallucinated column names, which
    * the database reports precisely.
    *
    * `validate` compiles rather than executes (see sqlValidator.ts), which is
    * what lets the loop cover writes. The previous version dry-ran the query
    * and was gated behind the read-only guard, so it could only ever check
-   * SELECTs — and a SELECT that fails to run is the case the user was least
+   * SELECTs, and a SELECT that fails to run is the case the user was least
    * likely to be hurt by.
    */
   async generateSqlQuery(
@@ -695,7 +695,7 @@ export const aiService = {
 
         // No read-only gate here, deliberately. `validate` compiles the
         // statement instead of running it, so a write is as safe to check as
-        // a read — and gating on read-only is precisely what stopped the old
+        // a read, and gating on read-only is precisely what stopped the old
         // loop from catching the errors that mattered.
         const error = await validate(sql);
         if (!error) return sql;

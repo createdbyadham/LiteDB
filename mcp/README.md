@@ -1,25 +1,25 @@
 # litedb-mcp
 
 An MCP server that lets Claude Desktop, Claude Code or any MCP client work
-against a local SQLite or PostgreSQL database — through LiteDB's write-safety
+against a local SQLite or PostgreSQL database, through LiteDB's write-safety
 layer rather than around it.
 
 The difference from pointing a model at a raw connection string is one
 sentence: **a write never runs on the first call.** `query` classifies the SQL,
 measures what it would do, and hands back a preview and a single-use token.
 Running it is a separate, separately-named tool call. That is the call your MCP
-client asks you to approve — attached to a result that already told you
+client asks you to approve, attached to a result that already told you
 `2 rows of 4 in orders`.
 
 ```
 > query({ sql: "DELETE FROM orders WHERE status = 'shipped'" })
 
-APPROVAL REQUIRED — nothing has run.
+APPROVAL REQUIRED: nothing has run.
 
 Generated SQL contains a write: removes rows in orders matching the WHERE clause.
 
   1. DELETE FROM orders WHERE status = 'shipped'
-     write · table: orders — removes rows in orders matching the WHERE clause
+     write · table: orders, removes rows in orders matching the WHERE clause
      affects: 2 rows of 4 in orders
      plan: SEARCH orders USING COVERING INDEX orders_status_idx (status=?)
 
@@ -34,7 +34,7 @@ To run exactly the statements above, call execute_approved with:
 **Using the LiteDB app? You do not need this package.** The app serves these
 same tools itself: point your agent at `LiteDB --mcp` (Settings → **Agents**
 copies the command for your install), with no Node involved. This package is
-for machines without the app — CI, a server — and keeps working alongside it.
+for machines without the app, CI, a server, and keeps working alongside it.
 
 If LiteDB is running, the server follows whatever you have open. Quitting the
 app clears the handoff (and any Postgres password in it). In the app:
@@ -69,7 +69,7 @@ That file is `claude_desktop_config.json` for Claude Desktop; for Claude Code
 it is `.mcp.json` in the project, or `claude mcp add`. MCP servers load at
 startup, so add it, then start a fresh session.
 
-Without the app — a CI box, a machine that has never launched LiteDB — set the
+Without the app, a CI box, a machine that has never launched LiteDB, set the
 target as environment variables. Env wins when both are present:
 
 ```json
@@ -100,8 +100,8 @@ For PostgreSQL, swap the env block:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | *(none)* | the app's currently open database | Handoff file next to the audit log. Removed when the app quits. |
-| `LITEDB_SQLITE_PATH` | — | Path to a SQLite file. Mutually exclusive with the next. Wins over the app. |
-| `LITEDB_DATABASE_URL` | — | `postgres://…` connection string. Wins over the app. |
+| `LITEDB_SQLITE_PATH` |, | Path to a SQLite file. Mutually exclusive with the next. Wins over the app. |
+| `LITEDB_DATABASE_URL` |, | `postgres://…` connection string. Wins over the app. |
 | `LITEDB_POLICY` | app dropdown, or `read-only` for env | `read-only`, `guarded`, or `unrestricted`. |
 | `LITEDB_MAX_ROWS` | `200` | Cap on rows returned by one tool call. |
 | `LITEDB_AUDIT_PATH` | the desktop app's log | Where statements are recorded. |
@@ -110,7 +110,7 @@ For PostgreSQL, swap the env block:
 
 **Following the app.** Connect in LiteDB and the agent uses that database. The
 status-bar dropdown is the policy. SQLite is the file on disk, not the
-editor's unsaved buffer — save first if you have been editing. An in-memory
+editor's unsaved buffer, save first if you have been editing. An in-memory
 database cannot be shared; save it to a file. Quitting LiteDB deletes the
 handoff file, so this is the *open* connection, not the last one.
 
@@ -126,7 +126,7 @@ If the app is in YOLO, the handoff maps that down to `guarded`. Setting
 `LITEDB_POLICY=yolo` refuses to start and says why.
 
 **The Postgres password.** Sharing a connection means sharing the credential.
-The handoff file stores it in plaintext in your app-data directory — the same
+The handoff file stores it in plaintext in your app-data directory, the same
 exposure as putting it in `claude_desktop_config.json`, in a less
 screenshot-prone place, and out of a file you might sync between machines.
 Disconnecting or quitting the app deletes the file. The cleaner version would
@@ -145,7 +145,7 @@ property.
 | `write` | Runs a small, bounded write in one call where the app allows it for the connection (Settings → Agents); otherwise previews it like `query`, with the reason. |
 | `list_vector_columns` | pgvector columns and their dimensions. |
 | `semantic_search` | Nearest-neighbour search, with the query text embedded on your machine. |
-| `audit_log` | What has been proposed, approved and run — including from the desktop app. |
+| `audit_log` | What has been proposed, approved and run, including from the desktop app. |
 
 Plus a `litedb://schema` resource: the whole schema as one document, for when
 you want the picture rather than one table.
@@ -173,7 +173,7 @@ npm install @xenova/transformers
 ```
 
 It is an optional peer dependency because it pulls in the ONNX runtime and
-sharp — around 210 MB, against 22 MB for the server itself. Charging that to
+sharp, around 210 MB, against 22 MB for the server itself. Charging that to
 someone who only wants `list_tables` would be the wrong default. Without it,
 `semantic_search` still works by `row_id`; text search returns the install
 command rather than failing obscurely.
@@ -186,8 +186,8 @@ about 25 seconds. After that it is cached in `LITEDB_EMBEDDING_CACHE`.
 Three independent mechanisms, in the order they engage.
 
 **1. Classification.** Every statement goes through the same tokenizer and
-classifier the desktop app uses — string literals, comments, quoted
-identifiers, dollar-quoting and paren depth all handled — and comes out as
+classifier the desktop app uses, string literals, comments, quoted
+identifiers, dollar-quoting and paren depth all handled, and comes out as
 `read`, `write`, `destructive`, `ddl`, `session` or `unknown`. An `unknown`
 statement is gated *as destructive*: the classifier failing to recognise
 something is exactly when it is least safe to assume it is harmless.
@@ -195,7 +195,7 @@ something is exactly when it is least safe to assume it is harmless.
 **2. The policy floor.** Provenance is part of the risk. A `DELETE` you typed
 and a `DELETE` a model wrote are the same SQL and not the same event. Over
 MCP the caller is a model by construction, so generated SQL is held to the
-`guarded` floor no matter how permissively the server was started — which is
+`guarded` floor no matter how permissively the server was started, which is
 why `unrestricted` still previews. There is no configuration that makes a
 write run on the first call.
 
@@ -208,17 +208,17 @@ classifier meets an engine that refuses it:
 ERROR:  cannot execute UPDATE in a read-only transaction
 ```
 
-The impact preview runs there too, and it never uses `EXPLAIN ANALYZE` —
+The impact preview runs there too, and it never uses `EXPLAIN ANALYZE`,
 which in PostgreSQL executes the statement it claims to be explaining.
 
 ### Approval in the LiteDB window
 
 While the desktop app is open (the server is following its handoff),
 `execute_approved` does not run on the agent's say-so. It writes the request to
-`approvals/` in the app's data folder — the statement, the exact row count and
-a sample of the rows it deletes, changes or adds — and waits for the person at
+`approvals/` in the app's data folder, the statement, the exact row count and
+a sample of the rows it deletes, changes or adds, and waits for the person at
 the window. Approve runs exactly what was previewed; Decline returns
-`DECLINED in LiteDB — nothing ran` and spends the token. With no answer within
+`DECLINED in LiteDB, nothing ran` and spends the token. With no answer within
 50 seconds (`LITEDB_APPROVAL_WAIT_MS`), the call returns `WAITING FOR APPROVAL
 IN LITEDB` and keeps the token, and the agent calls again. That keeps each call
 under the 60-second request timeout most clients use.
@@ -230,8 +230,8 @@ client, as before.
 ### Undo
 
 Before an approved UPDATE or DELETE runs, the server saves the rows it is about
-to touch — up to 5,000, keyed by primary key or SQLite's rowid, and for an
-UPDATE the values it is about to write — to `undo/<id>.json` beside the audit
+to touch, up to 5,000, keyed by primary key or SQLite's rowid, and for an
+UPDATE the values it is about to write, to `undo/<id>.json` beside the audit
 log, and the audit entry links to it. For a SQLite INSERT it notes the rowids
 the new rows get. **Undo** in the app's Audit panel puts the rows back, leaving
 alone any row that changed again since. Scripts of several statements, upserts,
@@ -256,20 +256,20 @@ asking.
 The audit log is append-only as a property of the API, not of the file. It
 sits in your own app-data directory and you can edit it. It is a record for
 its owner, not tamper-evident storage for a third party. It holds SQL
-verbatim, which means literal values — that is the point, and it is why the
+verbatim, which means literal values, that is the point, and it is why the
 file never leaves the machine.
 
 ## The audit log is shared with the desktop app
 
 By default this server appends to the same file LiteDB writes:
 
-- Windows — `%LOCALAPPDATA%\com.adhamehab.litedb\audit\sql-audit.jsonl`
-- macOS — `~/Library/Application Support/com.adhamehab.litedb/audit/sql-audit.jsonl`
-- Linux — `~/.local/share/com.adhamehab.litedb/audit/sql-audit.jsonl`
+- Windows, `%LOCALAPPDATA%\com.adhamehab.litedb\audit\sql-audit.jsonl`
+- macOS, `~/Library/Application Support/com.adhamehab.litedb/audit/sql-audit.jsonl`
+- Linux, `~/.local/share/com.adhamehab.litedb/audit/sql-audit.jsonl`
 
 So a statement an agent ran over MCP shows up in the app's audit view next to
 the ones you ran yourself. A proposal is logged when it is made, not only when
-it is approved — a write an agent suggested and never came back for still
+it is approved, a write an agent suggested and never came back for still
 leaves a trace:
 
 ```
@@ -289,7 +289,7 @@ npm run typecheck:mcp
 npm run mcp:build      # bundles to mcp/dist/index.js
 ```
 
-The self-test asserts outcomes rather than calls — after a `query` that
+The self-test asserts outcomes rather than calls, after a `query` that
 previews a `DELETE`, it reopens the database on its own connection and checks
 the rows are still there. Every piece of the guarantee can degrade silently,
 leaving a server that still answers questions correctly and guards nothing.

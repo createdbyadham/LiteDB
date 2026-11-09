@@ -4,8 +4,8 @@
 // a tool result, and the shape of that result is the whole design:
 //
 //   * A read runs and returns rows.
-//   * A write does not run. It returns what it *would* do — the statement, the
-//     row count, the plan — and a single-use token.
+//   * A write does not run. It returns what it *would* do, the statement, the
+//     row count, the plan, and a single-use token.
 //   * Running it is a second, separately named tool call: `execute_approved`.
 //   * A statement the policy forbids gets neither, and says why.
 //
@@ -20,7 +20,7 @@
 // none: LiteDB cannot make the host ask. A user who allowlists
 // `execute_approved` has turned the prompt off, and this server has no way to
 // know or prevent that. What it can guarantee is narrower and still worth
-// having — that the write was classified, that its impact was measured and
+// having, that the write was classified, that its impact was measured and
 // reported before anything ran, that what runs is byte-for-byte what was
 // previewed, and that all of it reaches the audit log either way.
 
@@ -75,7 +75,7 @@ function describeStatement(statement: StatementClassification, index: number): s
     const parts: string[] = [statement.kind];
     if (statement.table) parts.push(`table: ${statement.table}`);
     if (statement.unbounded) parts.push('unbounded (no WHERE clause)');
-    return `  ${index + 1}. ${statement.sql}\n     ${parts.join(' · ')} — ${statement.reason}`;
+    return `  ${index + 1}. ${statement.sql}\n     ${parts.join(' · ')}, ${statement.reason}`;
 }
 
 function describeImpact(estimate: ImpactEstimate): string {
@@ -133,7 +133,7 @@ async function readStatements(
 }
 
 /**
- * Run approved statements — all of them, or none.
+ * Run approved statements, all of them, or none.
  *
  * A script is approved as a unit. Letting the first `UPDATE` commit and the
  * second fail would leave the database in a state nobody agreed to, and the
@@ -142,7 +142,7 @@ async function readStatements(
  *
  * A single statement is left alone deliberately. It is already atomic, and
  * wrapping it would break the handful of statements that cannot run inside a
- * transaction at all — `VACUUM`, `CREATE INDEX CONCURRENTLY` — for no gain.
+ * transaction at all, `VACUUM`, `CREATE INDEX CONCURRENTLY`, for no gain.
  */
 async function runApprovedStatements(
     db: Database,
@@ -278,7 +278,7 @@ export interface QueryOptions {
 }
 
 export async function runQuery(ctx: ToolContext, sql: string, options: QueryOptions = {}): Promise<ToolResult> {
-    // Provenance is always 'ai'. That is not a default — it is what MCP means,
+    // Provenance is always 'ai'. That is not a default, it is what MCP means,
     // and it is what holds generated SQL to the policy floor no matter how
     // permissively the server was started.
     const decision = evaluateScript(sql, ctx.config.policy, 'ai');
@@ -291,7 +291,7 @@ export async function runQuery(ctx: ToolContext, sql: string, options: QueryOpti
             error: decision.reason,
         });
         return {
-            text: ['REFUSED — nothing ran.', '', decision.reason, '', footer(decision)].join('\n'),
+            text: ['REFUSED: nothing ran.', '', decision.reason, '', footer(decision)].join('\n'),
             isError: true,
         };
     }
@@ -324,7 +324,7 @@ export async function runQuery(ctx: ToolContext, sql: string, options: QueryOpti
         }
     }
 
-    // confirm — measure the impact, hand back a token, run nothing.
+    // confirm, measure the impact, hand back a token, run nothing.
     const runner = previewRunner(ctx.db);
     const estimates: ImpactEstimate[] = [];
     for (const statement of decision.statements) {
@@ -380,7 +380,7 @@ export async function runQuery(ctx: ToolContext, sql: string, options: QueryOpti
 
     return {
         text: [
-            'APPROVAL REQUIRED — nothing has run.',
+            'APPROVAL REQUIRED: nothing has run.',
             '',
             decision.reason,
             ...(notDirect ? [`Not run directly: ${notDirect}.`] : []),
@@ -401,7 +401,7 @@ export async function runQuery(ctx: ToolContext, sql: string, options: QueryOpti
 }
 
 /**
- * execute_approved's arguments. Token only — see approvals.ts for why.
+ * execute_approved's arguments. Token only, see approvals.ts for why.
  *
  * The SDK rejects a call without a token before runApproved sees it, so the
  * hint has to live on the schema too. `message` rather than `required_error`
@@ -419,7 +419,7 @@ function waitingText(approval: approvals.PendingApproval): string {
     const expires = new Date(approval.createdAt + approvals.TTL_MS);
     const at = `${String(expires.getHours()).padStart(2, '0')}:${String(expires.getMinutes()).padStart(2, '0')}`;
     return [
-        'WAITING FOR APPROVAL IN LITEDB — nothing has run.',
+        'WAITING FOR APPROVAL IN LITEDB: nothing has run.',
         '',
         'The statement, its row count and the rows it changes are on screen in the ' +
             'LiteDB window. Tell the person you are working for, and once they have ' +
@@ -431,7 +431,7 @@ function waitingText(approval: approvals.PendingApproval): string {
 }
 
 const DECLINED_TEXT = [
-    'DECLINED in LiteDB — nothing ran.',
+    'DECLINED in LiteDB, nothing ran.',
     '',
     'The person at the LiteDB window said no to this write. Do not run it again ' +
         'or work around it; ask them what they want instead.',

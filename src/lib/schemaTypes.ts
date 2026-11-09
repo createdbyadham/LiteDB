@@ -13,7 +13,7 @@ export interface ColumnSchema {
     isNotNull?: boolean;
     /**
      * A few distinct values, for low-cardinality text columns only. Lets the
-     * model resolve enumerations it would otherwise have to guess at — asked
+     * model resolve enumerations it would otherwise have to guess at, asked
      * for "customers in Germany" against a column storing 'DE', names and
      * types alone are not enough. Populated by schemaSamples.ts, which owns
      * the eligibility and privacy rules.

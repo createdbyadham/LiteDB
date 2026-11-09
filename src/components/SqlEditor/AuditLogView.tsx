@@ -4,8 +4,8 @@
 // entry, because a log its subject can quietly prune answers a different
 // question from the one it exists to answer.
 //
-// The columns are chosen for the question people actually bring to a log —
-// "what changed my data, and did I agree to it?" — so provenance, decision and
+// The columns are chosen for the question people actually bring to a log,
+// "what changed my data, and did I agree to it?", so provenance, decision and
 // outcome sit next to the SQL rather than behind a detail view.
 
 import { useCallback, useEffect, useState } from 'react';
@@ -144,7 +144,7 @@ export function AuditLogView() {
             await refresh();
         } catch (error) {
             toast({
-                title: 'Undo failed — nothing changed',
+                title: 'Undo failed, nothing changed',
                 description: error instanceof Error ? error.message : String(error),
                 variant: 'destructive',
             });
@@ -247,7 +247,7 @@ export function AuditLogView() {
                                         >
                                             {entry.actualRows.toLocaleString()} row
                                             {entry.actualRows === 1 ? '' : 's'} changed
-                                            {/* Shown only when the two disagree — the case
+                                            {/* Shown only when the two disagree, the case
                                                 where the approval dialog was wrong. */}
                                             {entry.estimatedRows != null &&
                                                 entry.estimatedRows !== entry.actualRows &&

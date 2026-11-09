@@ -1,7 +1,7 @@
 // The Tauri commands that reach the database (src-tauri/src/db).
 //
 // Everything that talks to SQLite or Postgres goes through `dbRun`. Results
-// arrive as rows of arrays — objects keyed by column name lost one of two
+// arrive as rows of arrays, objects keyed by column name lost one of two
 // columns that shared a name, which every join on `id` does.
 
 import { invoke } from '@tauri-apps/api/core';

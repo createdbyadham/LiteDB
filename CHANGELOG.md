@@ -110,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **"Use SSL" is now "Require SSL", and the app obeys it.** Ticked requires an encrypted connection; unticked connects without encryption — the same as the MCP server. Previously the app ignored the box and tried TLS anyway, so a saved connection to a host that insists on TLS (Neon, RDS, most managed Postgres) worked unticked and will now fail until you tick it. The error says so.
+- **"Use SSL" is now "Require SSL", and the app obeys it.** Ticked requires an encrypted connection; unticked connects without encryption, the same as the MCP server. Previously the app ignored the box and tried TLS anyway, so a saved connection to a host that insists on TLS (Neon, RDS, most managed Postgres) worked unticked and will now fail until you tick it. The error says so.
 - SQLite files are saved through a guarded write: LiteDB will not save over a database another program has open or has changed since you loaded it, and shows the state in the status bar instead of in a toast that disappears.
 
 ### Fixed
@@ -123,13 +123,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **PostgreSQL support** — connect, browse, and edit PostgreSQL databases alongside SQLite via the Connection Manager
-- **Vector search & semantic search** — pgvector-powered similarity search with local embedding models (`all-MiniLM-L6-v2`, `bge-base-en-v1.5`, `bge-large-en-v1.5`) via Transformers.js; search by row ID or natural language text with cosine, L2, and inner product distance metrics
-- **AI text-to-SQL agent** — context-aware RAG pipeline that introspects schema and injects it into LLM prompts; supports Ollama (local/privacy-first), OpenAI, GitHub, and Azure providers with driver-specific SQL validation
-- **Schema visualization** — interactive ERD with drag-and-drop tables, auto-layout, foreign key relationship lines, and PNG/SVG export
-- **Autosave & export** — automatic change persistence and query result export to CSV, Excel, and JSON
-- **Batch operations & SQL scripting** — execute multiple statements with transaction support; save and reuse SQL scripts
-- **Dual database switcher** — toggle between SQLite and PostgreSQL connections in the UI
+- **PostgreSQL support**, connect, browse, and edit PostgreSQL databases alongside SQLite via the Connection Manager
+- **Vector search & semantic search**, pgvector-powered similarity search with local embedding models (`all-MiniLM-L6-v2`, `bge-base-en-v1.5`, `bge-large-en-v1.5`) via Transformers.js; search by row ID or natural language text with cosine, L2, and inner product distance metrics
+- **AI text-to-SQL agent**, context-aware RAG pipeline that introspects schema and injects it into LLM prompts; supports Ollama (local/privacy-first), OpenAI, GitHub, and Azure providers with driver-specific SQL validation
+- **Schema visualization**, interactive ERD with drag-and-drop tables, auto-layout, foreign key relationship lines, and PNG/SVG export
+- **Autosave & export**, automatic change persistence and query result export to CSV, Excel, and JSON
+- **Batch operations & SQL scripting**, execute multiple statements with transaction support; save and reuse SQL scripts
+- **Dual database switcher**, toggle between SQLite and PostgreSQL connections in the UI
 
 ### Changed
 

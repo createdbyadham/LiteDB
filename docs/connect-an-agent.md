@@ -1,10 +1,10 @@
 # Connect an agent
 
-LiteDB is the MCP server. Your agent's app — Claude Desktop, Claude Code,
-Cursor, VS Code — starts `LiteDB --mcp`, which connects to the LiteDB window
+LiteDB is the MCP server. Your agent's app, Claude Desktop, Claude Code,
+Cursor, VS Code, starts `LiteDB --mcp`, which connects to the LiteDB window
 you have open. There is nothing else to install: no Node, no npm package.
 
-The agent follows the connection on screen — no path, no URL, no restart when
+The agent follows the connection on screen, no path, no URL, no restart when
 you switch databases. The status-bar policy is the agent's policy (YOLO maps
 down to guarded), and a connection tagged production starts read-only for the
 agent as well. Its queries run on the app's own connection, so a Postgres
@@ -20,8 +20,8 @@ Settings → **Agents**, or the **MCP** chip in the status bar.
 
 - Green “Agents can see this connection” means a database is open for agents.
 - **Add to Claude Desktop** merges `mcpServers.litedb` into
-  `claude_desktop_config.json` — always the documented file, plus the Windows
-  Store copy when the Store version is installed. Fully quit Claude — tray too —
+  `claude_desktop_config.json`, always the documented file, plus the Windows
+  Store copy when the Store version is installed. Fully quit Claude, tray too,
   then a new chat.
 - Everyone else: copy the snippet for Claude Code, Cursor, OpenCode, or VS Code.
   The snippets carry this install's path.
@@ -58,7 +58,7 @@ MCP servers load at host startup. Add the entry, then start a **new** session.
 
 ## Without the app
 
-On a machine without LiteDB — CI, a server — the same tools ship as the npm
+On a machine without LiteDB, CI, a server, the same tools ship as the npm
 package `litedb-mcp` (Node 22.5+ with `npx` on the host's PATH): set
 `LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`. Run alongside the app, it
 follows the window through a handoff file instead. Details:
@@ -68,8 +68,8 @@ follows the window through a handoff file instead. Details:
 
 Connect in LiteDB first. Then in the agent:
 
-1. **“What’s in this database?”** — should call `list_tables` / `describe_table`.
-2. **“Delete the shipped orders.”** — should `query` a DELETE, return a preview
+1. **“What’s in this database?”**, should call `list_tables` / `describe_table`.
+2. **“Delete the shipped orders.”**, should `query` a DELETE, return a preview
    and a token, and **not** run it yet.
 
 Watch, in this order:

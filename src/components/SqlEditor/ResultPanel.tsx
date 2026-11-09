@@ -145,7 +145,7 @@ export function ResultPanel({ outcome, running, onCancel, onFix, onExplainError,
         )}
         {anyWrites && !error && (
           <span className={cn(changed === 0 ? 'text-warning' : 'text-muted-foreground')}>
-            {changed === 0 ? 'nothing matched — 0 rows changed' : `${plural(changed, 'row')} changed`}
+            {changed === 0 ? 'nothing matched, 0 rows changed' : `${plural(changed, 'row')} changed`}
           </span>
         )}
         <span className="text-muted-foreground tabular-nums">{outcome.elapsedMs.toLocaleString()} ms</span>

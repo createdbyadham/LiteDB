@@ -28,7 +28,7 @@ let source = '';
 try {
     source = readFileSync(ENTRY, 'utf8');
 } catch {
-    problems.push(`no bundle at ${ENTRY} — run: npm run mcp:build`);
+    problems.push(`no bundle at ${ENTRY}, run: npm run mcp:build`);
 }
 
 if (source) {

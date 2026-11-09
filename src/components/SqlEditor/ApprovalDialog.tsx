@@ -6,7 +6,7 @@
 // A count is the difference between clicking through a warning and reading it.
 //
 // The typed confirmation is deliberately rationed. It appears only for
-// statements that change data with no predicate bounding them — the class
+// statements that change data with no predicate bounding them, the class
 // where a mis-click cannot be undone and where there is no row count to show
 // short of the whole table. Applying it to every write would train the habit
 // of typing the word without reading the sentence above it.
@@ -89,7 +89,7 @@ function ImpactLine({ preview }: { preview: ImpactEstimate }) {
             <span className={all ? 'text-destructive font-medium' : ''}>
                 Affects {formatCount(exactRows)}
                 {proportion}
-                {all ? ' — every row in the table' : ''}
+                {all ? ', every row in the table' : ''}
             </span>
         );
     }
@@ -99,7 +99,7 @@ function ImpactLine({ preview }: { preview: ImpactEstimate }) {
     }
 
     if (error) {
-        return <span className="text-muted-foreground">Impact unavailable — {error}</span>;
+        return <span className="text-muted-foreground">Impact unavailable, {error}</span>;
     }
 
     return <span className="text-muted-foreground">Impact could not be estimated</span>;

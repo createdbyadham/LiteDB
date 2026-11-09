@@ -23,8 +23,8 @@ type PipelineProgress = {
 env.allowLocalModels = false;
 
 // Only a browser has a Cache API. transformers.js does not degrade when asked
-// for one it cannot provide — it throws "Browser cache is not available in
-// this environment" before the first byte is fetched — so this has to be a
+// for one it cannot provide, it throws "Browser cache is not available in
+// this environment" before the first byte is fetched, so this has to be a
 // question about the host rather than a constant. Node falls back to the
 // filesystem cache, which transformers.js enables on its own. Probed with `in`
 // rather than `typeof` so it compiles under a tsconfig with no DOM types.

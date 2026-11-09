@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Self-test for the harness. No model calls, no API keys, no cost — so CI can
+// Self-test for the harness. No model calls, no API keys, no cost, so CI can
 // run it on every pull request.
 //
 // An eval harness is measurement equipment: if the guard or the comparator is
@@ -34,7 +34,7 @@ function check(name: string, condition: boolean, detail = ''): void {
         process.stdout.write(`  ok   ${name}\n`);
     } else {
         failures++;
-        process.stdout.write(`  FAIL ${name}${detail ? ` — ${detail}` : ''}\n`);
+        process.stdout.write(`  FAIL ${name}${detail ? `, ${detail}` : ''}\n`);
     }
 }
 
@@ -268,7 +268,7 @@ async function main(): Promise<void> {
         'reporting an unexplainable statement as invalid would have the model fix working SQL',
     );
     // Measured against Postgres 16: it rejects these at the grammar, with
-    // `syntax error at or near "TRUNCATE"` — indistinguishable from a real
+    // `syntax error at or near "TRUNCATE"`, indistinguishable from a real
     // defect. A kind-based check let them through (TRUNCATE is destructive,
     // COPY is a write), so a valid statement was reported to the model as
     // broken.

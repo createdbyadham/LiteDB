@@ -7,7 +7,7 @@ order changes: if something here matters to you, say so there.
 
 - **Approve agent writes in LiteDB.** An agent's write waits in the LiteDB
   window with its row count and the rows it changes, and runs only when you
-  click Approve — even when the agent's app runs tools without asking.
+  click Approve, even when the agent's app runs tools without asking.
 - **Undo for agent writes**, from the audit log.
 - **Inline suggestions** in the SQL editor, from a local or hosted model.
 - **MCP without Node.** The app is the server: agents start `LiteDB --mcp`,

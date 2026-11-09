@@ -12,7 +12,7 @@
 //
 // The safety rule that governs this whole file: **nothing here may change the
 // database.** Every query it builds is passed through the read-only guard
-// before it runs, and the EXPLAIN it issues is never EXPLAIN ANALYZE — which
+// before it runs, and the EXPLAIN it issues is never EXPLAIN ANALYZE: which
 // in Postgres executes the statement it claims to be explaining.
 
 import type { StatementClassification } from './sqlClassifier';
@@ -66,7 +66,7 @@ export function buildCountQuery(statement: StatementClassification): string | nu
  * Bounded table-size probe for the denominator.
  *
  * A bare `COUNT(*)` seq-scans the table. On a 50M-row relation that hangs the
- * approval dialog for as long as the scan takes — for a number that only
+ * approval dialog for as long as the scan takes, for a number that only
  * needs to tell the user "of 4,812" vs "of 200+". Same trick as
  * `buildRowProbeQuery`: count a `LIMIT` subquery, and treat hitting the
  * limit as "at least this many".
@@ -124,7 +124,7 @@ function isPlanNode(value: unknown): value is PlanNode {
  * Pull the row estimate and a readable summary out of a Postgres JSON plan.
  *
  * The top node of a write plan is a ModifyTable (`Delete on orders`), whose
- * own `Plan Rows` is 0 — the rows it *returns*, not the rows it changes. The
+ * own `Plan Rows` is 0, the rows it *returns*, not the rows it changes. The
  * estimate that matters is on the child that feeds it.
  */
 function readPostgresPlan(raw: unknown): { rows: number | null; text: string | null } {
@@ -184,7 +184,7 @@ function readSqlitePlan(rows: unknown[][] | Record<string, unknown>[] | null): s
  *
  * Every failure is caught and reported as `error` rather than thrown. A
  * preview that cannot be produced must not block the approval dialog from
- * opening — the user still needs to decide, with less information — and it
+ * opening, the user still needs to decide, with less information, and it
  * must never be mistaken for "this affects nothing".
  */
 export async function previewStatement(
@@ -232,7 +232,7 @@ export async function previewStatement(
     }
 
     // An unbounded statement hits everything, so the table count *is* the
-    // impact — but only when the probe actually finished the table. Copying
+    // impact, but only when the probe actually finished the table. Copying
     // a capped 200 would invent an exact number we never measured.
     if (
         statement.unbounded &&
@@ -258,8 +258,8 @@ export async function previewStatement(
             estimate.plan = readSqlitePlan(rows);
         }
     } catch (error) {
-        // A failed EXPLAIN is not fatal — an exact count may already be in
-        // hand — so it only becomes `error` when nothing else was learned.
+        // A failed EXPLAIN is not fatal, an exact count may already be in
+        // hand, so it only becomes `error` when nothing else was learned.
         if (estimate.exactRows === null && estimate.error === null) {
             estimate.error = error instanceof Error ? error.message : String(error);
         }

@@ -106,7 +106,7 @@ export function SettingsDialog() {
    * Ask the provider what models it has.
    *
    * Uses the config currently on screen, not the saved one, so a key typed a
-   * moment ago works without saving first. Never throws — a provider that
+   * moment ago works without saving first. Never throws, a provider that
    * cannot list its models is a normal outcome, and the field stays typeable.
    */
   const loadModels = useCallback(async () => {
@@ -342,7 +342,7 @@ export function SettingsDialog() {
               <Label htmlFor="modelName">Model</Label>
               <div className="flex gap-2">
                 {/* Still an input, not a dropdown. The list is discovery,
-                    not a constraint — a model released this morning must
+                    not a constraint, a model released this morning must
                     remain typeable even if the provider has not listed it. */}
                 <Input
                   id="modelName"

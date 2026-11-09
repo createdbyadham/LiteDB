@@ -1,8 +1,8 @@
 // One open database, whichever engine it is.
 //
 // The grid, the editor, the schema view and the importers talk to a DbClient
-// and never to an engine directly. The engine-specific parts — catalog
-// queries, quoting, how a row without a key is addressed — are the abstract
+// and never to an engine directly. The engine-specific parts, catalog
+// queries, quoting, how a row without a key is addressed, are the abstract
 // methods; everything built on them (paging, filters, edits, import, export)
 // is written once here, so SQLite and Postgres behave the same.
 
@@ -174,7 +174,7 @@ export abstract class DbClient {
 
     /**
      * One page of a table with search, filters and sort applied in SQL, plus
-     * the matching row count — so every row is reachable, not just the first
+     * the matching row count, so every row is reachable, not just the first
      * thousand.
      */
     async queryTable(table: string, q: TableQuery): Promise<TablePage> {

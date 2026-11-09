@@ -114,12 +114,12 @@ export interface Database {
     quote(identifier: string): string;
     /**
      * Make committed writes visible to other processes watching the file.
-     * Only does anything for SQLite in WAL mode — see SqliteDatabase.
+     * Only does anything for SQLite in WAL mode, see SqliteDatabase.
      */
     flushWrites(): Promise<void>;
     /**
-     * No tool call is using the connection. SQLite closes its file handles —
-     * see SqliteDatabase — and reopens on the next call. Postgres keeps its
+     * No tool call is using the connection. SQLite closes its file handles,
+     * see SqliteDatabase, and reopens on the next call. Postgres keeps its
      * client.
      */
     release(): Promise<void>;
@@ -140,7 +140,7 @@ export function literal(value: string): string {
  * How long a table list may be reused.
  *
  * `describe_table` resolves the table, then asks for columns, foreign keys and
- * indexes — each of which resolves it again — and `list_tables` does that once
+ * indexes, each of which resolves it again, and `list_tables` does that once
  * per table, so an uncached catalogue read turns a schema dump into O(n^2)
  * queries against information_schema. A few seconds of staleness is the right
  * trade: names still come from the database rather than from the caller, which
@@ -269,7 +269,7 @@ export abstract class SqliteCatalog implements Database {
             infos.push({
                 name,
                 unique: Number(row[2]) === 1,
-                // seqno, cid, name — name is null for an expression index.
+                // seqno, cid, name, name is null for an expression index.
                 columns: cols.map((c) => (c[2] === null ? '(expression)' : String(c[2]))),
             });
         }
@@ -303,7 +303,7 @@ export abstract class PostgresCatalog implements Database {
     }
 
     /**
-     * Tables in every schema the role can use, not just `public` — Supabase's
+     * Tables in every schema the role can use, not just `public`, Supabase's
      * `auth` and `storage`, and any app's own schemas. A table in the default
      * schema keeps its bare name; elsewhere it is `schema.table`, which is
      * also how an agent writes it back in SQL.

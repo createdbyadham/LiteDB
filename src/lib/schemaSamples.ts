@@ -2,7 +2,7 @@
 //
 // Column names and types alone cannot resolve an enumerated column. Asked for
 // "customers in Germany" against `country TEXT`, a model can only guess
-// 'Germany' — while the table actually stores 'DE'. Showing a few distinct
+// 'Germany', while the table actually stores 'DE'. Showing a few distinct
 // values turns that guess into a lookup.
 //
 // This sends real cell values to the configured model, so collection is
@@ -36,7 +36,7 @@ const SENSITIVE_NAME =
 
 /**
  * Prose columns. Their values are unbounded in practice, so a handful of short
- * ones is misleading context rather than a useful enumeration — and free text
+ * ones is misleading context rather than a useful enumeration, and free text
  * is the likeliest place for something private to sit.
  */
 const FREE_TEXT_NAME =
@@ -94,7 +94,7 @@ export function normalizeSamples(rows: unknown[][], rowCount?: number): string[]
     if (rows.length > SAMPLE_LIMITS.maxDistinct) return null;
 
     // Few distinct values only means "enumeration" relative to table size. In
-    // an 8-row table, 8 distinct names is a unique identifier, not an enum —
+    // an 8-row table, 8 distinct names is a unique identifier, not an enum,
     // and dumping it puts every customer name in the prompt. Above the probe
     // limit the table is large enough that a low distinct count is meaningful
     // on its own.

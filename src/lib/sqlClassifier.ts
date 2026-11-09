@@ -6,15 +6,15 @@
 // read-only guard in sqlGuard.ts cannot: what category the statement falls in,
 // *why*, and what it targets.
 //
-// Three traps drive most of the code here. All of them fail open — they make a
-// dangerous statement look safe — so each is handled explicitly:
+// Three traps drive most of the code here. All of them fail open, they make a
+// dangerous statement look safe, so each is handled explicitly:
 //
 //   1. `EXPLAIN ANALYZE DELETE FROM t` actually deletes. In Postgres, ANALYZE
 //      executes the statement it is explaining. Treating every EXPLAIN as a
 //      read is a data-loss bug.
 //   2. `WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x` deletes, and
 //      leads with WITH. Classifying on the leading keyword alone misses it.
-//   3. `UPDATE t SET x = (SELECT y FROM z WHERE q)` has no WHERE of its own —
+//   3. `UPDATE t SET x = (SELECT y FROM z WHERE q)` has no WHERE of its own,
 //      the only WHERE belongs to the subquery. It rewrites every row. A
 //      substring search for "where" calls this bounded; it is not.
 //
@@ -34,13 +34,13 @@ export type StatementKind =
     | 'ddl'
     /** Changes engine or session state: transactions, SET, PRAGMA writes. */
     | 'session'
-    /** Unrecognised. Gated as if destructive — see `effectiveKind`. */
+    /** Unrecognised. Gated as if destructive, see `effectiveKind`. */
     | 'unknown';
 
 /**
  * Ordering used to reduce a multi-statement script to a single risk level, and
  * to compare a statement against a policy ceiling. Not a claim that DDL is
- * always safer than a write — it is the order in which the gate escalates.
+ * always safer than a write, it is the order in which the gate escalates.
  */
 export const KIND_SEVERITY: Record<StatementKind, number> = {
     read: 0,
@@ -69,7 +69,7 @@ export interface StatementClassification {
     /** Write target, schema-qualified as written. Null when not identifiable. */
     table: string | null;
     /**
-     * True for an UPDATE, DELETE or TRUNCATE with no predicate of its own —
+     * True for an UPDATE, DELETE or TRUNCATE with no predicate of its own,
      * the case the spec calls out for hard interception.
      */
     unbounded: boolean;
@@ -85,7 +85,7 @@ const STATEMENT_VERBS = new Set([
     'ALTER', 'TRUNCATE', 'VALUES', 'TABLE', 'REPLACE', 'COPY', 'GRANT', 'REVOKE',
 ]);
 
-/** Verbs that modify rows, wherever they appear — including inside a CTE. */
+/** Verbs that modify rows, wherever they appear, including inside a CTE. */
 const MODIFYING_VERBS = new Set(['INSERT', 'UPDATE', 'DELETE', 'MERGE', 'REPLACE']);
 
 /**
@@ -126,7 +126,7 @@ function extractPredicate(sql: string, tokens: SqlToken[]): string | null {
 }
 
 /**
- * The identifier a verb acts on — the table for a write, the created object
+ * The identifier a verb acts on, the table for a write, the created object
  * for a CREATE. Joins `schema.table` back together.
  *
  * Sliced from the original text rather than read off `token.value`, because
@@ -148,7 +148,7 @@ function extractTarget(sql: string, tokens: SqlToken[], verbIndex: number): stri
     if (i >= tokens.length) return null;
 
     const first = i;
-    // schema.table — a dot immediately followed by another name part.
+    // schema.table, a dot immediately followed by another name part.
     while (
         tokens[i + 1]?.kind === 'punct' &&
         tokens[i + 1].value === '.' &&
@@ -258,7 +258,7 @@ export function classifyStatement(sql: string, recursionDepth = 0): StatementCla
                     verb,
                     table,
                     unbounded: true,
-                    reason: `${verb} with no WHERE clause — ${action} every row in ${target}`,
+                    reason: `${verb} with no WHERE clause, ${action} every row in ${target}`,
                 };
             }
             return {
@@ -361,13 +361,13 @@ export function classifyStatement(sql: string, recursionDepth = 0): StatementCla
                 ...base,
                 kind: 'unknown',
                 verb,
-                reason: `unrecognised statement "${verb}" — gated as destructive`,
+                reason: `unrecognised statement "${verb}", gated as destructive`,
             };
     }
 }
 
 /**
- * `EXPLAIN` is a read — unless it is `EXPLAIN ANALYZE`, which runs the
+ * `EXPLAIN` is a read, unless it is `EXPLAIN ANALYZE`, which runs the
  * statement for real and reports what happened. The ANALYZE check ignores
  * nesting depth on purpose, so the Postgres option-list form
  * `EXPLAIN (ANALYZE, BUFFERS) DELETE ...` is caught too.
@@ -398,7 +398,7 @@ function classifyExplain(
         ...inner,
         sql,
         verb: 'EXPLAIN',
-        reason: `EXPLAIN ANALYZE runs the statement for real — ${inner.reason}`,
+        reason: `EXPLAIN ANALYZE runs the statement for real, ${inner.reason}`,
     };
 }
 
@@ -438,7 +438,7 @@ function classifyCte(
         ...branch,
         sql,
         verb: 'WITH',
-        reason: `data-modifying CTE — ${branch.reason}`,
+        reason: `data-modifying CTE: ${branch.reason}`,
     };
 }
 

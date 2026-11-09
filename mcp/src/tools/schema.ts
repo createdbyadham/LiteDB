@@ -6,8 +6,8 @@
 // points of execution accuracy on their own, because "customers in Germany"
 // against a column storing 'DE' is not something a model can guess.
 //
-// So `describe_table` returns more than column names — types, keys, foreign
-// keys, indexes, and the enumerations a column actually holds — and it gets
+// So `describe_table` returns more than column names, types, keys, foreign
+// keys, indexes, and the enumerations a column actually holds, and it gets
 // them through the same `schemaSamples` rules the desktop app uses, so the
 // privacy and eligibility decisions are made in exactly one place.
 
@@ -80,7 +80,7 @@ export async function listTables(ctx: ToolContext): Promise<ToolResult> {
         }
         const keys = columns.filter((c) => c.isPrimaryKey).map((c) => c.name);
         lines.push(
-            `  ${name} — ${columns.length} columns, ${size}` +
+            `  ${name}, ${columns.length} columns, ${size}` +
                 (keys.length > 0 ? `, primary key: ${keys.join(', ')}` : ''),
         );
     }

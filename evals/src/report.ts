@@ -17,7 +17,7 @@ export function renderMarkdown(report: RunReport): string {
     const { meta } = report;
     const lines: string[] = [];
 
-    lines.push(`# Text-to-SQL eval — ${meta.provider} / ${meta.model} (${meta.dialect})`);
+    lines.push(`# Text-to-SQL eval, ${meta.provider} / ${meta.model} (${meta.dialect})`);
     lines.push('');
     lines.push(`- **Execution accuracy: ${pct(report.executionAccuracy)}** (${report.passed}/${report.scored} scored cases)`);
     lines.push(`- Run: ${meta.startedAt} · ${(meta.durationMs / 1000).toFixed(1)}s · concurrency ${meta.concurrency}`);
@@ -65,7 +65,7 @@ export function renderMarkdown(report: RunReport): string {
         lines.push('## Failures');
         lines.push('');
         for (const failure of failures) {
-            lines.push(`### \`${failure.id}\` — ${failure.outcome}`);
+            lines.push(`### \`${failure.id}\`, ${failure.outcome}`);
             lines.push('');
             lines.push(`> ${failure.question}`);
             lines.push('');
@@ -233,7 +233,7 @@ export function renderMultiRunMarkdown(summary: MultiRunSummary): string {
     const n = summary.runs.length;
     const lines: string[] = [];
 
-    lines.push(`# Repeated eval — ${meta.provider} / ${meta.model} (${meta.dialect})`);
+    lines.push(`# Repeated eval, ${meta.provider} / ${meta.model} (${meta.dialect})`);
     lines.push('');
     lines.push(`- **Mean execution accuracy: ${pct(summary.mean)}** over ${n} runs`);
     lines.push(`- Range ${pct(summary.min)}-${pct(summary.max)}, sd ${summary.stdevPp.toFixed(1)}pp`);

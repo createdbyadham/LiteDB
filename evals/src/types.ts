@@ -40,8 +40,8 @@ export interface EvalCase {
     split?: 'dev' | 'test';
     /**
      * Fixture database this case targets. Defaults to 'storefront'.
-     * 'library' uses a deliberately different schema — suffixed primary keys,
-     * full_name rather than name, integer cents, a nullable date — to test
+     * 'library' uses a deliberately different schema, suffixed primary keys,
+     * full_name rather than name, integer cents, a nullable date, to test
      * generalisation to an unseen database rather than unseen questions.
      */
     fixture?: FixtureName;
@@ -53,7 +53,7 @@ export interface EvalCase {
 /**
  * Failure taxonomy. The distinction matters: `api_error` is harness/infra
  * noise and must never be counted against the model, while `invalid_sql` and
- * `wrong_result` are genuinely different model failures — one is a syntax or
+ * `wrong_result` are genuinely different model failures, one is a syntax or
  * schema mistake, the other is a plausible query that answers the wrong
  * question. Collapsing them hides which one you actually have.
  */

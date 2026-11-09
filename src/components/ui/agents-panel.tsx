@@ -259,7 +259,7 @@ export function AgentsPanel() {
                 so there is nothing else to install. Keep LiteDB open: the agent works on what is
                 connected here, and while LiteDB is closed every call says to open it. After adding
                 a server, restart the host. Then: “what&apos;s in this database?”, then “delete the
-                shipped orders.” A write should preview and wait — that is the whole claim.
+                shipped orders.” A write should preview and wait, that is the whole claim.
             </p>
         </div>
     );

@@ -9,8 +9,8 @@ themselves in their header comments.
 
 ## The safety pipeline
 
-The part most worth understanding. Every statement — typed in the editor,
-written by Text to SQL, made by a grid edit, or sent by an agent — goes through
+The part most worth understanding. Every statement, typed in the editor,
+written by Text to SQL, made by a grid edit, or sent by an agent, goes through
 the same stages:
 
 ```

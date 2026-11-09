@@ -22,8 +22,8 @@ function truncate(text: string): string {
 /**
  * `[0.04,0.02,...]` -> `[384 floats]`, or null when it is not a vector.
  *
- * pgvector hands a `vector` column back as a *string*, not an array — the
- * driver has no type parser for an extension type — so the array check below
+ * pgvector hands a `vector` column back as a *string*, not an array, the
+ * driver has no type parser for an extension type, so the array check below
  * never sees one. Without this, a 384-dimensional embedding arrives as 200
  * characters of truncated digits in every row of a similarity search, which
  * is both unreadable and an expensive way to say nothing.
@@ -47,7 +47,7 @@ function renderValue(value: unknown): string {
     if (typeof value === 'boolean') return value ? 'true' : 'false';
     if (value instanceof Date) return value.toISOString();
     if (Array.isArray(value)) {
-        // A real array of numbers — a Postgres `real[]` column, or a driver
+        // A real array of numbers, a Postgres `real[]` column, or a driver
         // configured to parse vectors. Same reasoning as above.
         if (value.length > 8 && value.every((v) => typeof v === 'number')) {
             return `[${value.length} floats]`;

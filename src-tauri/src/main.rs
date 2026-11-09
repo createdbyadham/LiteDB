@@ -76,7 +76,7 @@ fn is_lan_http(url: &reqwest::Url) -> bool {
 
 // OpenAI-compatible endpoints are user-typed, so this cannot be a fixed
 // hostname list. http is limited to this machine / LAN so keys are not sent
-// in the clear. Redirects are disabled — an allowed https URL must not be
+// in the clear. Redirects are disabled, an allowed https URL must not be
 // able to bounce into IMDS.
 fn is_proxy_url_allowed(url: &reqwest::Url) -> Result<(), String> {
     match url.scheme() {
@@ -187,7 +187,7 @@ fn delete_secret(service: String, account: String) -> Result<(), String> {
     }
 }
 
-/// Must match `HANDOFF_FILENAME` in src/lib/mcpHandoff.ts — a test holds them together.
+/// Must match `HANDOFF_FILENAME` in src/lib/mcpHandoff.ts, a test holds them together.
 const MCP_HANDOFF_FILENAME: &str = "mcp-handoff.json";
 
 fn clear_mcp_handoff(app: &tauri::AppHandle) {
@@ -229,8 +229,8 @@ fn main() {
         .manage(mcp::McpState::default())
         .setup(|app| {
             // A crash or a killed process never reaches the window and exit
-            // events below, which would leave the last connection — Postgres
-            // password included — advertised to agents indefinitely. Start
+            // events below, which would leave the last connection, Postgres
+            // password included, advertised to agents indefinitely. Start
             // clean; connecting writes it again.
             clear_mcp_handoff(app.handle());
             Ok(())

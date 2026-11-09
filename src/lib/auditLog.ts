@@ -1,7 +1,7 @@
 // Append-only record of every statement the gate let through.
 //
 // The point of an audit log in a database client is to answer "what did the
-// model actually run against my data, and did I say yes to it?" — after the
+// model actually run against my data, and did I say yes to it?", after the
 // fact, when something looks wrong and memory is not evidence. So entries are
 // written when the statement runs, never rewritten, and the module exposes no
 // way to edit or delete one.
@@ -12,7 +12,7 @@
 //   * Append-only is a property of this API, not of the file. The file sits in
 //     the user's own app-data directory and the user can edit it. This is a
 //     record for its owner, not tamper-evident storage for a third party.
-//   * Entries hold the SQL verbatim, which means literal values — the email in
+//   * Entries hold the SQL verbatim, which means literal values, the email in
 //     a WHERE clause, the value in a SET. That is the whole point (a redacted
 //     log cannot tell you what ran) and it is why the file never leaves the
 //     machine and is never attached to a diagnostics bundle.
@@ -42,7 +42,7 @@ export type AuditDecision =
      * separate tool calls and an unknown amount of time apart. Recording the
      * request when it is made means a write the agent proposed and never came
      * back for still leaves a trace; the matching `approved` entry is written
-     * when — if — it runs.
+     * when, if, it runs.
      */
     | 'pending';
 
@@ -145,10 +145,10 @@ export function parseLog(contents: string): AuditEntry[] {
  *
  * The desktop app writes through Tauri and `npm run dev` falls back to
  * localStorage; the MCP server has neither, and a log that silently no-ops
- * there would be worse than no log at all — it is the only safeguard left
+ * there would be worse than no log at all, it is the only safeguard left
  * once a statement has been approved. So the host may supply its own sink,
- * and everything else about the log — the format, the parser, the append
- * ordering — stays shared.
+ * and everything else about the log, the format, the parser, the append
+ * ordering, stays shared.
  */
 export interface AuditSink {
     append(line: string): Promise<void>;
@@ -168,7 +168,7 @@ export function setAuditSink(next: AuditSink | null): void {
 /**
  * True inside the Tauri shell, where a real file is available.
  *
- * Probes `globalThis` rather than `window` — identical in a browser, and it
+ * Probes `globalThis` rather than `window`, identical in a browser, and it
  * keeps this module compiling under a Node tsconfig that has no DOM types,
  * which is what lets the MCP server share the format.
  */
@@ -178,7 +178,7 @@ function inTauri(): boolean {
 
 /**
  * Fallback sink for `npm run dev` in a browser, where there is no filesystem.
- * Bounded, because localStorage is not a log store — it is a way to keep the
+ * Bounded, because localStorage is not a log store, it is a way to keep the
  * feature visibly working outside the shell.
  */
 const MEMORY_LIMIT = 500;
@@ -202,8 +202,8 @@ let writeChain: Promise<void> = Promise.resolve();
 /**
  * Record an entry. Never throws.
  *
- * A failure to log is reported to the console and swallowed. The alternative —
- * failing the user's query because the log was unwritable — trades a small
+ * A failure to log is reported to the console and swallowed. The alternative,
+ * failing the user's query because the log was unwritable, trades a small
  * loss of record-keeping for a large loss of function, which is the wrong way
  * round.
  */

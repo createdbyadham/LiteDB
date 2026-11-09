@@ -17,7 +17,7 @@ export interface ChatMessage {
  * Measured failure mode on small local models: asked for a per-row value
  * computed across a group, they reach for GROUP BY or a self-join, which
  * collapses or duplicates rows and answers a different question. The SQL is
- * valid, so nothing downstream can detect it — only the prompt can.
+ * valid, so nothing downstream can detect it, only the prompt can.
  *
  * Deliberately scoped to the substitution itself. Rules about which columns to
  * project would fix some of the same cases for a different reason, and
@@ -51,7 +51,7 @@ export interface PromptOptions {
      * Render columns as `table.column` instead of bare `column`.
      *
      * Hypothesis under test: bare names under a table header bind weakly, and
-     * a model asked for "the order id" writes `orders.order_id` — borrowing
+     * a model asked for "the order id" writes `orders.order_id`, borrowing
      * `order_id` from `order_items`, where it really exists. Qualifying every
      * name may remove that ambiguity, at the cost of roughly one extra token
      * per column on every request.
@@ -64,7 +64,7 @@ export interface PromptOptions {
     antiSubstitution?: boolean;
     /**
      * Number of retrieved few-shot exemplars to include. 0 disables them.
-     * Exemplars use an unrelated schema on purpose — see fewShot.ts.
+     * Exemplars use an unrelated schema on purpose, see fewShot.ts.
      */
     fewShot?: number;
 }
@@ -138,7 +138,7 @@ ${serializeSchema(schema, options.qualifyColumns)}
     }
 
     // Exemplars go after the schema and before the question, as real
-    // conversational turns rather than a blob of text — instruction-tuned
+    // conversational turns rather than a blob of text, instruction-tuned
     // models follow demonstrated turn structure more reliably than a list.
     // The preamble is load-bearing: without it the model has just been shown
     // tables that do not exist in its actual database.
@@ -177,7 +177,7 @@ export function stripSqlFences(content: string): string {
 /**
  * Build the follow-up turn for execution-guided repair.
  *
- * Only ever called with a real engine error — a parse failure, an unknown
+ * Only ever called with a real engine error, a parse failure, an unknown
  * column, a rejected statement. A query that executes but answers the wrong
  * question produces no error, so there is nothing to feed back and no repair
  * is attempted. That asymmetry is the honest limit of this technique: it
@@ -286,8 +286,8 @@ ${sql}
 }
 
 /**
- * Ask for a plain-language explanation of a query that has not failed — what
- * it does and what to watch out for — with the planner's output when there is
+ * Ask for a plain-language explanation of a query that has not failed, what
+ * it does and what to watch out for, with the planner's output when there is
  * one. The plan comes from plain EXPLAIN, never ANALYZE, so asking for an
  * explanation never runs the statement.
  */
@@ -300,7 +300,7 @@ export function buildExplainQueryMessages(sql: string, plan: string | null, sche
   <format>
     Start with one or two sentences on what the query returns or changes.
     Then a short bullet list of what matters: joins and what they match on, filters, grouping, ordering,
-    and anything risky or slow — an UPDATE or DELETE without a WHERE, a full table scan in the plan,
+    and anything risky or slow, an UPDATE or DELETE without a WHERE, a full table scan in the plan,
     a missing index, a join that can multiply rows, implicit casts.
     Plain language. Markdown: short paragraphs, "- " bullets, \`inline code\`. No headings. Under 200 words.
   </format>

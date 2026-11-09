@@ -1,4 +1,4 @@
-// litedb-mcp — a database an agent can drive, with LiteDB's guardrails in the
+// litedb-mcp, a database an agent can drive, with LiteDB's guardrails in the
 // path.
 //
 // The case for this existing alongside a plain Postgres MCP server is one
@@ -12,7 +12,7 @@
 // The tool names, descriptions and annotations here are part of the safety
 // design, not documentation of it. `query` is annotated read-only because it
 // genuinely never writes, and `execute_approved` is annotated destructive
-// because it genuinely might — which is what makes an MCP host stop and ask.
+// because it genuinely might, which is what makes an MCP host stop and ask.
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';

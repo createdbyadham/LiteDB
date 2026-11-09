@@ -2,7 +2,7 @@
  * "Require SSL" now means what it says, in the app and in the MCP server alike:
  * on requires TLS, off sends nothing encrypted. Before 2.2 the app ignored the
  * box and quietly tried TLS anyway, so a remembered connection to a host that
- * insists on TLS — Neon, RDS, most managed Postgres — worked unticked and now
+ * insists on TLS: Neon, RDS, most managed Postgres, worked unticked and now
  * fails. The server's refusal does not mention the checkbox; this does.
  */
 export function pgSslHint(message: string, sslRequired: boolean): string | null {

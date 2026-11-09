@@ -4,8 +4,8 @@
 // Everything the write-safety layer promises rests on reading SQL correctly.
 // Splitting on a bare `;` is wrong the moment a semicolon appears inside a
 // string literal, and matching keywords with a regex is wrong the moment a
-// column is named "delete". Both mistakes fail open — the statement runs
-// anyway, classified as something safer than it is — so they are worth the
+// column is named "delete". Both mistakes fail open, the statement runs
+// anyway, classified as something safer than it is, so they are worth the
 // hundred lines it takes to avoid them.
 //
 // This is deliberately not a parser. It knows where strings, comments,
@@ -224,7 +224,7 @@ export function splitStatements(script: string): SplitStatement[] {
         }
         current.push(token);
     }
-    // A script ending in `;` leaves `current` empty, so this yields nothing —
+    // A script ending in `;` leaves `current` empty, so this yields nothing,
     // a trailing semicolon must not produce a phantom statement.
     flush(script.length);
 

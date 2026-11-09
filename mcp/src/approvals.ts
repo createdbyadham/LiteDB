@@ -2,8 +2,8 @@
 //
 // In the desktop app, approving a write is one uninterrupted act: the dialog
 // opens, the user reads the row count, the user clicks. Over MCP that act
-// splits in two — `query` returns a preview and stops, and a later
-// `execute_approved` runs it — with an unknown amount of time, and an
+// splits in two, `query` returns a preview and stops, and a later
+// `execute_approved` runs it, with an unknown amount of time, and an
 // arbitrary amount of model reasoning, in between. This module is the gap.
 //
 // Three properties the gap has to have, all of them because the thing holding
@@ -12,7 +12,7 @@
 //   * The SQL is stored here, not echoed back and re-submitted.
 //     `execute_approved` takes a token and nothing else, so there is no
 //     argument through which a different statement could arrive. What runs is
-//     byte-for-byte what was previewed — not a paraphrase of it, and not a
+//     byte-for-byte what was previewed, not a paraphrase of it, and not a
 //     second statement appended to it.
 //   * One use. A token is removed when claimed, so an approval for one DELETE
 //     cannot become an approval for that DELETE three times.
@@ -28,7 +28,7 @@ import type { GateDecision } from '../../src/lib/sqlPolicy';
  *
  * Five minutes is long enough for a model to think, ask the user, and come
  * back, and short enough that the row count it reported is probably still
- * true. It is not a security boundary — it is an expiry on a claim about the
+ * true. It is not a security boundary, it is an expiry on a claim about the
  * data.
  */
 export const TTL_MS = 5 * 60 * 1000;
@@ -127,7 +127,7 @@ export class StaleApprovalError extends Error {
     constructor() {
         super(
             'This approval was issued against a different database than the one now ' +
-                'open. The token is still valid — switch back, or call query again to ' +
+                'open. The token is still valid, switch back, or call query again to ' +
                 'preview against the current database.',
         );
         this.name = 'StaleApprovalError';

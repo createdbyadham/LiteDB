@@ -2,8 +2,8 @@
 //
 // Off unless the person at LiteDB turns it on for a connection (Settings →
 // Agents), and never on a connection tagged production. With it on, a write
-// whose size the preview can pin down — an INSERT of listed rows, an UPDATE
-// or DELETE with a WHERE clause — runs as soon as `query` sees it, when it
+// whose size the preview can pin down, an INSERT of listed rows, an UPDATE
+// or DELETE with a WHERE clause, runs as soon as `query` sees it, when it
 // changes no more rows than the limit set there. Everything else still stops
 // for approval: schema and permission changes, a write with no WHERE clause,
 // DROP and TRUNCATE, an upsert, and anything whose row count cannot be

@@ -44,11 +44,11 @@ const SOURCE = {
     npm:
         'Talks to the database currently open in the LiteDB desktop app, or to ' +
         'LITEDB_SQLITE_PATH / LITEDB_DATABASE_URL if those are set. Switch ' +
-        'database or policy in the app and the next tool call follows — no restart. ' +
+        'database or policy in the app and the next tool call follows, no restart. ' +
         'Quitting the app clears the handoff.',
     app:
         'Talks to the database currently open in the LiteDB window. Switch ' +
-        'database or policy in the app and the next tool call follows — no restart.',
+        'database or policy in the app and the next tool call follows, no restart.',
 };
 
 /** The server's instructions to the model, for the host serving the tools. */
@@ -56,8 +56,8 @@ export function serverInstructions(host: 'npm' | 'app'): string {
     return [
         SOURCE[host],
         'If the app is in YOLO, this server maps that down to guarded. ' +
-            'SQLite is the file on disk, not unsaved editor state — save first.',
-        'Start with list_tables and describe_table — describe_table reports the ' +
+            'SQLite is the file on disk, not unsaved editor state, save first.',
+        'Start with list_tables and describe_table, describe_table reports the ' +
             'values a low-cardinality column actually holds, which is usually the ' +
             'difference between a query that runs and one that is right.',
         'Writes are previewed; running them is a separate execute_approved call. ' +
@@ -90,7 +90,7 @@ export function registerTools(server: McpServer, session: ToolSession): void {
             title: 'Describe a table',
             description:
                 'Columns and types for one table, with primary keys, NOT NULL, defaults, ' +
-                'foreign keys, indexes, and — for low-cardinality text columns — the ' +
+                'foreign keys, indexes, and, for low-cardinality text columns, the ' +
                 'distinct values they actually contain. Read this before writing SQL ' +
                 'against a table you have not seen.',
             inputSchema: {
@@ -139,7 +139,7 @@ export function registerTools(server: McpServer, session: ToolSession): void {
             title: 'Execute an approved statement',
             description:
                 'Second step, after query. Runs the statements a previous `query` call ' +
-                'previewed. Takes only the token — the SQL is held server-side, so what ' +
+                'previewed. Takes only the token, the SQL is held server-side, so what ' +
                 'runs is exactly what was previewed. Single-use, and expires five minutes ' +
                 'after the preview. Confirm the row count with the person you are working ' +
                 'for before calling this. While LiteDB is open, the request appears in its ' +
@@ -205,8 +205,8 @@ export function registerTools(server: McpServer, session: ToolSession): void {
             title: 'Semantic search',
             description:
                 'Nearest-neighbour search over a pgvector column. Give `text` to search ' +
-                'by meaning — it is embedded by a model running on this machine, so the ' +
-                'text never leaves it — or `row_id` to find rows similar to an existing ' +
+                'by meaning, it is embedded by a model running on this machine, so the ' +
+                'text never leaves it, or `row_id` to find rows similar to an existing ' +
                 'one. The first text search downloads the embedding model (~23 MB for the ' +
                 'default) and may take a minute.',
             inputSchema: {
@@ -251,7 +251,7 @@ export function registerTools(server: McpServer, session: ToolSession): void {
             title: 'Read the audit log',
             description:
                 'The most recent statements recorded against this database, newest first ' +
-                '— from this server and from the LiteDB desktop app, which share the ' +
+                ', from this server and from the LiteDB desktop app, which share the ' +
                 'file. Shows what was proposed, what was approved, and what ran.',
             inputSchema: {
                 limit: z.number().int().min(1).max(200).optional().describe('Default 20.'),

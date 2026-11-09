@@ -58,7 +58,7 @@ Thank you for your interest in contributing to LiteDB! This document outlines ho
    git checkout -b feat/my-feature
    ```
 
-2. **Make your changes** — keep PRs focused and reasonably sized.
+2. **Make your changes**, keep PRs focused and reasonably sized.
 
 3. **Verify locally** before opening a PR:
 
@@ -74,7 +74,7 @@ Thank you for your interest in contributing to LiteDB! This document outlines ho
 
 4. **Push** your branch and open a Pull Request against `main`.
 
-5. **CI must pass** — all GitHub Actions checks must be green before a PR can be merged. Fix any failures before requesting review.
+5. **CI must pass**, all GitHub Actions checks must be green before a PR can be merged. Fix any failures before requesting review.
 
 6. A maintainer will review your PR. Address feedback promptly.
 

@@ -426,8 +426,8 @@ const SchemaVisualizer = forwardRef<SchemaVisualizerRef, SchemaVisualizerProps>(
   );
 
   /**
-   * What was last laid out. `revision` bumps on every reload — including an
-   * agent changing rows, not tables — and re-laying out an identical schema
+   * What was last laid out. `revision` bumps on every reload, including an
+   * agent changing rows, not tables, and re-laying out an identical schema
    * throws away where the user dragged the tables and refits the view.
    */
   const laidOutSchemaRef = useRef<string | null>(null);

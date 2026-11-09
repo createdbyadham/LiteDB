@@ -2,9 +2,9 @@
 //
 // Splitting the safety layer across the call sites that execute SQL is how it
 // stops being a safety layer: one new call site added later, and the guarantee
-// silently narrows. So this module owns three things that used to be nowhere —
+// silently narrows. So this module owns three things that used to be nowhere,
 // which connection is active, what policy it runs under, and what got recorded
-// — and every execution path is expected to consult it.
+//, and every execution path is expected to consult it.
 //
 // It deliberately does not own the approval *interaction*. Deciding what
 // should happen is logic and belongs here; asking the user is UI and belongs
@@ -58,8 +58,8 @@ function readPolicies(): Record<string, SafetyPolicy> {
  * before.
  *
  * A deliberate deviation from the "read-only by default" line in the original
- * plan. Read-only by default would make the table editor — the app's primary
- * function — appear broken on first launch, and a safety default users switch
+ * plan. Read-only by default would make the table editor, the app's primary
+ * function, appear broken on first launch, and a safety default users switch
  * off within a minute protects nobody. `guarded` keeps reads instant, makes
  * every mutation an explicit act, and leaves read-only as a real mode one
  * click away for the case it is meant for: pointing the app at production.
@@ -261,7 +261,7 @@ export function isOwnAuditEntry(id: string): boolean {
  * Write one audit entry per statement.
  *
  * Per statement rather than per script, because a script is not what anyone
- * searches the log for later — "when did something delete from orders" is a
+ * searches the log for later, "when did something delete from orders" is a
  * question about a statement.
  */
 export async function recordDecision(record: DecisionRecord): Promise<void> {
@@ -308,8 +308,8 @@ export function auditableStatements(
     provenance: Provenance,
     policy?: SafetyPolicy,
 ): StatementClassification[] {
-    // In YOLO nothing else is watching — no approval, no row count, no
-    // refusal — so the log stops being a convenience and becomes the only
+    // In YOLO nothing else is watching, no approval, no row count, no
+    // refusal, so the log stops being a convenience and becomes the only
     // record that anything happened. It gets everything.
     if (provenance === 'ai' || policy === 'yolo') return statements;
     return statements.filter((s) => s.kind !== 'read');

@@ -29,8 +29,8 @@ second, unseen `library` schema. All arms run with `--repair 1`.
 | --- | ---: | ---: | ---: |
 | `qwen2.5-coder:7b` local | 77.3% | 82.5% | 67.6% |
 | `qwen2.5-coder:7b` + `--fewshot 3` | **85.6%** | 90.5% | **76.5%** |
-| `gpt-5.6-luna` cloud | 99.0% | — | — |
-| `gpt-5.6-luna` + `--fewshot 3` | 99.0% | — | — |
+| `gpt-5.6-luna` cloud | 99.0% |, |, |
+| `gpt-5.6-luna` + `--fewshot 3` | 99.0% |, |, |
 
 ### Unseen schema (12 held-out `library` cases)
 
@@ -40,7 +40,7 @@ second, unseen `library` schema. All arms run with `--repair 1`.
 | `gpt-5.6-luna` cloud, with or without exemplars | **100%** |
 
 The library set is small and skews easier, so it shows the agent **transfers to
-an unfamiliar schema** — suffixed keys, `full_name`, integer cents, a nullable
+an unfamiliar schema**, suffixed keys, `full_name`, integer cents, a nullable
 date. It is not evidence that the two fixtures are equally hard.
 
 ### Reading these
@@ -58,7 +58,7 @@ date. It is not evidence that the two fixtures are equally hard.
   | local, `--fewshot 3` | 85.6% | 84.5% | +1.1pp |
   | cloud, both arms | 99.0% | 99.0% | 0 |
 
-  It rescued `wf-03` and `wf-06`, both the `orders.order_id` hallucination —
+  It rescued `wf-03` and `wf-06`, both the `orders.order_id` hallucination,
   exactly the class it was built for and nothing else. It fires more often than
   it succeeds (6 retries, 2 recoveries), because a query that is wrong but
   valid produces no error to feed back. The two interventions also overlap:
@@ -66,7 +66,7 @@ date. It is not evidence that the two fixtures are equally hard.
   repair adds less on top of it.
 
   **Repair only works where a correctness signal exists.** `invalid_sql` has
-  one — the engine says what is wrong. `wrong_result` does not, and no retry
+  one, the engine says what is wrong. `wrong_result` does not, and no retry
   loop can see it. It fired zero times across every cloud run, so it is free
   insurance against a frontier model rather than a benefit.
 - Exemplars cost the cloud path 477 → 626 prompt tokens and 2.1s → 3.2s per
@@ -83,8 +83,8 @@ storefront set. That has not been re-measured and is not being claimed.
 executed against the same fixture database, and their result sets are compared.
 
 This is deliberate. String similarity and AST comparison both punish correct
-answers for being phrased differently — `EXISTS` instead of `IN`, a CTE instead
-of a subquery, a different join order — and reward memorised surface form. What
+answers for being phrased differently, `EXISTS` instead of `IN`, a CTE instead
+of a subquery, a different join order, and reward memorised surface form. What
 a user cares about is whether the rows are right.
 
 The tradeoff is that execution accuracy accepts a query that is right on this
@@ -108,11 +108,11 @@ A single pass/fail number hides which problem you have, so failures are typed:
 
 | Outcome | Meaning | Counted against the model |
 | --- | --- | --- |
-| `pass` | Result set matched the reference | — |
+| `pass` | Result set matched the reference |, |
 | `wrong_result` | Valid SQL, answered the wrong question | Yes |
-| `invalid_sql` | Did not execute — bad syntax, unknown column | Yes |
+| `invalid_sql` | Did not execute, bad syntax, unknown column | Yes |
 | `guard_rejected` | Not a single read-only statement | Yes |
-| `api_error` | Provider or transport failure | **No** — excluded from the denominator |
+| `api_error` | Provider or transport failure | **No**, excluded from the denominator |
 
 Separating `wrong_result` from `invalid_sql` matters: the first is a reasoning
 failure, the second is usually a schema-context failure, and they are fixed in
@@ -137,7 +137,7 @@ names:
 - **`status`** exists on `orders` and `payments`, with overlapping values.
 - **`created_at`** exists on `customers`, `products` and `reviews`.
 - **`orders.total`** is denormalised and can disagree with the sum of its line
-  items — and for exactly one order in the fixture, it does.
+  items, and for exactly one order in the fixture, it does.
 - **`products.price`** is current; **`order_items.unit_price`** is historical.
   They differ in the seed data, so "the price actually paid" is a real
   distinction rather than a trivia question.
@@ -165,7 +165,7 @@ change as cases are added, since a case is a JSON object.
 Everything from here to *Agreement with the reference* was measured on the
 earlier 63-case set, before the held-out split was widened and four ambiguous
 questions were fixed. It is kept because the experiments and their reasoning
-still stand — but for figures that are current, see **Current results** above.
+still stand, but for figures that are current, see **Current results** above.
 
 #### Result: qwen2.5-coder:7b, SQLite, 63 cases
 
@@ -178,7 +178,7 @@ still stand — but for figures that are current, see **Current results** above.
 | **`window-functions`** | **52% (13/25)** |
 | Overall | 79.4% (50/63) |
 
-Overall accuracy is **not comparable across case-set versions** — expanding
+Overall accuracy is **not comparable across case-set versions**, expanding
 `window-functions` from 6 to 25 cases moved that slice from 14% of the set to
 40%, which pushed the overall number down even as per-slice accuracy improved.
 Compare slices, not totals.
@@ -193,7 +193,7 @@ for self-joins.
 
 A second, narrower failure repeats three times (`wf-03`, `wf-06`, `wf-21`): asked
 for "the order id", the model writes `orders.order_id`. That column does not
-exist on `orders` — but `order_id` *does* exist on `order_items`, so this is
+exist on `orders`, but `order_id` *does* exist on `order_items`, so this is
 cross-table name bleed rather than pure invention.
 
 ### Tested and rejected: qualified column names
@@ -209,7 +209,7 @@ bare `id`, on the theory that bare names under a table header bind weakly.
 
 The mechanism was confirmed where predicted: `wf-03` and `wf-06`, both
 `orders.order_id` hallucinations, were fixed, and `wf-07` with them. But the
-same failure moved rather than disappeared — `wf-02` **gained** `order_id`
+same failure moved rather than disappeared, `wf-02` **gained** `order_id`
 having previously been correct, and `wf-10` swapped a working self-join for a
 correlated subquery whose inner `orders.order_date` silently rebinds to the
 inner table.
@@ -228,7 +228,7 @@ together on the same 63 cases.
 - `--directive` adds anti-substitution guidance to the system prompt, steering
   toward window functions and away from GROUP BY and self-joins.
 - `--repair N` feeds engine errors back to the model for up to N extra
-  attempts. It fires **only on execution failure** — a query that runs but
+  attempts. It fires **only on execution failure**, a query that runs but
   answers the wrong question produces no error, so there is nothing to repair.
 
 | Arm | Accuracy | Window slice | Avg prompt tokens | Wall clock |
@@ -246,12 +246,12 @@ Net of that, case by case:
 | Arm | Fixed | Broken | Net |
 | --- | --- | --- | ---: |
 | `--directive` | `wf-06`, `wf-15` | `wf-19` | +1 |
-| `--repair 1` | `wf-03`, `wf-06` | — | +2 |
+| `--repair 1` | `wf-03`, `wf-06` |, | +2 |
 | Both | `wf-03`, `wf-06`, `wf-15` | `wf-19` | +2 |
 
 **Repair wins, and the directive adds nothing on top of it.** Both arms score
 identically to repair alone while costing 37% more prompt tokens on every
-request. Repair's cost is paid only by failures — 4 of 63 cases retried — so it
+request. Repair's cost is paid only by failures, 4 of 63 cases retried, so it
 is a fraction of the directive's, which taxes all 63.
 
 Two details worth keeping:
@@ -259,23 +259,23 @@ Two details worth keeping:
 - The directive's regression is not a new failure class. `wf-19` broke by
   writing `orders.order_id`, the *same* cross-table bleed already documented
   above. The guidance perturbed a case that had been avoiding it rather than
-  introducing anything novel — the same shuffling seen with `--qualified`.
+  introducing anything novel, the same shuffling seen with `--qualified`.
 - Repair's boundary is visible in `wf-21`. It was `invalid_sql`, got repaired
   into valid SQL, and landed on `wrong_result`: `SELECT customer_id, id AS
-  order_id FROM orders ORDER BY customer_id, order_date DESC LIMIT 2` — a
+  order_id FROM orders ORDER BY customer_id, order_date DESC LIMIT 2`, a
   global `LIMIT 2` instead of two rows per customer. The error signal fixed the
   syntax and could say nothing about the logic. That is the technique working
   exactly as far as it can and no further.
 
 Repair also cut `invalid_sql` from 3 cases to 1, which is the class it targets.
 It leaves the dominant `wrong_result` class untouched, and nothing here reached
-it — consistent with both prompt-level experiments above.
+it, consistent with both prompt-level experiments above.
 
 ### Retrieved few-shot: the intervention that worked
 
 `--fewshot K` retrieves up to K worked examples from `src/lib/fewShot.ts` and
 injects them as conversational turns before the question. Retrieval is lexical
-tag overlap — deterministic, no model load. Exemplars are written against an
+tag overlap, deterministic, no model load. Exemplars are written against an
 **unrelated employees/departments schema**, so they teach the shape of an
 answer and cannot leak one.
 
@@ -292,21 +292,21 @@ All arms below run with `--repair 1`:
 **K=3 is the plateau.** A fourth exemplar buys nothing and costs latency.
 
 Against `--repair 1` alone, three exemplars fixed `wf-07`, `wf-14`, `wf-15`,
-`wf-16`, `wf-17`, `wf-18` and `wf-23`, and broke `wf-03` — net +6 cases. Those
+`wf-16`, `wf-17`, `wf-18` and `wf-23`, and broke `wf-03`, net +6 cases. Those
 seven are precisely the GROUP-BY-and-self-join substitutions that the directive,
 the qualified schema and the sample values had all failed to move. `wrong_result`
 fell from 11 cases to 2.
 
 The contrast exemplar earned its place: `aggregation` and `single-table` both
 stayed at 100%, so demonstrating window functions did not push the model into
-using them where `GROUP BY` is correct — the exact regression the anti-
+using them where `GROUP BY` is correct, the exact regression the anti-
 substitution directive caused.
 
 #### Held-out validation
 
 The dev numbers above are tuned-on. `evals/cases/window-holdout.json` is an
 18-case `split: test` set written afterwards to cover **function surface rather
-than observed failures** — weighted deliberately toward window functions no
+than observed failures**, weighted deliberately toward window functions no
 exemplar demonstrates. Run it with `--split test`.
 
 | Arm | Held-out accuracy |
@@ -323,7 +323,7 @@ accuracy is quoting a number that includes its own tuning.
 The interesting part is *which* cases few-shot fixed. Four of the five use
 functions no exemplar contains: `NTILE` (`wh-02`), `PERCENT_RANK` (`wh-03`), a
 window used as a filter (`wh-11`), and a centred `ROWS ... FOLLOWING` frame
-(`wh-18`). The exemplars are not teaching syntax to copy — they are teaching
+(`wh-18`). The exemplars are not teaching syntax to copy, they are teaching
 *that a window function is the right tool here*, and the model supplies the
 function it needs. That is a stronger claim than pattern matching, and it is
 what makes the technique worth keeping.
@@ -332,11 +332,11 @@ Two cases regressed, and both are demonstration bias rather than noise:
 
 - **`wh-05`** wants a two-row frame. Without exemplars the model wrote the
   correct `ROWS BETWEEN 1 PRECEDING AND CURRENT ROW`. With them it pattern-
-  matched the `LAG` exemplar into `amount + LAG(amount) OVER (ORDER BY id)` —
+  matched the `LAG` exemplar into `amount + LAG(amount) OVER (ORDER BY id)`,
   wrong ordering column, wrong shape. A superficially similar exemplar pulled
   it off a correct answer.
-- **`wh-08`** moved *toward* the better mechanism — a correlated subquery
-  became a partitioned window — but dropped the `100.0 *` and added a stray
+- **`wh-08`** moved *toward* the better mechanism, a correlated subquery
+  became a partitioned window, but dropped the `100.0 *` and added a stray
   column. Right tool, wrong projection.
 
 So demonstrations carry a real cost: they transfer the nearest pattern, which
@@ -370,7 +370,7 @@ model too, +5.6pp, which is a smaller absolute gain simply because there was
 less headroom. The technique generalises upward; the size of the win does not.
 
 **The entire `invalid_sql` class is a small-model problem.** Execution-guided
-repair fired **zero times** across both cloud runs — the model never emitted
+repair fired **zero times** across both cloud runs, the model never emitted
 SQL that failed to execute. Repair earns its keep locally and is dead weight
 against a frontier model, which is a routing argument, not an argument against
 repair.
@@ -378,7 +378,7 @@ repair.
 One case reverses direction and is worth recording. `wh-05` is where
 demonstration bias hurt the local model, which copied the `LAG` exemplar
 instead of writing an explicit frame. The cloud model gets `wh-05` **wrong
-without exemplars and right with them** — it treats a near-neighbour exemplar
+without exemplars and right with them**, it treats a near-neighbour exemplar
 as guidance rather than a template. So demonstration bias is itself a
 capability-dependent failure, not a property of the technique.
 
@@ -398,12 +398,12 @@ would get.
 What the number does support: these failures are reachable by demonstration
 rather than being a hard capability ceiling. What it does not yet support: a
 claim about unseen questions. Closing that needs held-out window cases written
-without reference to the exemplars — the natural next use of the remaining
+without reference to the exemplars, the natural next use of the remaining
 budget toward 120 cases.
 
 **Update:** that held-out set now exists. On 34 storefront cases written after
 the exemplars, and 12 more on an entirely unseen schema, retrieved few-shot is
-worth +8.9pp — so it is now the default in both the harness and the app. The
+worth +8.9pp, so it is now the default in both the harness and the app. The
 dev-set figure remains optimistic; the held-out one is the claim.
 
 ### Agreement with the reference is not the same as correctness
@@ -411,12 +411,12 @@ dev-set figure remains optimistic; the held-out one is the claim.
 Running a frontier model against the set exposed three cases where the
 *question* was defective, not the answer:
 
-- **`ag-03`** — "the average review rating for each product name." The
+- **`ag-03`**, "the average review rating for each product name." The
   reference inner-joins, returning the 10 reviewed products. The model
   left-joined, returning all 12. Both readings are defensible.
-- **`ag-05`** — same shape, with `COALESCE(..., 0)` for never-sold products.
+- **`ag-05`**, same shape, with `COALESCE(..., 0)` for never-sold products.
   The model's reading is arguably the better one.
-- **`wh-17`** — "each customer id, their order id, and the total of their most
+- **`wh-17`**, "each customer id, their order id, and the total of their most
   recent order" reads naturally as one row per customer, which is what the
   model produced. The reference returns one row per order.
 
@@ -429,7 +429,7 @@ agreeing with you looks like validation, and it is really just correlated bias.
 particular reading of an ambiguous question.**
 
 The fix is to disambiguate the question, never to relax the reference toward
-whatever the model produced — that would turn the benchmark into a record of
+whatever the model produced, that would turn the benchmark into a record of
 model behaviour rather than a test of it. `wh-17` is a held-out case, so
 correcting it means it has now been looked at; that is defensible for repairing
 a broken instrument, but it is not a licence to tune.
@@ -443,12 +443,12 @@ until a model is good enough to pick the other one.
 The schema context includes a few distinct values for columns that are genuine
 enumerations, because names and types alone cannot resolve them: asked for
 "customers in Germany" against a column storing `'DE'`, the model can only
-guess. Eligibility is decided in `src/lib/schemaSamples.ts` — shared with the
+guess. Eligibility is decided in `src/lib/schemaSamples.ts`, shared with the
 app, so the benchmark measures what ships.
 
 Selection is deliberately narrow, and the first implementation was not narrow
 enough. It emitted every customer name, every product name, review free text
-and — because SQLite stores dates in `TEXT` columns — every date, tripling the
+and, because SQLite stores dates in `TEXT` columns, every date, tripling the
 prompt and putting personal data in it. The current rules require a column to
 have fewer distinct values than the table has rows (a unique `name` column in
 an 8-row table is an identifier, not an enum), reject date-shaped and
@@ -463,11 +463,11 @@ Measured on `qwen2.5-coder:7b` / SQLite, temperature 0, on the 44-case set that 
 | Unfiltered sample values (rejected) | 90.9% | ~1270 |
 
 The curated setting fixed exactly the two cases it was designed to fix
-(`st-01`, `jn-09` — both country-code lookups), and regressed one unrelated
+(`st-01`, `jn-09`, both country-code lookups), and regressed one unrelated
 join (`jn-06`), for a net of one case.
 
 That regression is worth being precise about. It was real and repeatable *on
-the 44-case set* — `jn-06` passed with `--no-samples` and failed with samples,
+the 44-case set*, `jn-06` passed with `--no-samples` and failed with samples,
 deterministically. But on the 63-case set it passes with samples. Same prompt,
 different outcome, because the surrounding request sequence differs. So it is
 better read as **prompt-sensitivity on a knife-edge case than as a systematic
@@ -476,7 +476,7 @@ case is a coin that this prompt change happened to flip.
 
 The unfiltered row is the honest awkward result: it scored highest. It is
 rejected anyway because it leaks personal data and triples prompt cost, but it
-raises a real question this harness cannot yet answer — whether the gain came
+raises a real question this harness cannot yet answer, whether the gain came
 from the *values* or simply from more schema text reinforcing table structure.
 Distinguishing those needs a padding control, and a larger golden set than 44
 cases before any of these differences should be treated as settled.
@@ -486,23 +486,23 @@ cases before any of these differences should be treated as settled.
 The harness executes text produced by a language model, so it assumes that text
 is hostile. Two independent layers:
 
-1. **Static guard** (`../src/lib/sqlGuard.ts`) — the statement must be a single
+1. **Static guard** (`../src/lib/sqlGuard.ts`), the statement must be a single
    statement beginning with `SELECT` or `WITH`, with no write keyword anywhere
    in it after comments and quoted spans are blanked out. Whole-statement
    matching is required because Postgres permits data-modifying CTEs.
-2. **Engine enforcement** (`src/fixture.ts`) — SQLite runs on a read-only
+2. **Engine enforcement** (`src/fixture.ts`), SQLite runs on a read-only
    connection to a throwaway temp file; Postgres runs every query inside a
    `BEGIN READ ONLY` transaction that is always rolled back.
 
 Either layer alone is insufficient, and the self-test asserts both. The guard's
-keyword scan was silently dead when first written — a `\b` in a template literal
-is a backspace character, not a word boundary — and the self-test is what caught
+keyword scan was silently dead when first written, a `\b` in a template literal
+is a backspace character, not a word boundary, and the self-test is what caught
 it. That is the argument for testing your measuring equipment.
 
 ### The app's write-safety layer is tested here too
 
 The harness needs to refuse generated writes; the app needs to *classify* them
-and ask. Both use the same modules, so the self-test covers both — a benchmark
+and ask. Both use the same modules, so the self-test covers both, a benchmark
 and a guardrail that disagree about what `DELETE` means would be worse than
 either alone.
 
@@ -510,7 +510,7 @@ either alone.
 layer described in the [main README](../README.md#write-safety): the tokenizer,
 the statement classifier, the policy table, and the impact preview. Six of those
 run the preview against the real fixture database and check that the row count
-it reports equals the count the predicate actually matches — a number shown to
+it reports equals the count the predicate actually matches, a number shown to
 a user about to destroy data has to be right, not merely well-formed.
 
 Three assertions exist because the case fails *open*, making a dangerous
@@ -536,7 +536,7 @@ statement look safe:
   63-case runs on a byte-identical prompt.
 
   The pattern that fits: results are reproducible **for a fixed case set**, and
-  change only when the sequence of requests around a case changes — consistent
+  change only when the sequence of requests around a case changes, consistent
   with server-side KV-cache reuse rather than sampling. So an A/B on the same
   case set is trustworthy; a number compared across case-set versions is not.
 
@@ -546,7 +546,7 @@ statement look safe:
   keep against hosted providers and any temperature above 0; for cold-start
   variance, run the CLI separately with different `--tag` values and compare.
 - **Shared prompt code.** The harness imports `buildTextToSqlMessages` from
-  `src/lib/promptBuilder.ts` — the same function the desktop app calls. If it
+  `src/lib/promptBuilder.ts`, the same function the desktop app calls. If it
   grew a Tauri or DOM dependency the harness would stop measuring shipped
   behaviour, which is why that module is kept free of both.
 - **References verified first.** Every reference query is executed before any
@@ -574,7 +574,7 @@ Use the object form of `sql` (`{ "sqlite": "...", "postgres": "..." }`) only
 when the dialects genuinely diverge. Then run `npm run eval:verify`.
 
 Two rules: the question must be answerable from the schema alone, and the
-reference must be *a* correct answer — not the only one. The comparator accepts
+reference must be *a* correct answer, not the only one. The comparator accepts
 any query producing the same rows.
 
 ## CLI

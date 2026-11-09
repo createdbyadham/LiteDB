@@ -87,7 +87,7 @@ export function claudeCodeCommand(entry: ServerEntry): string {
 
 /**
  * Insert or replace `mcpServers.litedb` without touching the rest of the file.
- * Invalid JSON is refused rather than overwritten — the user's Claude
+ * Invalid JSON is refused rather than overwritten, the user's Claude
  * preferences live in the same document.
  */
 export function mergeLiteDbMcp(raw: string, entry: { command: string; args: string[] }): string {

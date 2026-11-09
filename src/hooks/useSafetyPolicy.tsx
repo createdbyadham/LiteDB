@@ -21,7 +21,7 @@ import type { SafetyPolicy } from '@/lib/sqlPolicy';
 export interface UseSafetyPolicy {
     connection: ActiveConnection | null;
     policy: SafetyPolicy;
-    /** No-op when no connection is open — there is nothing to scope it to. */
+    /** No-op when no connection is open, there is nothing to scope it to. */
     setPolicy: (policy: SafetyPolicy) => void;
 }
 

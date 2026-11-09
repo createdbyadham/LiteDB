@@ -1,6 +1,6 @@
 // The file that tells `litedb-mcp` which database the desktop app has open.
 //
-// The npm package has to work for someone who has never launched LiteDB — that
+// The npm package has to work for someone who has never launched LiteDB, that
 // is why the server takes `LITEDB_SQLITE_PATH` / `LITEDB_DATABASE_URL`. This
 // file is the other direction: you already connected in the app, so the agent
 // should follow that connection rather than asking you to paste the same
@@ -195,7 +195,7 @@ export function postgresTarget(cfg: HandoffPostgres): string {
  *
  * `sslmode=require` in node-pg verifies the server certificate (libpq 17
  * behaviour). The app's require and prefer encrypt without verifying, which
- * node-pg spells `no-verify` — without it a self-signed or private-CA host the
+ * node-pg spells `no-verify`, without it a self-signed or private-CA host the
  * app accepted would fail in the agent with a certificate error.
  */
 function sslQuery(cfg: HandoffPostgres): string {
@@ -255,8 +255,8 @@ export function clearHandoff(): Promise<void> {
 /**
  * Quit path. Writes already queued are dropped, so a connect that was
  * mid-flight cannot put the Postgres password back after the file is deleted.
- * Not permanent: a write requested after this — the window stayed open after
- * all — goes through. Rust deletes the file again once the window is actually
+ * Not permanent: a write requested after this, the window stayed open after
+ * all, goes through. Rust deletes the file again once the window is actually
  * destroyed, which covers a write that lands during the close itself.
  */
 export function sealHandoff(): Promise<void> {

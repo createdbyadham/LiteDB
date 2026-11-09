@@ -4,7 +4,7 @@
 // secrets goes in localStorage, and secrets never do. Host, database, username
 // and file paths are addressing information. Passwords and SSH passphrases go
 // to the OS keychain, and only when the user ticks the box for that
-// connection — a tool that memorises production credentials on its own has
+// connection, a tool that memorises production credentials on its own has
 // made a decision that was not its to make.
 
 import { invoke } from '@tauri-apps/api/core';

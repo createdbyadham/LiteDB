@@ -219,7 +219,7 @@ const StatusBar = ({ conn, tableCount = 0 }: StatusBarProps) => {
                   </p>
                   <ul className="list-disc pl-5 space-y-1">
                     <li>
-                      The AI <strong>runs its own SQL immediately</strong> — you never see it before it executes.
+                      The AI <strong>runs its own SQL immediately</strong>, you never see it before it executes.
                     </li>
                     <li>
                       No approval, no row counts. <code className="font-mono">DROP TABLE</code> and{' '}

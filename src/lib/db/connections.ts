@@ -143,7 +143,7 @@ async function pushSchemaToAi(conn: OpenConnection): Promise<void> {
 let watchTimer: ReturnType<typeof setInterval> | null = null;
 
 /**
- * SQLite's data_version moves when another connection writes the file — an
+ * SQLite's data_version moves when another connection writes the file, an
  * agent through MCP, or the user's own program. The grid listens for this to
  * reload without being asked. Our own writes do not move it.
  */
@@ -193,7 +193,7 @@ export function activateConnection(id: string): void {
 
 function add(conn: OpenConnection): void {
     // Read-only by default when tagged production, or when the file or role
-    // refuses writes anyway — so the status bar says what will happen.
+    // refuses writes anyway, so the status bar says what will happen.
     setDefaultPolicy(conn.id, conn.production || conn.info.readOnly ? 'read-only' : null);
     emit({ connections: [...state.connections, conn], activeId: conn.id });
     applyActive();
@@ -254,7 +254,7 @@ export async function testPostgres(config: PgConnectConfig): Promise<OpenInfo> {
 }
 
 export async function openPostgres(config: PgConnectConfig, meta: ConnectMeta): Promise<OpenConnection> {
-    // Identity is host, port and database — never credentials — so policies
+    // Identity is host, port and database, never credentials, so policies
     // and audit history follow the database, whichever user connects.
     const id = postgresConnectionId(config.host, config.port, config.database);
     const existing = getOpenConnection(id);

@@ -38,8 +38,8 @@ export class ConfigError extends Error {
     /**
      * Retryable errors clear themselves without restarting the server: open a
      * database in LiteDB, save an in-memory file, rewrite a damaged handoff.
-     * Env conflicts do not — the process has to be relaunched with different
-     * variables — so those fail startup.
+     * Env conflicts do not, the process has to be relaunched with different
+     * variables, so those fail startup.
      */
     readonly retryable: boolean;
 
@@ -88,8 +88,8 @@ function appDataDir(env: NodeJS.ProcessEnv): string {
  * Where the desktop app keeps its audit log.
  *
  * The point of defaulting to the same file rather than a private one is that
- * the log then answers the question it exists for — "what has touched this
- * database?" — across both ways of reaching it. A statement an agent ran over
+ * the log then answers the question it exists for, "what has touched this
+ * database?", across both ways of reaching it. A statement an agent ran over
  * MCP shows up in the app's audit view next to the ones you ran yourself.
  */
 export function defaultAuditPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -116,13 +116,13 @@ export function defaultHandoffPath(env: NodeJS.ProcessEnv = process.env): string
 }
 
 export const NO_DATABASE_MESSAGE =
-    'No database configured. Open a database in the LiteDB app — the agent ' +
-    'follows whatever is connected — or set LITEDB_SQLITE_PATH to a .sqlite/.db ' +
+    'No database configured. Open a database in the LiteDB app, the agent ' +
+    'follows whatever is connected, or set LITEDB_SQLITE_PATH to a .sqlite/.db ' +
     'file, or LITEDB_DATABASE_URL to a postgres:// connection string.';
 
 export const IN_MEMORY_MESSAGE =
     'LiteDB has an in-memory SQLite database open. MCP talks to the file on ' +
-    'disk, not the editor\'s copy — save the database to a file and reopen it.';
+    'disk, not the editor\'s copy, save the database to a file and reopen it.';
 
 /**
  * Policies this server will run under.
@@ -146,7 +146,7 @@ function parsePolicy(raw: string | undefined): SafetyPolicy | null {
                 'desktop app behind a confirmation and a visible banner, with someone ' +
                 'at the keyboard; neither is true of a server. Use "unrestricted" if ' +
                 'you want writes to need only one approval instead of two. If LiteDB ' +
-                'is in YOLO, the handoff maps that down to guarded on its own — do ' +
+                'is in YOLO, the handoff maps that down to guarded on its own, do ' +
                 'not set the variable.',
         );
     }

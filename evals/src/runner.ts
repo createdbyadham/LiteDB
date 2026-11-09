@@ -157,7 +157,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
         detail = comparison.equal ? undefined : comparison.reason;
 
         // The query ran. A wrong-but-valid result produces no error to feed
-        // back, so there is nothing to repair from — stop rather than pretend
+        // back, so there is nothing to repair from, stop rather than pretend
         // the loop can see correctness it has no signal for.
         break;
     }

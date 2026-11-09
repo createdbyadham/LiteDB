@@ -5,7 +5,7 @@
 // and not the same event. The user's DELETE expresses an intention the user
 // already had. The model's DELETE expresses an intention the model inferred
 // from a sentence, using a schema summary, at temperature 0, with a measured
-// error rate this repo publishes — 86.4% execution accuracy for a 7B local
+// error rate this repo publishes, 86.4% execution accuracy for a 7B local
 // model on read-only SELECTs, which is the *easy* case.
 //
 // So `unrestricted` is a promise the user makes about their own typing. It
@@ -16,7 +16,7 @@
 // `yolo` is the deliberate exception, and the only policy that waives the
 // floor. It is a separate mode rather than the removal of the floor from
 // `unrestricted` precisely so that "my writes run free" and "the model's
-// writes run free" stay separate decisions — the first is a reasonable
+// writes run free" stay separate decisions, the first is a reasonable
 // everyday setting, the second is not.
 //
 // Kept free of browser, Tauri and network imports: the eval harness and the
@@ -40,7 +40,7 @@ export type SafetyPolicy =
     | 'unrestricted'
     /**
      * Nothing asks, nothing is refused, and the model executes its own SQL
-     * the moment it writes it — no review, no row count, no undo.
+     * the moment it writes it, no review, no row count, no undo.
      *
      * This exists because the alternative to an escape hatch is people
      * working around the tool, and because on a scratch database the prompts
@@ -88,7 +88,7 @@ export type GateAction =
 
 export interface GateDecision {
     action: GateAction;
-    /** Risk level the script was gated at. Never 'unknown' — see effectiveKind. */
+    /** Risk level the script was gated at. Never 'unknown', see effectiveKind. */
     kind: Exclude<StatementKind, 'unknown'>;
     /** The statement that set `kind`, for the dialog headline. */
     worst: StatementClassification | null;
@@ -99,7 +99,7 @@ export interface GateDecision {
     /**
      * Whether approval requires typing the target's name rather than clicking
      * a button. Reserved for statements that destroy data without a predicate
-     * bounding them — the class where a mis-click is unrecoverable.
+     * bounding them, the class where a mis-click is unrecoverable.
      */
     requireTypedConfirmation: boolean;
     /** The policy actually applied, after the AI floor. */

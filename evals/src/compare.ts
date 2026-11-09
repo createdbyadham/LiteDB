@@ -3,8 +3,8 @@
 // Execution accuracy asks whether the generated query *answers the question*,
 // not whether it looks like the reference. So both queries are executed and
 // their result sets compared. That deliberately accepts any query that
-// produces the right rows — a different join order, a subquery instead of a
-// CTE, EXISTS instead of IN — which is the whole point: string or AST
+// produces the right rows, a different join order, a subquery instead of a
+// CTE, EXISTS instead of IN, which is the whole point: string or AST
 // similarity would fail correct answers and reward memorised phrasing.
 
 export interface CompareOptions {
@@ -24,8 +24,8 @@ type Scalar = string | number | null;
  * Numeric-looking strings become numbers so a Postgres NUMERIC ('188.00') and
  * a SQLite REAL (188) compare equal. The tradeoff is that a genuine text
  * column holding "123" would match the number 123; no such column exists in
- * the fixture, and the alternative — failing correct answers over storage
- * representation — is worse for a cross-dialect benchmark.
+ * the fixture, and the alternative, failing correct answers over storage
+ * representation, is worse for a cross-dialect benchmark.
  */
 function normalizeValue(value: unknown, precision: number): Scalar {
     if (value === null || value === undefined) return null;

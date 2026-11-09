@@ -3,7 +3,7 @@
 A desktop database client for SQLite and PostgreSQL that lets AI agents in
 without letting them loose. When Claude Code, Cursor or any MCP agent wants to
 change your data, LiteDB shows you the statement, the exact row count and the
-rows it changes — and nothing runs until you click **Approve**. Change your
+rows it changes, and nothing runs until you click **Approve**. Change your
 mind later, and **Undo** puts the rows back.
 
 It is also an everyday client: a real SQL editor with Text to SQL, inline
@@ -55,14 +55,14 @@ The badge above is the GitHub release for this version. The installers are not c
 - **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries.
   - Settings → **AI**: OpenAI, OpenAI-compatible (LM Studio, vLLM, GitHub Models, Azure, …), or Ollama. Default is Ollama.
   - Same prompt the eval harness measures: schema + sample values (toggle), retrieved few-shot (K=3), one compile-repair pass.
-- **MCP**: Settings → **Agents**, or the status-bar **MCP** chip. Claude Desktop / Claude Code / Cursor / OpenCode / VS Code follow the open connection — [Connect an agent](docs/connect-an-agent.md).
+- **MCP**: Settings → **Agents**, or the status-bar **MCP** chip. Claude Desktop / Claude Code / Cursor / OpenCode / VS Code follow the open connection, [Connect an agent](docs/connect-an-agent.md).
 - **Write Safety**: Generated SQL is classified before it runs.
   - Read-only / guarded / unrestricted / YOLO modes, remembered per connection.
   - Unqualified `DELETE`/`UPDATE`, `DROP` and `TRUNCATE` intercepted.
   - Approval shows the **exact affected-row count**, not just a warning.
   - Generated SQL is **compiled before you see it**, so the model fixes its own
-    unknown columns and syntax errors — writes included.
-  - Append-only audit log of every statement that ran — including edits, inserts, deletes and imports made in the grid — and who authorised it.
+    unknown columns and syntax errors, writes included.
+  - Append-only audit log of every statement that ran, including edits, inserts, deletes and imports made in the grid, and who authorised it.
   - An agent's writes wait for **your Approve in the LiteDB window**, with the rows they change, and can be **undone** from the audit log.
 - **Export**: tables or query results to **CSV, Excel, JSON or INSERT statements**.
 - **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
@@ -70,7 +70,7 @@ The badge above is the GitHub release for this version. The installers are not c
 ## Measured, not asserted
 
 LiteDB's Text-to-SQL agent ships with a public benchmark in [`evals/`](./evals)
-— 109 cases scored by **execution accuracy**, with a held-out split that was
+, 109 cases scored by **execution accuracy**, with a held-out split that was
 written after the prompt work and never tuned against.
 
 `qwen2.5-coder:7b` running locally on a 6 GB laptop GPU, SQLite:
@@ -80,8 +80,8 @@ written after the prompt work and never tuned against.
 | Schema context + execution-guided repair | 77.3% | 67.6% |
 | \+ retrieved few-shot exemplars | **85.6%** | **76.5%** |
 
-On a **second, unseen schema** — different naming conventions, integer cents,
-nullable dates — the same agent scores 91.7%, so the gains are not an artifact
+On a **second, unseen schema**, different naming conventions, integer cents,
+nullable dates, the same agent scores 91.7%, so the gains are not an artifact
 of one database.
 
 ```bash
@@ -96,7 +96,7 @@ model exposed. Every number is reproducible with one command.
 That score is also the argument for the [write-safety layer](#write-safety):
 85.6% is good for a 7B model on read-only queries, and read-only queries are
 the easy case. Generated SQL is classified before it runs, and never executes
-unattended — even on a connection you have set to unrestricted.
+unattended, even on a connection you have set to unrestricted.
 
 ## Compared honestly
 
@@ -106,17 +106,17 @@ layer. It is not a replacement for a general DBA workbench.
 | | LiteDB | TablePlus | Beekeeper Studio | DBeaver |
 | --- | :---: | :---: | :---: | :---: |
 | SQLite + PostgreSQL | ✓ | ✓ | ✓ | ✓ |
-| MySQL, SQL Server, and the rest | — | ✓ | ✓ | ✓ |
+| MySQL, SQL Server, and the rest |, | ✓ | ✓ | ✓ |
 | SSH tunnel / jump host | ✓ | ✓ | ✓ | ✓ |
 | ERD | ✓ | paid | plugins | ✓ |
-| Text-to-SQL (local or cloud) | ✓ | — | — | Pro AI |
-| Write-safety (classify, row-count approval, audit) | ✓ | — | — | — |
-| MCP server through those guardrails | ✓ | — | — | — |
-| An agent's write waits for Approve in the app, with the rows it changes | ✓ | — | — | — |
-| Undo for an agent's write | ✓ | — | — | — |
-| pgvector semantic search in the app | ✓ | — | — | — |
-| JDBC / every obscure driver | — | — | — | ✓ |
-| Native polish / years of query UX | — | ✓ | — | — |
+| Text-to-SQL (local or cloud) | ✓ |, |, | Pro AI |
+| Write-safety (classify, row-count approval, audit) | ✓ |, |, |, |
+| MCP server through those guardrails | ✓ |, |, |, |
+| An agent's write waits for Approve in the app, with the rows it changes | ✓ |, |, |, |
+| Undo for an agent's write | ✓ |, |, |, |
+| pgvector semantic search in the app | ✓ |, |, |, |
+| JDBC / every obscure driver |, |, |, | ✓ |
+| Native polish / years of query UX |, | ✓ |, |, |
 
 The loss that matters in practice: **two dialects**. If you need MySQL or SQL
 Server, use those tools. Use this one when a model is allowed near the
@@ -155,14 +155,14 @@ Unlike standard API wrappers, LiteDB implements a **Context-Aware RAG Pipeline**
 2.  **Dynamic Context Injection**: That metadata goes into the system prompt, dialect-specific (Postgres vs SQLite).
 3.  **Sample values** (on by default, toggle in Settings): a few distinct values from short enum-like columns so `"Germany"` can match stored `'DE'`. Emails, keys, and PII-looking columns are skipped.
 4.  **Retrieved few-shot (K=3)**: worked examples from an unrelated employees schema. Same default as `npm run eval`.
-5.  **Compile-repair**: if generated SQL does not compile, the engine error goes back to the model once. Writes included — it uses `EXPLAIN`, not a dry run.
+5.  **Compile-repair**: if generated SQL does not compile, the engine error goes back to the model once. Writes included, it uses `EXPLAIN`, not a dry run.
 
 ### Measured accuracy
 
 Accuracy claims about the Text-to-SQL agent are backed by a public, runnable
 benchmark in [`evals/`](./evals) rather than asserted. It scores **execution
-accuracy** — the generated query and a reference query are both executed
-against a seeded fixture database and their result sets compared — so any
+accuracy**, the generated query and a reference query are both executed
+against a seeded fixture database and their result sets compared, so any
 correct formulation counts, not just one that matches a string.
 
 ```bash
@@ -173,7 +173,7 @@ npm run eval -- --provider ollama  # score a local model
 
 109 cases across five slices (`single-table`, `joins`, `aggregation`,
 `window-functions`, `ambiguous-schema`), over two fixture schemas, runnable against SQLite or PostgreSQL
-and OpenAI, any OpenAI-compatible endpoint, or Ollama. Failures are typed — a query that
+and OpenAI, any OpenAI-compatible endpoint, or Ollama. Failures are typed, a query that
 answers the wrong question is reported separately from one that fails to parse,
 and provider outages are excluded from the score entirely.
 
@@ -189,7 +189,7 @@ rules and their tradeoffs, and how to add cases.
 The benchmark above measures how often the model is right. This layer decides
 what happens when it isn't.
 
-Every statement — typed or generated — passes through one gate before it
+Every statement, typed or generated, passes through one gate before it
 reaches the database, and read-only mode is enforced in the services rather
 than in the query box, so it covers the table editor's inline edits too.
 
@@ -204,9 +204,9 @@ Not by their leading keyword:
 | `ddl` | creates or alters a schema object without destroying data |
 | `write` | changes rows, bounded by a predicate |
 | `destructive` | unbounded row change, or removal of an object |
-| `unknown` | unrecognised — **gated as destructive** |
+| `unknown` | unrecognised, **gated as destructive** |
 
-Three cases drive most of the implementation, because all three fail *open* —
+Three cases drive most of the implementation, because all three fail *open*,
 each makes a dangerous statement look safe:
 
 - **`EXPLAIN ANALYZE DELETE FROM t` deletes.** In Postgres, `ANALYZE` executes
@@ -232,30 +232,30 @@ literal, and between the keyword `DELETE` and a column named `"delete"`.
 | **YOLO** | run | run | run, unreviewed |
 
 The `unrestricted` row is the interesting one. It is a promise you make about
-your own typing, and it does not extend to SQL a model wrote — that is floored
+your own typing, and it does not extend to SQL a model wrote, that is floored
 at `guarded` whatever the connection is set to. A `DELETE` you typed and a
 `DELETE` a model inferred from a sentence are the same SQL and not the same
 event, and the benchmark above is the reason: 85.6% is a good score for a 7B
 model on *read-only* queries, which is the easy case.
 
 **YOLO** is the deliberate escape hatch, and the only mode that waives that
-floor. In it the model executes its own SQL the moment it writes it — no
+floor. In it the model executes its own SQL the moment it writes it, no
 editor, no Execute click, no row count, nothing refused. It exists because the
 alternative to an escape hatch is people working around the tool, and because
 on a scratch database the prompts are pure friction. It is opt-in per
 connection behind a one-time confirmation, shown in red for as long as it is
 on, and it is the one mode where the audit log stops being a convenience and
-becomes the only record that anything happened — which is why, in YOLO, the
+becomes the only record that anything happened, which is why, in YOLO, the
 log records your reads too.
 
-Provenance is sticky. Editing generated SQL does not make you its author —
-someone who tweaks one clause has not read the rest — and `ai` only ever
+Provenance is sticky. Editing generated SQL does not make you its author,
+someone who tweaks one clause has not read the rest, and `ai` only ever
 tightens the gate. Accepting an inline suggestion makes a tab `ai` too.
 Clearing the editor resets it.
 
 > **Deviation from the original plan, stated plainly:** this was specified as
-> "read-only by default". Read-only by default would make the table editor —
-> the app's primary function — appear broken on first launch, and a safety
+> "read-only by default". Read-only by default would make the table editor,
+> the app's primary function, appear broken on first launch, and a safety
 > default users switch off within a minute protects nobody. `guarded` keeps
 > reads instant, makes every mutation an explicit act, and leaves read-only as
 > a real mode one click away in the status bar for the case it is meant for:
@@ -264,18 +264,18 @@ Clearing the editor resets it.
 ### Approval shows impact, not a shrug
 
 "Are you sure?" is a question nobody can answer well. The dialog answers a
-better one — how many rows, out of how many:
+better one, how many rows, out of how many:
 
 - **Bounded writes get an exact count.** The predicate that limits the write is
   the same predicate that counts what it will hit, so `DELETE FROM t WHERE p`
   is previewed with `SELECT COUNT(*) FROM t WHERE p`. That is a measurement,
   not an estimate, and the self-test checks it against a real database.
 - **The total it is measured against is probed, not counted.** `12 of 200+ rows`
-  means the table holds at least 200 — the probe stops there, because a plain
+  means the table holds at least 200, the probe stops there, because a plain
   `COUNT(*)` on a large table is a full scan and the dialog would sit waiting on
   it. A capped total is never promoted to an exact one: an unbounded `DELETE`
   reports "affects every row", not a number the probe never reached.
-- **Everything else gets the planner's estimate**, via `EXPLAIN` — never
+- **Everything else gets the planner's estimate**, via `EXPLAIN`, never
   `EXPLAIN ANALYZE`, for the reason above.
 - **Typed confirmation is rationed** to statements that destroy data with no
   predicate bounding them. Requiring it for every write would train the habit
@@ -298,7 +298,7 @@ well as reads:
 | `SELEC * FROM orders` | `near "SELEC": syntax error` |
 
 An earlier version dry-*ran* the query instead, which meant the read-only guard
-had to refuse anything but a `SELECT` — so the failure people actually hit went
+had to refuse anything but a `SELECT`, so the failure people actually hit went
 uncaught: the model writes an `UPDATE`, it looks plausible in the box, and the
 missing column only surfaces after you press Execute.
 
@@ -325,7 +325,7 @@ cover scripts of several statements, upserts, Postgres INSERTs, Postgres tables
 without a primary key, or rows changed by cascades and triggers.
 
 Two limits, stated because a safety feature that overclaims is worse than none:
-append-only is a property of the API, not of the file — the file is yours and
+append-only is a property of the API, not of the file, the file is yours and
 you can edit it; and entries hold SQL verbatim, including literal values, which
 is why it never leaves the machine and is never attached to a diagnostics
 bundle.
@@ -339,8 +339,8 @@ MCP server.
 
 LiteDB is the server. The agent's app starts `LiteDB --mcp`, which connects to
 the running window, so there is nothing else to install: no Node, no package.
-The agent follows whatever you have open — no paths in the config, no restart
-when you switch database — and its queries run on the app's own connection, so
+The agent follows whatever you have open, no paths in the config, no restart
+when you switch database, and its queries run on the app's own connection, so
 a Postgres password never leaves the app. While LiteDB is closed the agent
 still sees its tools, and every call says to open LiteDB. Fastest path:
 Settings → **Agents**, or the status-bar **MCP** chip, which copies the command
@@ -371,12 +371,12 @@ the UI and the next tool call is read-only. YOLO is the one exception: it maps
 down to guarded, because YOLO means a human is watching this window, which is
 exactly what isn't true over MCP.
 
-Without the app — CI, a box that has never launched LiteDB — the same tools
+Without the app, CI, a box that has never launched LiteDB, the same tools
 ship as [`litedb-mcp`](mcp/README.md) on npm (Node 22.5+): set
 `LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`.
 
-Eight tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
-`write`, `list_vector_columns`, `semantic_search`, `audit_log` — plus a
+Eight tools, `list_tables`, `describe_table`, `query`, `execute_approved`,
+`write`, `list_vector_columns`, `semantic_search`, `audit_log`, plus a
 `litedb://schema` resource.
 
 **A write never runs on the first `query`.** That call classifies, measures
@@ -393,9 +393,9 @@ nothing ran. Settings → Agents turns this off, leaving the host's own prompt a
 the only check. What it does not stop is in
 [`mcp/README.md`](mcp/README.md#what-it-does-not-do).
 
-Underneath the classifier, the engine enforces the same boundary independently —
+Underneath the classifier, the engine enforces the same boundary independently,
 SQLite opened read-only, Postgres reads inside `BEGIN READ ONLY` that is always
-rolled back — so a statement that beats the parser still meets
+rolled back, so a statement that beats the parser still meets
 `cannot execute UPDATE in a read-only transaction`.
 
 Semantic search embeds your query text with MiniLM or BGE **in the server
@@ -468,7 +468,7 @@ Edits in the grid follow the connection's safety mode: in read-only they are ref
 1. Write SQL. Autocomplete offers the columns of the tables your query reads, before you type `table.`; a name two of them share comes qualified, as `o.id`.
 2. `Ctrl/Cmd+Enter` runs the statement under the cursor, or the selection. `Shift+Ctrl/Cmd+Enter` or `F5` runs every statement in the tab.
    - Reads run immediately. Anything that changes the database opens an
-     approval dialog first, showing how many rows each statement will affect —
+     approval dialog first, showing how many rows each statement will affect,
      see [Write safety](#write-safety). Switch the connection to
      **Unrestricted** in the status bar to skip the prompt for statements you
      typed yourself.

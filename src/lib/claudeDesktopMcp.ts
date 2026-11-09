@@ -79,7 +79,7 @@ export async function claudeDesktopConfigPaths(): Promise<string[]> {
             storeInstalled = await pathExists(join(local, 'Packages', CLAUDE_STORE_PACKAGE));
         } catch (error) {
             // A scope denial lands here too. Skipping the Store copy is the safe
-            // failure — creating it on a guess is the bug this replaced — but it
+            // failure, creating it on a guess is the bug this replaced, but it
             // should not be silent, or a capability regression looks like "not
             // installed" forever.
             console.warn('Could not check for the Store build of Claude Desktop:', error);
@@ -99,7 +99,7 @@ export async function claudeDesktopConfigPaths(): Promise<string[]> {
                 hits.push(path);
             }
         } catch {
-            // Scope miss — skip rather than pretend the file is absent.
+            // Scope miss, skip rather than pretend the file is absent.
         }
     }
     return hits.length > 0 ? hits : unique.slice(0, 1);

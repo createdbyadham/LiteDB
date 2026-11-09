@@ -335,8 +335,8 @@ fn cell(row: &PgRow, i: usize) -> Value {
     if let Ok(v) = row.try_get::<bool, _>(i) {
         return Value::Bool(v);
     }
-    // Everything else — date, timestamp, numeric, uuid, json, arrays, enums,
-    // pgvector — in the server's own text rendering. The simple query
+    // Everything else, date, timestamp, numeric, uuid, json, arrays, enums,
+    // pgvector, in the server's own text rendering. The simple query
     // protocol sends every value as text, so this is exact where f64 is not,
     // and it is the value rather than an invented NULL.
     row.try_get_raw(i)

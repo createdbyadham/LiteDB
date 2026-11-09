@@ -48,7 +48,7 @@ function check(name: string, condition: boolean, detail = ''): void {
         process.stdout.write(`  ok   ${name}\n`);
     } else {
         failures++;
-        process.stdout.write(`  FAIL ${name}${detail ? ` — ${detail}` : ''}\n`);
+        process.stdout.write(`  FAIL ${name}${detail ? `, ${detail}` : ''}\n`);
     }
 }
 
@@ -498,7 +498,7 @@ check('the old checkbox still means require', postgresTarget({ ...base, ssl: tru
 void suggesterChecks()
     .catch((error: unknown) => {
         failures++;
-        process.stdout.write(`  FAIL the suggester checks threw — ${String(error)}\n`);
+        process.stdout.write(`  FAIL the suggester checks threw, ${String(error)}\n`);
     })
     .then(() => {
         process.stdout.write('\n');
