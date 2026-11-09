@@ -1,15 +1,27 @@
 # LiteDB
 
-A modern, fast, and user-friendly database viewer/editor built with React and Tauri (Rust). Now supporting both SQLite and PostgreSQL with seamless database management and advanced vector search capabilities.
+A desktop database client for SQLite and PostgreSQL that lets AI agents in
+without letting them loose. When Claude Code, Cursor or any MCP agent wants to
+change your data, LiteDB shows you the statement, the exact row count and the
+rows it changes — and nothing runs until you click **Approve**. Change your
+mind later, and **Undo** puts the rows back.
+
+It is also an everyday client: a real SQL editor with Text to SQL, inline
+editing, saved connections, SSH tunnels and production tags.
 
 <div align="center">
 
-[![Download](https://img.shields.io/badge/Download-App-blue?style=for-the-badge&logo=w)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0)
-[![Watch Demo](https://img.shields.io/badge/Watch-Demo-red?style=for-the-badge&logo=y)](https://www.linkedin.com/feed/update/urn:li:activity:7377312579544563712/?updateEntityUrn=urn%3Ali%3Afs_feedUpdate%3A%28V2%2Curn%3Ali%3Aactivity%3A7377312579544563712%29)
+[![Download for macOS](https://img.shields.io/badge/macOS-Download-111111?style=for-the-badge&logo=apple)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0)
+[![Download for Windows](https://img.shields.io/badge/Windows-Download-0078D4?style=for-the-badge&logo=windows)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0)
+[![Download for Linux](https://img.shields.io/badge/Linux-Download-E95420?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0)
 
 </div>
 
-![LiteDB](./docs/assets/Litedb.png)
+![Claude Code asks to change 13 customers; LiteDB shows the rows and waits for Approve, the audit log names the agent, and Undo puts the rows back](./docs/assets/demo.gif)
+
+Claude Code asks to move 13 customers from FR to DE. LiteDB shows exactly which
+rows and waits; after Approve, the audit log names the agent, and one click puts
+the rows back. ([Video version](./docs/assets/demo.mp4).)
 
 ## Install
 
@@ -26,37 +38,6 @@ The badge above is the GitHub release for this version. macOS builds are Develop
 ## Code signing policy
 
 Free code signing provided by SignPath.io, certificate by SignPath Foundation
-
-## Measured, not asserted
-
-LiteDB's Text-to-SQL agent ships with a public benchmark in [`evals/`](./evals)
-— 109 cases scored by **execution accuracy**, with a held-out split that was
-written after the prompt work and never tuned against.
-
-`qwen2.5-coder:7b` running locally on a 6 GB laptop GPU, SQLite:
-
-| | Overall | Held-out |
-| --- | ---: | ---: |
-| Schema context + execution-guided repair | 77.3% | 67.6% |
-| \+ retrieved few-shot exemplars | **85.6%** | **76.5%** |
-
-On a **second, unseen schema** — different naming conventions, integer cents,
-nullable dates — the same agent scores 91.7%, so the gains are not an artifact
-of one database.
-
-```bash
-npm run eval:selftest   # verify the harness itself (no API calls)
-npm run eval -- --provider ollama
-```
-
-Six experiments are documented in [`evals/README.md`](./evals/README.md),
-including the two that were **rejected** and the case-design defects a stronger
-model exposed. Every number is reproducible with one command.
-
-That score is also the argument for the [write-safety layer](#write-safety):
-85.6% is good for a 7B model on read-only queries, and read-only queries are
-the easy case. Generated SQL is classified before it runs, and never executes
-unattended — even on a connection you have set to unrestricted.
 
 ## Features
 
@@ -90,6 +71,37 @@ unattended — even on a connection you have set to unrestricted.
 - **Export**: tables or query results to **CSV, Excel, JSON or INSERT statements**.
 - **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
 
+## Measured, not asserted
+
+LiteDB's Text-to-SQL agent ships with a public benchmark in [`evals/`](./evals)
+— 109 cases scored by **execution accuracy**, with a held-out split that was
+written after the prompt work and never tuned against.
+
+`qwen2.5-coder:7b` running locally on a 6 GB laptop GPU, SQLite:
+
+| | Overall | Held-out |
+| --- | ---: | ---: |
+| Schema context + execution-guided repair | 77.3% | 67.6% |
+| \+ retrieved few-shot exemplars | **85.6%** | **76.5%** |
+
+On a **second, unseen schema** — different naming conventions, integer cents,
+nullable dates — the same agent scores 91.7%, so the gains are not an artifact
+of one database.
+
+```bash
+npm run eval:selftest   # verify the harness itself (no API calls)
+npm run eval -- --provider ollama
+```
+
+Six experiments are documented in [`evals/README.md`](./evals/README.md),
+including the two that were **rejected** and the case-design defects a stronger
+model exposed. Every number is reproducible with one command.
+
+That score is also the argument for the [write-safety layer](#write-safety):
+85.6% is good for a 7B model on read-only queries, and read-only queries are
+the easy case. Generated SQL is classified before it runs, and never executes
+unattended — even on a connection you have set to unrestricted.
+
 ## Compared honestly
 
 LiteDB is a SQLite/Postgres desktop client with an agent and a write-safety
@@ -104,6 +116,8 @@ layer. It is not a replacement for a general DBA workbench.
 | Text-to-SQL (local or cloud) | ✓ | — | — | Pro AI |
 | Write-safety (classify, row-count approval, audit) | ✓ | — | — | — |
 | MCP server through those guardrails | ✓ | — | — | — |
+| An agent's write waits for Approve in the app, with the rows it changes | ✓ | — | — | — |
+| Undo for an agent's write | ✓ | — | — | — |
 | pgvector semantic search in the app | ✓ | — | — | — |
 | JDBC / every obscure driver | — | — | — | ✓ |
 | Native polish / years of query UX | — | ✓ | — | — |
