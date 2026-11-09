@@ -61,6 +61,7 @@
     "core:window:allow-close",
     "core:window:allow-destroy",
     "core:window:allow-start-dragging",
+    "core:window:allow-request-user-attention",
     "clipboard-manager:default",
     "log:default"
   ]

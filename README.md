@@ -1,15 +1,27 @@
 # LiteDB
 
-A modern, fast, and user-friendly database viewer/editor built with React and Tauri (Rust). Now supporting both SQLite and PostgreSQL with seamless database management and advanced vector search capabilities.
+A desktop database client for SQLite and PostgreSQL that lets AI agents in
+without letting them loose. When Claude Code, Cursor or any MCP agent wants to
+change your data, LiteDB shows you the statement, the exact row count and the
+rows it changes — and nothing runs until you click **Approve**. Change your
+mind later, and **Undo** puts the rows back.
+
+It is also an everyday client: a real SQL editor with Text to SQL, inline
+editing, saved connections, SSH tunnels and production tags.
 
 <div align="center">
 
-[![Download](https://img.shields.io/badge/Download-App-blue?style=for-the-badge&logo=w)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0)
-[![Watch Demo](https://img.shields.io/badge/Watch-Demo-red?style=for-the-badge&logo=y)](https://www.linkedin.com/feed/update/urn:li:activity:7377312579544563712/?updateEntityUrn=urn%3Ali%3Afs_feedUpdate%3A%28V2%2Curn%3Ali%3Aactivity%3A7377312579544563712%29)
+[![Download for macOS](https://img.shields.io/badge/macOS-Download-111111?style=for-the-badge&logo=apple)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0)
+[![Download for Windows](https://img.shields.io/badge/Windows-Download-0078D4?style=for-the-badge&logo=windows)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0)
+[![Download for Linux](https://img.shields.io/badge/Linux-Download-E95420?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0)
 
 </div>
 
-![LiteDB](./docs/assets/Litedb.png)
+![Claude Code asks to change 13 customers; LiteDB shows the rows and waits for Approve, the audit log names the agent, and Undo puts the rows back](./docs/assets/demo.gif)
+
+Claude Code asks to move 13 customers from FR to DE. LiteDB shows exactly which
+rows and waits; after Approve, the audit log names the agent, and one click puts
+the rows back. ([Video version](./docs/assets/demo.mp4).)
 
 ## Install
 
@@ -26,6 +38,38 @@ The badge above is the GitHub release for this version. macOS builds are Develop
 ## Code signing policy
 
 Free code signing provided by SignPath.io, certificate by SignPath Foundation
+
+## Features
+
+- **SQLite, opened in place**: files are read and written natively (rusqlite), so a multi-gigabyte database opens as fast as a small one and shares the file with your app or an agent through SQLite's own locking. Writes from another program show up in the grid on their own.
+- **PostgreSQL the way it is used**: every schema the role can see (Supabase's `auth` and `storage` included), paste a `postgres://` URL to fill the form, SSL from off to verify-full with your CA, and SSH tunnels through a bastion with a key, a password or your SSH agent.
+- **Saved connections**: as many as you like, each with a name and a colour. Passwords and SSH passphrases go to the OS keychain, only if you ask.
+- **Production tag**: a connection tagged production opens read-only, for you and for any agent following the app, and turns the title bar red while it is on screen. Leaving read-only asks first.
+- **Several databases open at once**, as tabs in the title bar. Switching does not reconnect.
+- **SQL editor**: syntax highlighting, autocomplete that offers the columns of the tables in your query (no `table.` needed), `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection, `F5` runs the script, query tabs that survive a restart, history and saved scripts, a row limit, and Cancel for a long query. Errors underline the statement (and, in Postgres, the exact spot).
+- **AI in the editor**: **Ask AI** (`Ctrl/Cmd+K`) opens Text to SQL from the editor, **Explain** describes a query with its plan, and a failed query offers **Explain** and **Fix with AI**, shown side by side before anything changes.
+- **Inline suggestions** (off by default): the model's continuation as grey text after the cursor, `Tab` to accept, `Esc` to dismiss. Fill-in-the-middle on Ollama, chat elsewhere. Never on a production connection, and accepted text counts as AI-written for the safety gate.
+- **Table editor**: double-click a cell to edit it, insert and duplicate rows, filter by any column, follow a foreign key to the row it points at (or see what points here), view and edit JSON, and copy rows as TSV, CSV, JSON, INSERT statements or Markdown. Results scroll smoothly however many rows come back.
+- **CSV import**: into a new table with inferred column types, or into an existing one with columns matched by name, in one transaction.
+- **Command palette**: `Ctrl/Cmd+P` jumps to any table, connection or action.
+- **Light and dark themes**, or follow the OS.
+- **Schema Visualization**: Visualize your database structure, relationships, and foreign keys in an interactive diagram.
+  - **Auto-Layout**: Automatically arranges tables to minimize crossing lines.
+  - **Export**: Save your schema diagram as **PNG or SVG** for documentation.
+- **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries.
+  - Settings → **AI**: OpenAI, OpenAI-compatible (LM Studio, vLLM, GitHub Models, Azure, …), or Ollama. Default is Ollama.
+  - Same prompt the eval harness measures: schema + sample values (toggle), retrieved few-shot (K=3), one compile-repair pass.
+- **MCP**: Settings → **Agents**, or the status-bar **MCP** chip. Claude Desktop / Claude Code / Cursor / OpenCode / VS Code follow the open connection — [Connect an agent](docs/connect-an-agent.md).
+- **Write Safety**: Generated SQL is classified before it runs.
+  - Read-only / guarded / unrestricted / YOLO modes, remembered per connection.
+  - Unqualified `DELETE`/`UPDATE`, `DROP` and `TRUNCATE` intercepted.
+  - Approval shows the **exact affected-row count**, not just a warning.
+  - Generated SQL is **compiled before you see it**, so the model fixes its own
+    unknown columns and syntax errors — writes included.
+  - Append-only audit log of every statement that ran — including edits, inserts, deletes and imports made in the grid — and who authorised it.
+  - An agent's writes wait for **your Approve in the LiteDB window**, with the rows they change, and can be **undone** from the audit log.
+- **Export**: tables or query results to **CSV, Excel, JSON or INSERT statements**.
+- **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
 
 ## Measured, not asserted
 
@@ -58,37 +102,6 @@ That score is also the argument for the [write-safety layer](#write-safety):
 the easy case. Generated SQL is classified before it runs, and never executes
 unattended — even on a connection you have set to unrestricted.
 
-## Features
-
-- **SQLite, opened in place**: files are read and written natively (rusqlite), so a multi-gigabyte database opens as fast as a small one and shares the file with your app or an agent through SQLite's own locking. Writes from another program show up in the grid on their own.
-- **PostgreSQL the way it is used**: every schema the role can see (Supabase's `auth` and `storage` included), paste a `postgres://` URL to fill the form, SSL from off to verify-full with your CA, and SSH tunnels through a bastion with a key, a password or your SSH agent.
-- **Saved connections**: as many as you like, each with a name and a colour. Passwords and SSH passphrases go to the OS keychain, only if you ask.
-- **Production tag**: a connection tagged production opens read-only, for you and for any agent following the app, and turns the title bar red while it is on screen. Leaving read-only asks first.
-- **Several databases open at once**, as tabs in the title bar. Switching does not reconnect.
-- **SQL editor**: syntax highlighting, autocomplete that offers the columns of the tables in your query (no `table.` needed), `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection, `F5` runs the script, query tabs that survive a restart, history and saved scripts, a row limit, and Cancel for a long query. Errors underline the statement (and, in Postgres, the exact spot).
-- **AI in the editor**: **Ask AI** (`Ctrl/Cmd+K`) opens Text to SQL from the editor, **Explain** describes a query with its plan, and a failed query offers **Explain** and **Fix with AI**, shown side by side before anything changes.
-- **Inline suggestions** (off by default): the model's continuation as grey text after the cursor, `Tab` to accept, `Esc` to dismiss. Fill-in-the-middle on Ollama, chat elsewhere. Never on a production connection, and accepted text counts as AI-written for the safety gate.
-- **Table editor**: double-click a cell to edit it, insert and duplicate rows, filter by any column, follow a foreign key to the row it points at (or see what points here), view and edit JSON, and copy rows as TSV, CSV, JSON, INSERT statements or Markdown. Results scroll smoothly however many rows come back.
-- **CSV import**: into a new table with inferred column types, or into an existing one with columns matched by name, in one transaction.
-- **Command palette**: `Ctrl/Cmd+P` jumps to any table, connection or action.
-- **Light and dark themes**, or follow the OS.
-- **Schema Visualization**: Visualize your database structure, relationships, and foreign keys in an interactive diagram.
-  - **Auto-Layout**: Automatically arranges tables to minimize crossing lines.
-  - **Export**: Save your schema diagram as **PNG or SVG** for documentation.
-- **AI Agent (Text-to-SQL)**: Turn natural language into SQL queries.
-  - Settings → **AI**: OpenAI, OpenAI-compatible (LM Studio, vLLM, GitHub Models, Azure, …), or Ollama. Default is Ollama.
-  - Same prompt the eval harness measures: schema + sample values (toggle), retrieved few-shot (K=3), one compile-repair pass.
-- **MCP**: Settings → **Agents**, or the status-bar **MCP** chip. Claude Desktop / Claude Code / Cursor / OpenCode / VS Code follow the open connection — [Connect an agent](docs/connect-an-agent.md).
-- **Write Safety**: Generated SQL is classified before it runs.
-  - Read-only / guarded / unrestricted / YOLO modes, remembered per connection.
-  - Unqualified `DELETE`/`UPDATE`, `DROP` and `TRUNCATE` intercepted.
-  - Approval shows the **exact affected-row count**, not just a warning.
-  - Generated SQL is **compiled before you see it**, so the model fixes its own
-    unknown columns and syntax errors — writes included.
-  - Append-only audit log of every statement that ran — including edits, inserts, deletes and imports made in the grid — and who authorised it.
-- **Export**: tables or query results to **CSV, Excel, JSON or INSERT statements**.
-- **Vector Search & Semantic Search**: Perform semantic similarity searches on your data using pgvector and local embedding models.
-
 ## Compared honestly
 
 LiteDB is a SQLite/Postgres desktop client with an agent and a write-safety
@@ -103,6 +116,8 @@ layer. It is not a replacement for a general DBA workbench.
 | Text-to-SQL (local or cloud) | ✓ | — | — | Pro AI |
 | Write-safety (classify, row-count approval, audit) | ✓ | — | — | — |
 | MCP server through those guardrails | ✓ | — | — | — |
+| An agent's write waits for Approve in the app, with the rows it changes | ✓ | — | — | — |
+| Undo for an agent's write | ✓ | — | — | — |
 | pgvector semantic search in the app | ✓ | — | — | — |
 | JDBC / every obscure driver | — | — | — | ✓ |
 | Native polish / years of query UX | — | ✓ | — | — |
@@ -305,6 +320,14 @@ editor's **Audit** tab. Entries record the SQL, the natural-language prompt it
 came from, the model that wrote it, the policy in force, whether it was
 allowed, approved, blocked or declined, and what actually happened.
 
+**Undo for agent writes.** Before an approved UPDATE or DELETE from an agent
+runs, the rows it touches (up to 5,000, keyed by primary key or SQLite's rowid)
+are saved next to the log, and **Undo** on the entry puts them back; a SQLite
+INSERT's new rows can be removed the same way. Undo leaves alone any row that
+changed again after the write, so it never overwrites newer work. It does not
+cover scripts of several statements, upserts, Postgres INSERTs, Postgres tables
+without a primary key, or rows changed by cascades and triggers.
+
 Two limits, stated because a safety feature that overclaims is worse than none:
 append-only is a property of the API, not of the file — the file is yours and
 you can edit it; and entries hold SQL verbatim, including literal values, which
@@ -315,35 +338,36 @@ bundle.
 
 The same write-safety layer, exposed over the Model Context Protocol, so an
 agent can drive a local database through the guardrails instead of around them.
-That is the reason to point it at [`litedb-mcp`](mcp/README.md) rather than at
-a raw Postgres MCP server.
+That is the reason to point an agent at LiteDB rather than at a raw Postgres
+MCP server.
 
-If LiteDB is running, the server follows whatever you have open. No paths in
-the config, no restart when you switch database. Quitting the app clears that
-handoff — including a stored Postgres password — so an agent cannot keep using
-the last connection. Fastest path: Settings →
-**Agents**, or the status-bar **MCP** chip. Host-by-host:
-[Connect an agent](docs/connect-an-agent.md). Requires **Node.js 22.5+** with
-`npx` on the PATH that Claude, Cursor, or VS Code uses (`node:sqlite`). LiteDB
-does not install Node.
+LiteDB is the server. The agent's app starts `LiteDB --mcp`, which connects to
+the running window, so there is nothing else to install: no Node, no package.
+The agent follows whatever you have open — no paths in the config, no restart
+when you switch database — and its queries run on the app's own connection, so
+a Postgres password never leaves the app. While LiteDB is closed the agent
+still sees its tools, and every call says to open LiteDB. Fastest path:
+Settings → **Agents**, or the status-bar **MCP** chip, which copies the command
+for this install. Host-by-host: [Connect an agent](docs/connect-an-agent.md).
 
-Windows (what the app copies):
+Windows (the default install path; the app copies yours):
 
 ```json
 {
   "mcpServers": {
     "litedb": {
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "litedb-mcp"]
+      "command": "C:\\Users\\you\\AppData\\Local\\LiteDB\\LiteDB.exe",
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-macOS / Linux: `"command": "npx", "args": ["-y", "litedb-mcp"]`.
+macOS: `"command": "/Applications/LiteDB.app/Contents/MacOS/LiteDB"`. Linux: the
+AppImage's path, or `litedb` from the AUR package.
 
 ```bash
-claude mcp add litedb --scope user -- npx -y litedb-mcp
+claude mcp add litedb --scope user -- /Applications/LiteDB.app/Contents/MacOS/LiteDB --mcp
 ```
 
 The status-bar policy is the agent's policy. Set the connection read-only in
@@ -351,19 +375,26 @@ the UI and the next tool call is read-only. YOLO is the one exception: it maps
 down to guarded, because YOLO means a human is watching this window, which is
 exactly what isn't true over MCP.
 
-Without the app — CI, a box that has never launched LiteDB — set
-`LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`. Env wins when both are present.
+Without the app — CI, a box that has never launched LiteDB — the same tools
+ship as [`litedb-mcp`](mcp/README.md) on npm (Node 22.5+): set
+`LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`.
 
-Seven tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
-`list_vector_columns`, `semantic_search`, `audit_log` — plus a `litedb://schema`
-resource.
+Eight tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
+`write`, `list_vector_columns`, `semantic_search`, `audit_log` — plus a
+`litedb://schema` resource.
 
 **A write never runs on the first `query`.** That call classifies, measures
 impact, and returns a preview plus a single-use token. Running it is a second
 tool, `execute_approved`. Provenance over MCP is a model by definition, so even
-`unrestricted` previews; `LITEDB_POLICY=yolo` is refused at startup. LiteDB
-cannot make the host ask you — Cursor with auto-run will chain both tools
-without a click. The preview is still the record; see
+`unrestricted` previews; `LITEDB_POLICY=yolo` is refused at startup.
+
+**With LiteDB open, you approve the write in LiteDB.** `execute_approved` puts
+the statement in front of you in the app, with the exact row count and the rows
+it deletes, changes or adds, and waits. Nothing runs until you click Approve
+there, even when the agent's host runs tools without asking (Cursor with
+auto-run chains both tools without a click). Decline, and the agent is told
+nothing ran. Settings → Agents turns this off, leaving the host's own prompt as
+the only check. What it does not stop is in
 [`mcp/README.md`](mcp/README.md#what-it-does-not-do).
 
 Underneath the classifier, the engine enforces the same boundary independently —
@@ -391,7 +422,7 @@ own statements.
 
 ### Prerequisites
 
-- Node.js **22.5+** (MCP uses `node:sqlite`; evals want **24+**)
+- Node.js **22.5+** (the npm MCP server and the self-tests use `node:sqlite`; evals want **24+**)
 - Rust (latest stable)
 - PostgreSQL (if using PostgreSQL features)
 

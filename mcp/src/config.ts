@@ -15,7 +15,8 @@
 
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { APPROVALS_DIR } from '../../src/lib/agentApproval';
 import { postgresConnectionId, sqliteConnectionId } from '../../src/lib/connectionId';
 import {
     HANDOFF_FILENAME,
@@ -26,6 +27,9 @@ import {
 } from '../../src/lib/mcpHandoff';
 import type { SqlDialect } from '../../src/lib/schemaTypes';
 import type { SafetyPolicy } from '../../src/lib/sqlPolicy';
+import { DEFAULT_APPROVAL_WAIT_MS, type ToolConfig } from './toolConfig';
+
+export { DEFAULT_APPROVAL_WAIT_MS } from './toolConfig';
 
 /** Bundle identifier from src-tauri/tauri.conf.json. Keep the two in step. */
 const APP_IDENTIFIER = 'com.adhamehab.litedb';
@@ -46,23 +50,24 @@ export class ConfigError extends Error {
     }
 }
 
-export interface ServerConfig {
-    dialect: SqlDialect;
+/** What the tools need (toolConfig.ts), plus what only this server uses. */
+export interface ServerConfig extends ToolConfig {
     /** Postgres connection string, or an absolute path to a SQLite file. */
     target: string;
-    /** Stable identity, shared with the desktop app. Never holds credentials. */
-    connectionId: string;
-    policy: SafetyPolicy;
-    /** Hard cap on rows returned by one tool call. */
-    maxRows: number;
     /** Where audit entries are appended. */
     auditPath: string;
-    /** Which local embedding model semantic_search uses for text queries. */
-    embeddingModelId: string;
     /** Directory the embedding model is downloaded to and reused from. */
     modelCachePath: string;
     /** Where the target came from. Controls the read-only refusal copy. */
     source: 'env' | 'handoff';
+    /**
+     * Where to ask the LiteDB window before a write runs, or null to leave the
+     * asking to the MCP host. Set when the app that wrote the handoff says it
+     * shows the requests; see src/lib/agentApproval.ts.
+     */
+    approvalsDir?: string | null;
+    /** How long one execute_approved call waits for an answer from the window. */
+    approvalWaitMs?: number;
 }
 
 /** The desktop app's data directory, mirroring Tauri v2's `AppLocalData`. */
@@ -238,6 +243,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         auditPath: env.LITEDB_AUDIT_PATH?.trim() || defaultAuditPath(env),
         embeddingModelId: env.LITEDB_EMBEDDING_MODEL?.trim() || 'minilm',
         modelCachePath: env.LITEDB_EMBEDDING_CACHE?.trim() || defaultModelCachePath(env),
+        approvalWaitMs: parseApprovalWait(env.LITEDB_APPROVAL_WAIT_MS),
     };
 
     if (databaseUrl) {
@@ -252,6 +258,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     if (!handoff) {
         throw new ConfigError(NO_DATABASE_MESSAGE, true);
     }
+    // Only an app that says it shows the requests gets them; an older one
+    // would leave every write waiting for a window that never appears.
+    const inApp = {
+        approvalsDir: handoff.approveInApp ? join(dirname(handoffPath), APPROVALS_DIR) : null,
+        approvalWaitMs: shared.approvalWaitMs,
+        // What the app allows agents to do without asking. Never for a
+        // production connection; parseHandoff drops it there too.
+        directWrites: handoff.production ? null : (handoff.directWrites ?? null),
+    };
 
     if (handoff.dialect === 'sqlite') {
         if (!handoff.sqlitePath) {
@@ -267,6 +282,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
             embeddingModelId: shared.embeddingModelId,
             modelCachePath: shared.modelCachePath,
             source: 'handoff',
+            ...inApp,
         };
     }
 
@@ -288,5 +304,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         embeddingModelId: shared.embeddingModelId,
         modelCachePath: shared.modelCachePath,
         source: 'handoff',
+        ...inApp,
     };
+}
+
+
+function parseApprovalWait(raw: string | undefined): number {
+    if (raw === undefined || raw.trim() === '') return DEFAULT_APPROVAL_WAIT_MS;
+    const ms = Number(raw);
+    if (!Number.isFinite(ms) || ms < 0 || ms > 600_000) {
+        throw new ConfigError('LITEDB_APPROVAL_WAIT_MS must be a number of milliseconds between 0 and 600000.');
+    }
+    return Math.round(ms);
 }

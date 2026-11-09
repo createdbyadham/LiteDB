@@ -2,11 +2,15 @@
 
 Thank you for your interest in contributing to LiteDB! This document outlines how to get started and what we expect from contributions.
 
+- [`docs/architecture.md`](docs/architecture.md) is the map of the code, starting with the safety pipeline every statement goes through.
+- [`ROADMAP.md`](ROADMAP.md) lists what is planned, and good first issues.
+- Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## Development Setup
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) (v16 or higher)
+- [Node.js](https://nodejs.org/) 22.5 or later (the MCP server and the self-tests use `node:sqlite`)
 - [Rust](https://www.rust-lang.org/tools/install) (latest stable)
 - [PostgreSQL](https://www.postgresql.org/download/) (optional, required only for PostgreSQL-related features)
 
@@ -40,7 +44,11 @@ Thank you for your interest in contributing to LiteDB! This document outlines ho
 | `npm run build` | Build the frontend |
 | `npm run tauri build` | Build production desktop app |
 | `npm run lint` | Run ESLint |
-| `npm run typecheck` | Run TypeScript type checking |
+| `npm run typecheck` | Run TypeScript type checking (app, MCP server, evals) |
+| `npm run test:unit` | Self-test for the pure helpers |
+| `npm run mcp:selftest` | The MCP server end to end against a real SQLite file |
+| `npm run eval:selftest` | The Text-to-SQL eval harness, without calling a model |
+| `cd src-tauri && cargo test` | Rust tests for the SQLite engine |
 
 ## Pull Request Process
 
@@ -57,8 +65,12 @@ Thank you for your interest in contributing to LiteDB! This document outlines ho
    ```bash
    npm run lint
    npm run typecheck
+   npm run test:unit
+   npm run mcp:selftest
    npm run build
    ```
+
+   If you changed Rust, also run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` in `src-tauri`.
 
 4. **Push** your branch and open a Pull Request against `main`.
 

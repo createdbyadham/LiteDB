@@ -4,6 +4,7 @@
 )]
 
 mod db;
+mod mcp;
 
 use keyring::Entry;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -204,6 +205,17 @@ fn install_crypto_provider() {
 }
 
 fn main() {
+    let context = tauri::generate_context!();
+
+    // Started by an MCP host as its server: a bridge to the running app, with
+    // no window and no Tauri.
+    if mcp::requested() {
+        if let Some(dir) = mcp::data_dir(&context.config().identifier) {
+            mcp::run_bridge(dir);
+        }
+        return;
+    }
+
     install_crypto_provider();
 
     tauri::Builder::default()
@@ -214,6 +226,7 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(db::DbState::default())
+        .manage(mcp::McpState::default())
         .setup(|app| {
             // A crash or a killed process never reaches the window and exit
             // events below, which would leave the last connection — Postgres
@@ -229,6 +242,10 @@ fn main() {
             db::db_run,
             db::db_cancel,
             db::db_data_version,
+            mcp::mcp_listen,
+            mcp::mcp_send,
+            mcp::mcp_close,
+            mcp::mcp_command,
             proxy_request,
             store_secret,
             get_secret,
@@ -237,15 +254,17 @@ fn main() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 clear_mcp_handoff(window.app_handle());
+                mcp::clear_endpoint(window.app_handle());
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             // Second delete after every window is gone, in case a plugin-fs
             // write that was already in flight completed after Destroyed.
             if let tauri::RunEvent::Exit = event {
                 clear_mcp_handoff(app);
+                mcp::clear_endpoint(app);
             }
         });
 }
@@ -295,6 +314,62 @@ mod tests {
             built.is_err(),
             "no roots, so building fails, but without a panic"
         );
+    }
+
+    #[test]
+    fn secrets_go_to_a_store_that_keeps_them() {
+        // Without a store feature for this OS, keyring falls back to its mock,
+        // which keeps a secret only inside the Entry that set it. Every command
+        // opens a new Entry, so nothing saved would ever be read back.
+        let persistence = keyring::default::default_credential_builder().persistence();
+        assert!(
+            matches!(
+                persistence,
+                keyring::credential::CredentialPersistence::UntilDelete
+            ),
+            "keyring has no lasting store for this OS; enable one in Cargo.toml"
+        );
+    }
+
+    /// Deletes the test entry even when an assertion fails.
+    struct DeleteSecretOnDrop(String, String);
+
+    impl Drop for DeleteSecretOnDrop {
+        fn drop(&mut self) {
+            let _ = delete_secret(self.0.clone(), self.1.clone());
+        }
+    }
+
+    #[test]
+    fn secrets_round_trip_through_the_os_store() {
+        // A service name of its own, so the app's entries are never touched.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let service = format!("LiteDB test {}-{nanos}", std::process::id());
+        let account = "round-trip";
+        let secret = "made-up value, not a credential";
+
+        if let Err(e) = store_secret(service.clone(), account.into(), secret.into()) {
+            // Windows and macOS always have a store. Linux needs a Secret
+            // Service (GNOME Keyring, KWallet), and CI runners have none.
+            if cfg!(any(target_os = "windows", target_os = "macos")) {
+                panic!("could not store a secret: {e}");
+            }
+            eprintln!("skipped: no Secret Service to store in ({e})");
+            return;
+        }
+        let _cleanup = DeleteSecretOnDrop(service.clone(), account.into());
+
+        // Each command opens its own Entry, so this reads from the store
+        // itself, as the app does after a restart.
+        let read = get_secret(service.clone(), account.into()).unwrap();
+        assert_eq!(read.as_deref(), Some(secret));
+        delete_secret(service.clone(), account.into()).unwrap();
+        assert_eq!(get_secret(service.clone(), account.into()).unwrap(), None);
+        // Deleting again, as removing a connection with no password does.
+        delete_secret(service, account.into()).unwrap();
     }
 
     #[test]

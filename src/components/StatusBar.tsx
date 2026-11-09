@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { useDirectWrites } from '@/hooks/useDirectWrites';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 import { acknowledgeYolo, hasAcknowledgedYolo } from '@/lib/queryGate';
 import type { SafetyPolicy } from '@/lib/sqlPolicy';
@@ -67,6 +68,7 @@ function engineLabel(conn: OpenConnection): string {
 
 const StatusBar = ({ conn, tableCount = 0 }: StatusBarProps) => {
   const { connection, policy, setPolicy } = useSafetyPolicy();
+  const { directWrites } = useDirectWrites(connection);
   const policyUi = POLICY_UI[policy];
   const PolicyIcon = policyUi.icon;
   const [confirmingYolo, setConfirmingYolo] = useState(false);
@@ -244,12 +246,23 @@ const StatusBar = ({ conn, tableCount = 0 }: StatusBarProps) => {
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('openSettings', { detail: { tab: 'agents' } }))}
           data-mascot-mcp
-          className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+          className={cn(
+            'flex items-center gap-1.5 hover:text-foreground',
+            directWrites ? 'text-warning' : 'text-muted-foreground',
+          )}
           aria-label="Connect an agent"
-          title="Connect an agent"
+          title={
+            directWrites
+              ? `Agents can change up to ${directWrites.maxRows.toLocaleString()} rows in one call without asking. Settings → Agents.`
+              : 'Connect an agent'
+          }
         >
           <Plug className="w-3 h-3" aria-hidden />
           <span>MCP</span>
+          {/* A mode you have to go looking for is one you forget you are in. */}
+          {directWrites && (
+            <span className="font-medium">· writes up to {directWrites.maxRows.toLocaleString()} rows without asking</span>
+          )}
         </button>
       </div>
     </div>

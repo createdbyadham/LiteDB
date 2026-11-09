@@ -12,9 +12,11 @@
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { decisionFileName, parseRequest, requestFileName, serializeDecision } from '../../src/lib/agentApproval';
+import { currentStateQueries, parseUndo, planUndo } from '../../src/lib/undoWrite';
 import { parseLog } from '../../src/lib/auditLog';
 import { pgSslHint } from '../../src/lib/pgSslHint';
 import {
@@ -27,11 +29,11 @@ import {
 import { mergeLiteDbMcp } from '../../src/lib/mcpAgentConfig';
 import { CLAUDE_STORE_PACKAGE, windowsClaudeConfigPaths } from '../../src/lib/claudeDesktopMcp';
 import * as approvals from './approvals';
-import { installAudit } from './audit';
+import { installFileAudit as installAudit } from './auditFile';
 import { ConfigError, IN_MEMORY_MESSAGE, NO_DATABASE_MESSAGE, defaultAuditPath, loadConfig, type ServerConfig } from './config';
-import { openDatabase, postgresConnectFailure, ReadOnlyServerError, type Database } from './db';
+import { openDatabase, postgresConnectFailure, ReadOnlyServerError, TooManyChangesError, type Database } from './db';
 import { renderTable } from './render';
-import { LiveSession } from './session';
+import { LiveSession, nodeToolContext } from './session';
 import { executeApprovedInput, runApproved, runQuery, type ToolContext } from './tools/query';
 import { describeTable, listTables } from './tools/schema';
 
@@ -377,13 +379,8 @@ async function main(): Promise<void> {
     let harness = buildFixture();
     let config = configFor(harness, 'read-only');
     let db: Database = await openDatabase(config);
-    let ctx: ToolContext = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'read-only',
-        path: harness.auditPath,
-    });
+    let ctx: ToolContext = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const read = await runQuery(ctx, 'SELECT id, status FROM orders ORDER BY id');
@@ -447,13 +444,8 @@ async function main(): Promise<void> {
     harness = buildFixture();
     config = configFor(harness, 'guarded');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'guarded',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const before = countRows(harness, 'orders');
@@ -577,6 +569,273 @@ async function main(): Promise<void> {
         rmSync(harness.dir, { recursive: true, force: true });
     }
 
+    // ------------------------------------------ approval in the window ---
+    process.stdout.write('\napproval in the LiteDB window\n');
+
+    {
+        // The handoff switches it on; an app that does not say so keeps the old way.
+        const dir = mkdtempSync(join(tmpdir(), 'litedb-handoff-test-'));
+        const handoffPath = join(dir, 'mcp-handoff.json');
+        const base = { version: 1, connectionId: 'sqlite:x', label: 'x', dialect: 'sqlite', policy: 'guarded', sqlitePath: join(dir, 'x.db') };
+        try {
+            writeFileSync(handoffPath, JSON.stringify({ ...base, approveInApp: true }));
+            check(
+                'an app that shows requests gets them',
+                loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).approvalsDir === join(dirname(handoffPath), 'approvals'),
+            );
+            writeFileSync(handoffPath, JSON.stringify(base));
+            check(
+                'an older app leaves the asking to the host',
+                !loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).approvalsDir,
+                'it has no window to answer, so waiting on one would hang every write',
+            );
+            check('without the switch, every write asks', !loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).directWrites);
+            writeFileSync(handoffPath, JSON.stringify({ ...base, directWrites: { maxRows: 25 } }));
+            check(
+                'the switch in the app reaches the server',
+                loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).directWrites?.maxRows === 25,
+            );
+            writeFileSync(handoffPath, JSON.stringify({ ...base, production: true, directWrites: { maxRows: 25 } }));
+            check(
+                'never on a production connection',
+                !loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).directWrites,
+            );
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }
+
+    approvals.reset();
+    harness = buildFixture();
+    config = { ...configFor(harness, 'guarded'), approvalsDir: join(harness.dir, 'approvals'), approvalWaitMs: 300 };
+    db = await openDatabase(config);
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
+
+    try {
+        const dir = join(harness.dir, 'approvals');
+        const before = countRows(harness, 'orders');
+        const tokenIn = (text: string) => /token: ([0-9a-f-]{36})/.exec(text)?.[1] ?? '';
+        const answer = (token: string, decision: 'approved' | 'declined') =>
+            writeFileSync(join(dir, decisionFileName(token)), serializeDecision({ token, decision, at: new Date().toISOString() }));
+
+        const token = tokenIn((await runQuery(ctx, "UPDATE orders SET status = 'refunded' WHERE customer_id = 1")).text);
+        const waiting = await runApproved(ctx, token);
+        check(
+            'with no answer, the call says it is waiting',
+            waiting.text.startsWith('WAITING FOR APPROVAL IN LITEDB') && waiting.isError !== true,
+        );
+        check('nothing ran while waiting', countRows(harness, 'orders', "status = 'refunded'") === 0);
+        check('the token survives the wait', approvals.size() === 1);
+
+        const requestPath = join(dir, requestFileName(token));
+        const request = existsSync(requestPath) ? parseRequest(readFileSync(requestPath, 'utf8')) : null;
+        check('the request is on disk for the window', request?.token === token);
+        check('it carries the exact row count', request?.statements[0]?.affectedRows === 2);
+        const diff = request?.statements[0]?.diff;
+        check(
+            'it shows the rows it changes, old and new',
+            diff?.mode === 'update' &&
+                diff.rows.length === 2 &&
+                diff.changes?.[0]?.column === 'status' &&
+                diff.changes[0].values.every((v) => v === 'refunded'),
+            JSON.stringify(diff),
+        );
+
+        answer(token, 'approved');
+        const approved = await runApproved(ctx, token);
+        check('after Approve in the window, it runs', approved.text.startsWith('Executed.'), approved.text);
+        check('the rows changed', countRows(harness, 'orders', "status = 'refunded'") === 2);
+        check(
+            'the request and the answer are cleaned up',
+            !existsSync(requestPath) && !existsSync(join(dir, decisionFileName(token))),
+        );
+
+        const second = tokenIn((await runQuery(ctx, 'DELETE FROM orders WHERE id = 4')).text);
+        // Answered while the call waits, as the window does.
+        setTimeout(() => answer(second, 'declined'), 50);
+        const declined = await runApproved(ctx, second);
+        check('Decline in the window refuses it', declined.isError === true && declined.text.startsWith('DECLINED in LiteDB'));
+        check('nothing was deleted', countRows(harness, 'orders') === before);
+        check('a declined token is spent', (await runApproved(ctx, second)).isError === true);
+        check(
+            'the log records the decline',
+            auditEntries(harness).some((e) => e.decision === 'declined' && e.outcome === 'not-run'),
+        );
+
+        const third = tokenIn((await runQuery(ctx, 'DELETE FROM orders WHERE id = 3')).text);
+        writeFileSync(
+            join(dir, decisionFileName(third)),
+            serializeDecision({ token: 'some-other-token', decision: 'approved', at: new Date().toISOString() }),
+        );
+        const forged = await runApproved(ctx, third);
+        check(
+            "an answer naming another token does not count",
+            forged.text.startsWith('WAITING') && countRows(harness, 'orders', 'id = 3') === 1,
+        );
+    } finally {
+        await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
+    // -------------------------------------------------------------- undo ---
+    process.stdout.write('\nundo\n');
+
+    approvals.reset();
+    harness = buildFixture();
+    config = configFor(harness, 'guarded');
+    db = await openDatabase(config);
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
+
+    try {
+        const tokenIn = (text: string) => /token: ([0-9a-f-]{36})/.exec(text)?.[1] ?? '';
+        const approve = async (sql: string) => runApproved(ctx, tokenIn((await runQuery(ctx, sql)).text));
+        const lastUndo = () => {
+            const link = auditEntries(harness).filter((e) => e.decision === 'approved').pop()?.undo;
+            return link ? parseUndo(readFileSync(join(dirname(harness.auditPath), link), 'utf8')) : null;
+        };
+        // What the app does: read what is there now, plan, run the plan.
+        const undoIt = () => {
+            const record = lastUndo();
+            if (!record) return null;
+            const own = new DatabaseSync(harness.dbPath);
+            try {
+                const current = currentStateQueries(record).flatMap(
+                    (sql) => own.prepare(sql).all().map((row) => Object.values(row as Record<string, unknown>)),
+                );
+                const plan = planUndo(record, current);
+                for (const sql of plan.statements) own.exec(sql);
+                return plan;
+            } finally {
+                own.close();
+            }
+        };
+
+        await approve("DELETE FROM orders WHERE status = 'shipped'");
+        const deleted = lastUndo();
+        check('a DELETE saves the rows it removed', deleted?.kind === 'delete' && deleted.rows.length === 2);
+        check('keyed by the primary key', deleted?.key.join() === 'id');
+        const restored = undoIt();
+        check('undo puts them back', restored?.restore === 2 && countRows(harness, 'orders', "status = 'shipped'") === 2);
+
+        await approve("UPDATE orders SET status = 'refunded' WHERE customer_id = 1");
+        const updated = lastUndo();
+        check(
+            'an UPDATE saves the old values and the new',
+            updated?.kind === 'update' && updated.assigned?.join() === 'status' && updated.after?.every((v) => v[0] === 'refunded') === true,
+        );
+        // Someone changes one of the rows again before the undo.
+        const other = new DatabaseSync(harness.dbPath);
+        other.exec("UPDATE orders SET status = 'disputed' WHERE id = 2");
+        other.close();
+        const reverted = undoIt();
+        check(
+            'undo reverts what is still as the write left it, and leaves newer work alone',
+            reverted?.restore === 1 &&
+                reverted.skipped === 1 &&
+                countRows(harness, 'orders', "id = 1 AND status = 'shipped'") === 1 &&
+                countRows(harness, 'orders', "id = 2 AND status = 'disputed'") === 1,
+        );
+
+        const before = countRows(harness, 'customers');
+        await approve("INSERT INTO customers (email, country) VALUES ('new@example.com', 'FR'), ('two@example.com', 'FR')");
+        const inserted = lastUndo();
+        check('a SQLite INSERT notes the new rowids', inserted?.kind === 'insert' && inserted.rowids?.upTo === (inserted.rowids?.after ?? 0) + 2);
+        undoIt();
+        check('undo removes the rows it added', countRows(harness, 'customers') === before);
+
+        await approve("UPDATE orders SET total = total + 1 WHERE id = 1; UPDATE orders SET total = total + 1 WHERE id = 2");
+        check(
+            'a script is not saved for undo: its statements depend on each other',
+            auditEntries(harness).filter((e) => e.decision === 'approved').slice(-2).every((e) => !e.undo),
+        );
+    } finally {
+        await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
+    // ---------------------------------------------- writes without asking ---
+    process.stdout.write('\nwrites without asking\n');
+
+    approvals.reset();
+    harness = buildFixture();
+    config = { ...configFor(harness, 'guarded'), directWrites: { maxRows: 2 } };
+    db = await openDatabase(config);
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
+
+    try {
+        const write = (sql: string) => runQuery(ctx, sql, { direct: true });
+        const ran = (text: string) => text.startsWith('Executed without approval');
+        const asked = (text: string) => text.startsWith('APPROVAL REQUIRED');
+
+        const bounded = await write("UPDATE orders SET status = 'held' WHERE status = 'shipped'");
+        check(
+            'a bounded UPDATE within the limit runs in one call',
+            ran(bounded.text) && countRows(harness, 'orders', "status = 'held'") === 2,
+            bounded.text,
+        );
+        const entry = auditEntries(harness).pop();
+        check(
+            'it is logged as run without approval, with its limit, its rows and an undo',
+            entry?.decision === 'allowed' && entry.directLimit === 2 && entry.actualRows === 2 && Boolean(entry.undo),
+        );
+
+        const tooMany = await write('UPDATE orders SET total = 1 WHERE id > 0');
+        check(
+            'over the limit it asks, and says why',
+            asked(tooMany.text) && tooMany.text.includes('more than the 2') && countRows(harness, 'orders', 'total = 1') === 0,
+            tooMany.text,
+        );
+        check('a write with no WHERE clause asks', asked((await write('DELETE FROM customers')).text) && countRows(harness, 'customers') === 3);
+        check('a schema change asks', asked((await write('CREATE TABLE notes (id INTEGER PRIMARY KEY)')).text));
+
+        const two = await write("INSERT INTO customers (email) VALUES ('a@example.com'), ('b@example.com')");
+        check('an INSERT of listed rows within the limit runs', ran(two.text) && countRows(harness, 'customers') === 5, two.text);
+        check(
+            'an INSERT of more rows than the limit asks',
+            asked((await write("INSERT INTO customers (email) VALUES ('c@x'), ('d@x'), ('e@x')")).text) &&
+                countRows(harness, 'customers') === 5,
+        );
+        check(
+            'an INSERT fed by a SELECT asks: its size is not in the statement',
+            asked((await write('INSERT INTO customers (email) SELECT email FROM customers WHERE id = 1')).text),
+        );
+        const upsert = await write(
+            "INSERT INTO customers (id, email) VALUES (1, 'x@example.com') ON CONFLICT(id) DO UPDATE SET email = excluded.email",
+        );
+        check('an upsert asks', asked(upsert.text) && countRows(harness, 'customers', "email = 'x@example.com'") === 0);
+        check('INSERT OR REPLACE asks', asked((await write("INSERT OR REPLACE INTO customers (id, email) VALUES (1, 'y@x')")).text));
+
+        const viaQuery = await runQuery(ctx, 'DELETE FROM orders WHERE id = 4');
+        check('query never writes, even where write may', asked(viaQuery.text) && countRows(harness, 'orders', 'id = 4') === 1);
+
+        // The limit holds when the write runs, not only when it is counted.
+        let rolledBack = false;
+        try {
+            await db.writeAll(['UPDATE orders SET total = 2 WHERE id > 0'], { maxChanges: 2 });
+        } catch (error) {
+            rolledBack = error instanceof TooManyChangesError;
+        }
+        check('a run over its row limit is rolled back', rolledBack && countRows(harness, 'orders', 'total = 2') === 0);
+
+        const off = await runQuery({ ...ctx, config: { ...ctx.config, directWrites: null } }, 'DELETE FROM orders WHERE id = 4', {
+            direct: true,
+        });
+        check(
+            'switched off, write previews and says why',
+            asked(off.text) && off.text.includes('does not allow writes without approval') && countRows(harness, 'orders', 'id = 4') === 1,
+        );
+        const readOnly = await runQuery({ ...ctx, config: { ...ctx.config, policy: 'read-only' } }, 'DELETE FROM orders WHERE id = 4', {
+            direct: true,
+        });
+        check('a read-only connection refuses it all the same', readOnly.text.startsWith('REFUSED') && countRows(harness, 'orders', 'id = 4') === 1);
+    } finally {
+        await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
     // ---------------------------------------------------- WAL visibility ---
     process.stdout.write('\nWAL visibility\n');
 
@@ -589,13 +848,8 @@ async function main(): Promise<void> {
     }
     config = configFor(harness, 'guarded');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'guarded',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const mtimeBefore = statSync(harness.dbPath).mtimeMs;
@@ -628,13 +882,8 @@ async function main(): Promise<void> {
     }
     config = configFor(harness, 'guarded');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'guarded',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
     try {
         const holder = new DatabaseSync(harness.dbPath);
         holder.exec('BEGIN');
@@ -754,13 +1003,8 @@ async function main(): Promise<void> {
     harness = buildFixture();
     config = configFor(harness, 'unrestricted');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'unrestricted',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const before = countRows(harness, 'orders');
@@ -856,13 +1100,8 @@ async function main(): Promise<void> {
     harness = buildFixture();
     config = configFor(harness, 'read-only');
     db = await openDatabase(config);
-    ctx = { db, config };
-    installAudit({
-        connection: config.connectionId,
-        dialect: 'sqlite',
-        policy: 'read-only',
-        path: harness.auditPath,
-    });
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
 
     try {
         const tables = await listTables(ctx);

@@ -23,6 +23,10 @@ export interface RunOptions {
     fullBlobs?: boolean;
     /** Postgres: run on the editor's own session, where BEGIN outlives the run. */
     session?: boolean;
+    /** Change nothing whatever the SQL says. For agents' reads; see src-tauri/src/db. */
+    readOnly?: boolean;
+    /** With `transaction`: roll back if the writes change more rows than this. */
+    maxChanges?: number;
 }
 
 export interface StatementResult {
@@ -143,8 +147,9 @@ export function inTauri(): boolean {
     return '__TAURI_INTERNALS__' in globalThis;
 }
 
-export async function dbOpenSqlite(id: string, path: string, create = false): Promise<OpenInfo> {
-    return invoke<OpenInfo>('db_open_sqlite', { id, path, create });
+/** `readOnly` opens a connection that cannot write at all, for agents' reads. */
+export async function dbOpenSqlite(id: string, path: string, create = false, readOnly = false): Promise<OpenInfo> {
+    return invoke<OpenInfo>('db_open_sqlite', { id, path, create, readOnly });
 }
 
 export async function dbOpenPostgres(id: string, config: PgConnectConfig): Promise<OpenInfo> {

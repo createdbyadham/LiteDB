@@ -6,6 +6,7 @@ import { SidebarProvider } from "@/contexts/SidebarContext";
 import DatabaseView from "./components/DatabaseView";
 import ConnectionsView from '@/components/Connections/ConnectionsView';
 import TitleBar from '@/components/TitleBar';
+import { AgentApprovalDialog } from '@/components/AgentApprovalDialog';
 import { CommandPalette } from '@/components/CommandPalette';
 import { useEffect } from 'react';
 import { check } from '@tauri-apps/plugin-updater';
@@ -19,6 +20,9 @@ import { THEME_STORAGE_KEY } from '@/lib/theme';
 const App = () => {
   useEffect(() => {
     if (!inTauri()) return;
+    // Agents reach the database through this window: `LiteDB --mcp`. Loaded
+    // after startup; the MCP SDK is not needed to draw the first screen.
+    void import('@/lib/mcp/host').then(({ startMcpHost }) => startMcpHost());
     const checkForAppUpdates = async () => {
       try {
         const update = await check();
@@ -76,6 +80,7 @@ const App = () => {
               </div>
             </div>
             <CommandPalette />
+            <AgentApprovalDialog />
           </HashRouter>
           <Toaster />
         </TooltipProvider>

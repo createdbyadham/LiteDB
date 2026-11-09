@@ -33,15 +33,32 @@ import {
 import { ROW_PROBE_LIMIT } from '../../../src/lib/schemaSamples';
 import type { StatementClassification } from '../../../src/lib/sqlClassifier';
 import { evaluateScript, type GateDecision } from '../../../src/lib/sqlPolicy';
+import type { AppAnswer } from '../approvalRequest';
 import * as approvals from '../approvals';
 import { record } from '../audit';
-import type { ServerConfig } from '../config';
-import type { Database, QueryResult } from '../db';
+import { TooManyChangesError, type Database, type QueryResult } from '../catalog';
+import { directVerdict, type DirectWrites } from '../directWrites';
 import { formatCount, pluralRows, renderTable } from '../render';
+import type { ToolConfig } from '../toolConfig';
+import type { PreparedUndo } from '../undoCapture';
 
+/**
+ * One tool call's view of its host. The npm server and the desktop app each
+ * build one; the tools never ask which.
+ */
 export interface ToolContext {
     db: Database;
-    config: ServerConfig;
+    config: ToolConfig;
+    /** The MCP host's own name for itself, as it said during initialize. */
+    client?: string | null;
+    /**
+     * Ask the person at the LiteDB window before an approved write runs.
+     * Absent when nobody is watching the window: the MCP host's own prompt is
+     * then the only ask.
+     */
+    approve?: (approval: approvals.PendingApproval) => Promise<AppAnswer>;
+    /** Save what a write is about to change, for Undo. Absent: no Undo. */
+    undo?: (statement: StatementClassification) => Promise<PreparedUndo | null>;
 }
 
 export interface ToolResult {
@@ -134,24 +151,7 @@ async function runApprovedStatements(
     if (statements.length <= 1) {
         return statements.length === 0 ? [] : [await db.write(statements[0].sql)];
     }
-
-    await db.write('BEGIN');
-    try {
-        const results: QueryResult[] = [];
-        for (const statement of statements) {
-            results.push(await db.write(statement.sql));
-        }
-        await db.write('COMMIT');
-        return results;
-    } catch (error) {
-        try {
-            await db.write('ROLLBACK');
-        } catch {
-            // Postgres has already aborted the transaction, or BEGIN itself
-            // failed. Either way the original error is the one worth raising.
-        }
-        throw error;
-    }
+    return db.writeAll(statements.map((statement) => statement.sql));
 }
 
 function renderResults(
@@ -165,13 +165,100 @@ function renderResults(
             if (result.columns.length === 0) {
                 return `${prefix}${pluralRows(result.rowsAffected)} changed.`;
             }
-            return `${prefix}${pluralRows(result.rows.length)} returned.\n\n${renderTable(
+            const returned = result.truncated
+                ? `The first ${pluralRows(result.rows.length)}`
+                : pluralRows(result.rows.length);
+            return `${prefix}${returned} returned.\n\n${renderTable(
                 result.columns,
                 result.rows,
                 { maxRows },
             )}`;
         })
         .join('\n\n');
+}
+
+/** Rows the writes in a run changed. RETURNING reports them as rows, not rowsAffected. */
+function changedRows(statements: StatementClassification[], results: QueryResult[]): number {
+    return results.reduce(
+        (sum, result, i) =>
+            statements[i]?.kind === 'read' ? sum : sum + (result.rowsAffected || result.rows.length),
+        0,
+    );
+}
+
+/**
+ * Make a committed write visible to the app. A failure is a note, not an
+ * error: the write happened, and reporting it as failed would be wrong.
+ */
+async function flushNote(db: Database): Promise<string> {
+    try {
+        await db.flushWrites();
+        return '';
+    } catch (error) {
+        // Busy is not an exception from SQLite, only a flag; the app catches
+        // up when the other program lets go of the file.
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('Could not checkpoint after an approved write:', error);
+        return `\n\nWarning: ${message}`;
+    }
+}
+
+/**
+ * Run a write the person at LiteDB let through without approval. Null when it
+ * changed more rows than allowed once it ran: it was rolled back, and the
+ * caller falls back to asking.
+ */
+async function runDirect(
+    ctx: ToolContext,
+    decision: GateDecision,
+    limit: DirectWrites,
+    counted: number,
+): Promise<ToolResult | null> {
+    const { statements } = decision;
+    // Saved for Undo before it runs, as for an approved write.
+    const undo =
+        statements.length === 1 && ctx.undo ? await ctx.undo(statements[0]).catch(() => null) : null;
+    const started = Date.now();
+    try {
+        const results = await ctx.db.writeAll(
+            statements.map((statement) => statement.sql),
+            { maxChanges: limit.maxRows },
+        );
+        const actualRows = changedRows(statements, results);
+        const undoLink = undo && actualRows > 0 ? await undo.save().catch(() => null) : null;
+        const note = await flushNote(ctx.db);
+        await record(ctx, {
+            statements,
+            decision: 'allowed',
+            outcome: 'ok',
+            durationMs: Date.now() - started,
+            estimatedRows: counted,
+            actualRows,
+            undo: undoLink,
+            directLimit: limit.maxRows,
+        });
+        return {
+            text:
+                `Executed without approval: this connection lets agents change up to ` +
+                `${pluralRows(limit.maxRows)} in one call.\n\n` +
+                renderResults(statements, results, ctx.config.maxRows) +
+                note,
+        };
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        // It ran, so it is logged, even though the rollback left nothing behind.
+        await record(ctx, {
+            statements,
+            decision: 'allowed',
+            outcome: 'error',
+            error: message,
+            estimatedRows: counted,
+            durationMs: Date.now() - started,
+            directLimit: limit.maxRows,
+        });
+        if (error instanceof TooManyChangesError) return null;
+        return { text: `Execution failed: ${message}`, isError: true };
+    }
 }
 
 /** Total of the per-statement estimates, or null when none could be made. */
@@ -182,14 +269,22 @@ function totalEstimate(estimates: ImpactEstimate[]): number | null {
     }, null);
 }
 
-export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResult> {
+export interface QueryOptions {
+    /**
+     * The `write` tool: run a write now when this connection allows it
+     * without approval (directWrites.ts). `query` never does.
+     */
+    direct?: boolean;
+}
+
+export async function runQuery(ctx: ToolContext, sql: string, options: QueryOptions = {}): Promise<ToolResult> {
     // Provenance is always 'ai'. That is not a default — it is what MCP means,
     // and it is what holds generated SQL to the policy floor no matter how
     // permissively the server was started.
     const decision = evaluateScript(sql, ctx.config.policy, 'ai');
 
     if (decision.action === 'block') {
-        await record({
+        await record(ctx, {
             statements: decision.statements,
             decision: 'blocked',
             outcome: 'not-run',
@@ -208,7 +303,7 @@ export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResul
         const started = Date.now();
         try {
             const results = await readStatements(ctx.db, decision.statements);
-            await record({
+            await record(ctx, {
                 statements: decision.statements,
                 decision: 'allowed',
                 outcome: 'ok',
@@ -218,7 +313,7 @@ export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResul
             return { text: renderResults(decision.statements, results, ctx.config.maxRows) };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            await record({
+            await record(ctx, {
                 statements: decision.statements,
                 decision: 'allowed',
                 outcome: 'error',
@@ -237,6 +332,23 @@ export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResul
         estimates.push(await previewStatement(statement, ctx.db.dialect, runner));
     }
 
+    // Asked to write now: run it if it is small enough and the person at
+    // LiteDB allowed that for this connection, else say why it waits.
+    let notDirect: string | null = null;
+    if (options.direct) {
+        const limit = ctx.config.directWrites;
+        const verdict = limit ? directVerdict(decision, estimates, limit) : null;
+        if (limit && verdict?.run) {
+            const ran = await runDirect(ctx, decision, limit, verdict.rows);
+            if (ran) return ran;
+            notDirect = `it changed more than ${pluralRows(limit.maxRows)} when it ran, so it was rolled back`;
+        } else {
+            notDirect = verdict && !verdict.run
+                ? verdict.why
+                : 'this connection does not allow writes without approval (Settings → Agents in LiteDB)';
+        }
+    }
+
     const approval = approvals.create(
         sql,
         decision,
@@ -247,7 +359,7 @@ export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResul
 
     // Logged now, before anything is approved. A write the agent proposed and
     // never came back for is worth being able to see.
-    await record({
+    await record(ctx, {
         statements: decision.statements,
         decision: 'pending',
         outcome: 'not-run',
@@ -271,6 +383,7 @@ export async function runQuery(ctx: ToolContext, sql: string): Promise<ToolResul
             'APPROVAL REQUIRED — nothing has run.',
             '',
             decision.reason,
+            ...(notDirect ? [`Not run directly: ${notDirect}.`] : []),
             '',
             ...body,
             '',
@@ -301,7 +414,58 @@ export const executeApprovedInput = {
         .describe("The token from the query tool's preview."),
 };
 
+/** What the agent hears while the request is still on screen. */
+function waitingText(approval: approvals.PendingApproval): string {
+    const expires = new Date(approval.createdAt + approvals.TTL_MS);
+    const at = `${String(expires.getHours()).padStart(2, '0')}:${String(expires.getMinutes()).padStart(2, '0')}`;
+    return [
+        'WAITING FOR APPROVAL IN LITEDB — nothing has run.',
+        '',
+        'The statement, its row count and the rows it changes are on screen in the ' +
+            'LiteDB window. Tell the person you are working for, and once they have ' +
+            'answered there, call execute_approved again with the same token:',
+        `  token: ${approval.token}`,
+        '',
+        `The token expires at ${at}, five minutes after the preview.`,
+    ].join('\n');
+}
+
+const DECLINED_TEXT = [
+    'DECLINED in LiteDB — nothing ran.',
+    '',
+    'The person at the LiteDB window said no to this write. Do not run it again ' +
+        'or work around it; ask them what they want instead.',
+].join('\n');
+
 export async function runApproved(ctx: ToolContext, token: string): Promise<ToolResult> {
+    // With LiteDB open, the window decides: the host may have asked, or may
+    // run tools without asking (Cursor's auto-run), and either way nothing
+    // runs until someone clicks Approve in the app.
+    if (ctx.approve) {
+        let held: approvals.PendingApproval;
+        try {
+            held = approvals.peek(token, ctx.config.connectionId, ctx.config.target);
+        } catch (error) {
+            return { text: error instanceof Error ? error.message : String(error), isError: true };
+        }
+        const answer = await ctx.approve(held);
+        if (answer === 'waiting') return { text: waitingText(held) };
+        if (answer === 'declined') {
+            try {
+                approvals.claim(token, ctx.config.connectionId, ctx.config.target);
+            } catch {
+                // Expired while the window was open. It did not run either way.
+            }
+            await record(ctx, {
+                statements: held.decision.statements,
+                decision: 'declined',
+                outcome: 'not-run',
+                estimatedRows: totalEstimate(held.estimates),
+            });
+            return { text: DECLINED_TEXT, isError: true };
+        }
+    }
+
     let approval: approvals.PendingApproval;
     try {
         approval = approvals.claim(token, ctx.config.connectionId, ctx.config.target);
@@ -311,30 +475,27 @@ export async function runApproved(ctx: ToolContext, token: string): Promise<Tool
 
     const { decision, estimates } = approval;
     const estimated = totalEstimate(estimates);
+    // Saved for Undo before it runs. A failure here only means no Undo.
+    const undo =
+        decision.statements.length === 1 && ctx.undo
+            ? await ctx.undo(decision.statements[0]).catch(() => null)
+            : null;
     const started = Date.now();
 
     try {
         const results = await runApprovedStatements(ctx.db, decision.statements);
         const actualRows = results.reduce((sum, r) => sum + r.rowsAffected, 0);
-        let flushNote = '';
-        try {
-            await ctx.db.flushWrites();
-        } catch (error) {
-            // The write is committed. Failing the call would report a change
-            // that happened as one that did not. Tell the agent the app cannot
-            // see it yet — busy is not an exception from SQLite, only a flag.
-            const message = error instanceof Error ? error.message : String(error);
-            console.error('Could not checkpoint after an approved write:', error);
-            flushNote = `\n\nWarning: ${message}`;
-        }
+        const undoLink = undo && actualRows > 0 ? await undo.save().catch(() => null) : null;
+        const note = await flushNote(ctx.db);
 
-        await record({
+        await record(ctx, {
             statements: decision.statements,
             decision: 'approved',
             outcome: 'ok',
             durationMs: Date.now() - started,
             estimatedRows: estimated,
             actualRows,
+            undo: undoLink,
         });
 
         // Saying so when the two disagree is the point of keeping both. A log
@@ -351,11 +512,11 @@ export async function runApproved(ctx: ToolContext, token: string): Promise<Tool
             text:
                 `Executed.\n\n${renderResults(decision.statements, results, ctx.config.maxRows)}` +
                 surprise +
-                flushNote,
+                note,
         };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await record({
+        await record(ctx, {
             statements: decision.statements,
             decision: 'approved',
             outcome: 'error',

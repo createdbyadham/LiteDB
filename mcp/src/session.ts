@@ -13,12 +13,34 @@
 // same fingerprint would leak a client and two opens of different ones would
 // run SQL against two databases in one process.
 
-import { installAudit } from './audit';
-import { loadConfig } from './config';
+import { askApp } from './appApproval';
+import { installFileAudit } from './auditFile';
+import { loadConfig, type ServerConfig } from './config';
 import { openDatabase, type Database } from './db';
 import type { ToolContext } from './tools/query';
+import { prepareUndo } from './undo';
+
+/** A tool context that still knows this server's own configuration. */
+export type NodeToolContext = ToolContext & { config: ServerConfig };
+
+/**
+ * A tool context for this server: approvals through the files the app
+ * watches, when the handoff says it shows them, and Undo files beside the
+ * audit log.
+ */
+export function nodeToolContext(db: Database, config: ServerConfig, client: string | null = null): NodeToolContext {
+    return {
+        db,
+        config,
+        client,
+        approve: config.approvalsDir ? (approval) => askApp({ db, config, client }, approval) : undefined,
+        undo: (statement) => prepareUndo(db, statement, config.connectionId, config.auditPath),
+    };
+}
 
 export class LiveSession {
+    /** The host's name for itself, once its initialize has arrived. */
+    client: () => string | null = () => null;
     private db: Database | null = null;
     private fingerprint = '';
     private chain: Promise<void> = Promise.resolve();
@@ -29,7 +51,7 @@ export class LiveSession {
      * it. Counted rather than released per call because hosts overlap calls,
      * and a multi-statement approval holds a transaction across awaits.
      */
-    async run<T>(work: (ctx: ToolContext) => Promise<T>): Promise<T> {
+    async run<T>(work: (ctx: NodeToolContext) => Promise<T>): Promise<T> {
         this.inFlight++;
         try {
             return await work(await this.context());
@@ -46,7 +68,7 @@ export class LiveSession {
         }
     }
 
-    async context(): Promise<ToolContext> {
+    async context(): Promise<NodeToolContext> {
         const run = this.chain.then(() => this.contextLocked(), () => this.contextLocked());
         this.chain = run.then(
             () => undefined,
@@ -67,7 +89,7 @@ export class LiveSession {
         }
     }
 
-    private async contextLocked(): Promise<ToolContext> {
+    private async contextLocked(): Promise<NodeToolContext> {
         let config;
         try {
             config = loadConfig();
@@ -94,13 +116,8 @@ export class LiveSession {
             }
         }
 
-        installAudit({
-            connection: config.connectionId,
-            dialect: config.dialect,
-            policy: config.policy,
-            path: config.auditPath,
-        });
-        return { db, config };
+        installFileAudit(config.auditPath);
+        return nodeToolContext(db, config, this.client());
     }
 
     async close(): Promise<void> {

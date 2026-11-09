@@ -1,4 +1,7 @@
-// Writing the audit log from Node, into the same file the desktop app uses.
+// Recording what agents do, into the same log the desktop app uses.
+//
+// The npm server writes the file through auditFile.ts; served from inside the
+// app, entries go straight into the app's own log.
 //
 // Sharing the file is the point. The log exists to answer "what has touched
 // this database?", and an agent reaching the database over MCP is exactly the
@@ -9,71 +12,27 @@
 // interleaved with no work on its side.
 //
 // The format, the parser and the append ordering all stay in
-// `src/lib/auditLog.ts`. This file is only the place the bytes land.
+// `src/lib/auditLog.ts`. This file only decides what an entry says.
 
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import {
     newAuditId,
     recordAudit,
-    setAuditSink,
     type AuditDecision,
     type AuditEntry,
     type AuditOutcome,
-    type AuditSink,
 } from '../../src/lib/auditLog';
-import type { SqlDialect } from '../../src/lib/schemaTypes';
 import type { StatementClassification } from '../../src/lib/sqlClassifier';
-import type { SafetyPolicy } from '../../src/lib/sqlPolicy';
+import type { ToolConfig } from './toolConfig';
 
-function createFileSink(path: string): AuditSink {
-    let ensured = false;
-
-    return {
-        async append(line: string): Promise<void> {
-            if (!ensured) {
-                await mkdir(dirname(path), { recursive: true });
-                ensured = true;
-            }
-            await appendFile(path, line, 'utf8');
-        },
-        async read(): Promise<string> {
-            try {
-                return await readFile(path, 'utf8');
-            } catch (error) {
-                // No log yet is not a failure; it is a log with nothing in it.
-                if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
-                throw error;
-            }
-        },
-        location(): string {
-            return path;
-        },
-    };
-}
-
-export interface AuditContext {
-    connection: string;
-    dialect: SqlDialect;
-    policy: SafetyPolicy;
-    path: string;
-}
-
-let context: AuditContext | null = null;
-
-// Which MCP host is calling, as it introduced itself during initialize. A
-// getter, because the handshake finishes after the audit is installed.
-let clientName: () => string | null = () => null;
-
-/** Tell the audit which host is calling, so the app can say "Claude is reading orders". */
-export function identifyClient(get: () => string | null): void {
-    clientName = get;
-}
-
-/** Point `recordAudit` at a file and remember what to stamp entries with. */
-export function installAudit(next: AuditContext): void {
-    context = next;
-    setAuditSink(createFileSink(next.path));
+/**
+ * What an entry is stamped with: the connection and policy of the call, and
+ * which host made it. A tool context is one. Passed per call rather than held
+ * here, because the app serves several hosts at once.
+ */
+export interface AuditScope {
+    config: Pick<ToolConfig, 'connectionId' | 'dialect' | 'policy'>;
+    /** The MCP host's own name for itself (clientInfo.name), once the handshake has said. */
+    client?: string | null;
 }
 
 export interface DecisionRecord {
@@ -84,6 +43,10 @@ export interface DecisionRecord {
     estimatedRows?: number | null;
     actualRows?: number | null;
     durationMs?: number | null;
+    /** The Undo file for this write, relative to the audit folder. */
+    undo?: string | null;
+    /** Ran without approval, under this connection's row limit for agents. */
+    directLimit?: number | null;
 }
 
 /**
@@ -93,8 +56,7 @@ export interface DecisionRecord {
  * a model by construction — that is what the protocol is for — so offering a
  * `user` option would only create a way to mislabel the log.
  */
-export async function record(entry: DecisionRecord): Promise<void> {
-    if (!context) return;
+export async function record(scope: AuditScope, entry: DecisionRecord): Promise<void> {
     const at = new Date().toISOString();
 
     for (const statement of entry.statements) {
@@ -102,13 +64,13 @@ export async function record(entry: DecisionRecord): Promise<void> {
             id: newAuditId(),
             at,
             provenance: 'ai',
-            connection: context.connection,
-            dialect: context.dialect,
+            connection: scope.config.connectionId,
+            dialect: scope.config.dialect,
             sql: statement.sql,
             kind: statement.kind,
             verb: statement.verb,
             table: statement.table,
-            policy: context.policy,
+            policy: scope.config.policy,
             decision: entry.decision,
             outcome: entry.outcome,
             error: entry.error ?? null,
@@ -123,7 +85,9 @@ export async function record(entry: DecisionRecord): Promise<void> {
             prompt: null,
             // The host's own name for itself (clientInfo.name). Unlike a model
             // name this is something the protocol does tell us.
-            client: clientName(),
+            client: scope.client ?? null,
+            ...(entry.undo ? { undo: entry.undo } : {}),
+            ...(entry.directLimit ? { directLimit: entry.directLimit } : {}),
         };
         await recordAudit(row);
     }

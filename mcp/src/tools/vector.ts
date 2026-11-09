@@ -14,7 +14,7 @@
 // the vector — is numbers this file generated.
 
 import { record } from '../audit';
-import { literal, type Database } from '../db';
+import { literal, type Database } from '../catalog';
 import { pluralRows, renderTable } from '../render';
 import type { ToolContext, ToolResult } from './query';
 
@@ -108,7 +108,7 @@ export async function listVectorColumns(ctx: ToolContext): Promise<ToolResult> {
 async function embed(
     text: string,
     modelId: string,
-    cacheDir: string,
+    cacheDir: string | undefined,
 ): Promise<{ vector: number[]; dims: number }> {
     let module: typeof import('../../../src/lib/localEmbeddings');
     try {
@@ -120,7 +120,7 @@ async function embed(
         );
     }
     const { configureEmbeddingCache, localEmbeddings } = module;
-    configureEmbeddingCache(cacheDir);
+    if (cacheDir) configureEmbeddingCache(cacheDir);
 
     const ready = await localEmbeddings.initialize(modelId);
     if (!ready || !localEmbeddings.currentModel) {
@@ -271,7 +271,7 @@ export async function semanticSearch(
     const result = await ctx.db.read(sql);
     const durationMs = Date.now() - started;
 
-    await record({
+    await record(ctx, {
         statements: [
             {
                 sql,

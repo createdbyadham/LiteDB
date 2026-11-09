@@ -31,6 +31,11 @@ To run exactly the statements above, call execute_approved with:
 
 ## Install
 
+**Using the LiteDB app? You do not need this package.** The app serves these
+same tools itself: point your agent at `LiteDB --mcp` (Settings → **Agents**
+copies the command for your install), with no Node involved. This package is
+for machines without the app — CI, a server — and keeps working alongside it.
+
 If LiteDB is running, the server follows whatever you have open. Quitting the
 app clears the handoff (and any Postgres password in it). In the app:
 Settings → **Agents**, or the status-bar **MCP** chip. Step-by-step for each
@@ -137,6 +142,7 @@ property.
 | `describe_table` | Columns, types, keys, foreign keys, indexes, and the values a low-cardinality column actually holds. |
 | `query` | Runs reads. **Previews** writes and returns a token. Refuses what the policy forbids. |
 | `execute_approved` | Runs a previewed statement. Takes only the token. |
+| `write` | Runs a small, bounded write in one call where the app allows it for the connection (Settings → Agents); otherwise previews it like `query`, with the reason. |
 | `list_vector_columns` | pgvector columns and their dimensions. |
 | `semantic_search` | Nearest-neighbour search, with the query text embedded on your machine. |
 | `audit_log` | What has been proposed, approved and run — including from the desktop app. |
@@ -205,14 +211,47 @@ ERROR:  cannot execute UPDATE in a read-only transaction
 The impact preview runs there too, and it never uses `EXPLAIN ANALYZE` —
 which in PostgreSQL executes the statement it claims to be explaining.
 
+### Approval in the LiteDB window
+
+While the desktop app is open (the server is following its handoff),
+`execute_approved` does not run on the agent's say-so. It writes the request to
+`approvals/` in the app's data folder — the statement, the exact row count and
+a sample of the rows it deletes, changes or adds — and waits for the person at
+the window. Approve runs exactly what was previewed; Decline returns
+`DECLINED in LiteDB — nothing ran` and spends the token. With no answer within
+50 seconds (`LITEDB_APPROVAL_WAIT_MS`), the call returns `WAITING FOR APPROVAL
+IN LITEDB` and keeps the token, and the agent calls again. That keeps each call
+under the 60-second request timeout most clients use.
+
+An app that does not show requests (older versions, or Settings → Agents
+turned off) does not ask for them, and the server leaves the asking to the MCP
+client, as before.
+
+### Undo
+
+Before an approved UPDATE or DELETE runs, the server saves the rows it is about
+to touch — up to 5,000, keyed by primary key or SQLite's rowid, and for an
+UPDATE the values it is about to write — to `undo/<id>.json` beside the audit
+log, and the audit entry links to it. For a SQLite INSERT it notes the rowids
+the new rows get. **Undo** in the app's Audit panel puts the rows back, leaving
+alone any row that changed again since. Scripts of several statements, upserts,
+Postgres INSERTs and Postgres tables without a primary key are not saved, and
+cascades and triggers are not undone.
+
 ### What it does not do
 
-LiteDB cannot make your MCP client ask you. A client that has allowlisted
-`execute_approved` has turned the prompt off, and this server has no way to
-know. What it guarantees is narrower and still worth having: the write was
-classified, its impact was measured and reported before anything ran, what
-runs is byte-for-byte what was previewed, and all of it is in the audit log
-either way.
+Without the app, LiteDB cannot make your MCP client ask you. A client that has
+allowlisted `execute_approved` has turned its prompt off, and this server has
+no way to know. What it guarantees then is narrower and still worth having: the
+write was classified, its impact was measured and reported before anything ran,
+what runs is byte-for-byte what was previewed, and all of it is in the audit
+log either way.
+
+The window's approval is not a sandbox. The request and the answer are files in
+your own profile; an agent that can run shell commands as you could write the
+answer itself, or skip LiteDB and open the database directly. It stops an agent
+that works through LiteDB's tools, including clients that run them without
+asking.
 
 The audit log is append-only as a property of the API, not of the file. It
 sits in your own app-data directory and you can edit it. It is a record for
