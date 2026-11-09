@@ -17,6 +17,18 @@ import { titleFromSql } from '../editorTabs';
 import { postgresTarget } from '../mcpHandoff';
 import { completionName } from '../types';
 import { columnOptions, tablesIn, type ColumnCatalog } from '../sqlComplete';
+import { classifyStatement } from '../sqlClassifier';
+import {
+    buildDiffQuery,
+    columnIndex,
+    formatCell,
+    parseDecision,
+    parseRequest,
+    requestToken,
+    serializeRequest,
+    shapeDiff,
+    type ApprovalRequest,
+} from '../agentApproval';
 import {
     InlineSuggester,
     buildInlinePrompt,
@@ -222,6 +234,60 @@ const pgCatalog: ColumnCatalog = {
 equal('Postgres: a bare name folds to lower case', labels(at(pgCatalog, 'SELECT | FROM Users')), ['createdAt']);
 equal('Postgres: camelCase goes in quoted', at(pgCatalog, 'SELECT | FROM users')?.[0]?.apply, '"createdAt"');
 equal('Postgres: schema-qualified tables', labels(at(pgCatalog, 'SELECT | FROM auth.sessions s')), ['token']);
+
+process.stdout.write('\nWhat an agent approval shows\n');
+const diffSql = (sql: string) => buildDiffQuery(classifyStatement(sql))?.sql ?? null;
+equal('a DELETE shows the rows it deletes', diffSql("DELETE FROM orders WHERE status = 'new'"), "SELECT * FROM orders WHERE status = 'new' LIMIT 21");
+equal('an unbounded DELETE shows the table', diffSql('DELETE FROM orders'), 'SELECT * FROM orders LIMIT 21');
+equal(
+    'an UPDATE computes each new value beside the old',
+    diffSql("UPDATE orders o SET status = 'paid', total = total * 2 WHERE o.id < 4"),
+    "SELECT *, ('paid') AS __litedb_new_0, (total * 2) AS __litedb_new_1 FROM orders o WHERE o.id < 4 LIMIT 21",
+);
+equal(
+    'a quoted column keeps its name',
+    buildDiffQuery(classifyStatement('UPDATE "Order Details" SET "Unit Price" = 1 WHERE "OrderID" = 7'))?.assigned,
+    ['Unit Price'],
+);
+check('UPDATE … FROM is not sampled: the join would have to be repeated', diffSql('UPDATE a SET x = b.y FROM b WHERE a.id = b.id') === null);
+check('a tuple assignment is not sampled', diffSql('UPDATE t SET (a, b) = (1, 2) WHERE id = 1') === null);
+const insertDiff = buildDiffQuery(classifyStatement("INSERT INTO people (name, score) VALUES ('Ada', 1), ('Alan', 2) ON CONFLICT DO NOTHING"));
+equal(
+    'an INSERT shows the rows its source produces',
+    insertDiff && { sql: insertDiff.sql, columns: insertDiff.insertColumns },
+    { sql: "SELECT * FROM (VALUES ('Ada', 1), ('Alan', 2)) AS __litedb_source LIMIT 21", columns: ['name', 'score'] },
+);
+equal(
+    'INSERT … SELECT samples the SELECT',
+    diffSql('INSERT INTO archive SELECT * FROM orders WHERE total < 5'),
+    'SELECT * FROM (SELECT * FROM orders WHERE total < 5) AS __litedb_source LIMIT 21',
+);
+check('DEFAULT VALUES has nothing to show', diffSql('INSERT INTO t DEFAULT VALUES') === null);
+check('DDL has no rows to show', diffSql('DROP TABLE orders') === null);
+const updated = shapeDiff(
+    { mode: 'update', sql: '', assigned: ['status'] },
+    { columns: ['id', 'status', '__litedb_new_0'], rows: [[1, 'new', 'paid'], [2, null, 'paid']] },
+);
+equal('an UPDATE sample keeps old and new apart', [updated.columns, updated.rows, updated.changes], [
+    ['id', 'status'],
+    [['1', 'new'], ['2', 'NULL']],
+    [{ column: 'status', values: ['paid', 'paid'] }],
+]);
+check('one row more than shown means there are more', shapeDiff({ mode: 'delete', sql: '' }, { columns: ['id'], rows: [[1], [2], [3]] }, 2).truncated);
+equal('cells read as text', [formatCell(null), formatCell(new Uint8Array(3)), formatCell('x'.repeat(200)).length], ['NULL', '[3 bytes]', 120]);
+equal('column names match ignoring case', columnIndex(['ID', 'Status'], 'status'), 1);
+equal('request files are told from answers', [requestToken('abc.json'), requestToken('abc.decision.json'), requestToken('abc.json.partial')], ['abc', null, null]);
+const sample: ApprovalRequest = {
+    version: 1, token: 't1', createdAt: '2026-11-09T10:00:00Z', expiresAt: '2026-11-09T10:05:00Z', client: 'claude-code',
+    connection: 'sqlite:/a.db', connectionId: 'sqlite:/a.db', dialect: 'sqlite', policy: 'guarded', reason: 'r',
+    destructive: true, requireTypedConfirmation: false, confirmPhrase: 'orders',
+    statements: [{ sql: 'DELETE FROM orders WHERE id = 1', kind: 'destructive', verb: 'DELETE', table: 'orders', unbounded: false, reason: '',
+        affectedRows: 1, estimatedRows: null, tableRows: 5, tableRowsCapped: false, diff: null }],
+};
+equal('a request reads back as written', parseRequest(serializeRequest(sample)), sample);
+check('a request from a newer version is ignored', parseRequest(JSON.stringify({ ...sample, version: 2 })) === null);
+check('an answer for another token does not count', parseDecision(JSON.stringify({ token: 'x', decision: 'approved' }), 't1') === null);
+check('an answer must say approved or declined', parseDecision(JSON.stringify({ token: 't1', decision: 'yes' }), 't1') === null);
 
 process.stdout.write('\nWhere Text to SQL puts its SQL\n');
 /** The script after placing `sql` with the cursor at `offset`, and the placed text read back. */

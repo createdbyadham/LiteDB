@@ -135,8 +135,11 @@ export class StaleApprovalError extends Error {
     }
 }
 
-/** Take an approval out of the store. Succeeds at most once per token. */
-export function claim(
+/**
+ * The approval for `token`, checked as `claim` checks it but left in the
+ * store: the LiteDB window may still be deciding, and the agent will ask again.
+ */
+export function peek(
     token: string,
     connectionId: string,
     target: string,
@@ -149,6 +152,17 @@ export function claim(
     if (approval.connectionId !== connectionId || approval.target !== target) {
         throw new StaleApprovalError();
     }
+    return approval;
+}
+
+/** Take an approval out of the store. Succeeds at most once per token. */
+export function claim(
+    token: string,
+    connectionId: string,
+    target: string,
+    now = Date.now(),
+): PendingApproval {
+    const approval = peek(token, connectionId, target, now);
     pending.delete(token);
     return approval;
 }

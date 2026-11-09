@@ -66,13 +66,17 @@ Connect in LiteDB first. Then in the agent:
 
 Watch, in this order:
 
-1. Does `execute_approved` prompt separately from `query`? That is the HITL claim.
-2. Does the model relay the row count (`2 rows of 4 in orders`), or only say it
-   needs approval?
-3. Does it pause, or chain preview → execute on its own?
+1. When the agent calls `execute_approved`, LiteDB shows the request: the
+   statement, `Affects 2 of 4 rows in orders`, and the two rows it deletes.
+   Nothing runs until you click Approve there. Decline, and the agent is told
+   nothing ran.
+2. Does the model relay the row count, or only say it needs approval?
+3. If you take longer than 50 seconds, the agent hears `WAITING FOR APPROVAL IN
+   LITEDB` and should call again with the same token.
 
-If (1) does not prompt, the host auto-ran the tool (Cursor auto-accept, or
-`execute_approved` allowlisted). LiteDB cannot force that click. The preview
-text is still the record; [`mcp/README.md`](../mcp/README.md#what-it-does-not-do)
-is doing real work. For SQLite, the agent works on the file itself; edits made
-in the app are already there.
+Hosts that run tools without asking (Cursor's auto-run, or `execute_approved`
+allowlisted) still stop at LiteDB's window. With Settings → Agents → *Ask in
+LiteDB* off, the host's prompt is the only check, and the preview text is the
+record; [`mcp/README.md`](../mcp/README.md#what-it-does-not-do) says what
+neither stops. For SQLite, the agent works on the file itself; edits made in
+the app are already there.

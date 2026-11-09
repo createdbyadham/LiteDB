@@ -361,9 +361,15 @@ resource.
 **A write never runs on the first `query`.** That call classifies, measures
 impact, and returns a preview plus a single-use token. Running it is a second
 tool, `execute_approved`. Provenance over MCP is a model by definition, so even
-`unrestricted` previews; `LITEDB_POLICY=yolo` is refused at startup. LiteDB
-cannot make the host ask you — Cursor with auto-run will chain both tools
-without a click. The preview is still the record; see
+`unrestricted` previews; `LITEDB_POLICY=yolo` is refused at startup.
+
+**With LiteDB open, you approve the write in LiteDB.** `execute_approved` puts
+the statement in front of you in the app, with the exact row count and the rows
+it deletes, changes or adds, and waits. Nothing runs until you click Approve
+there, even when the agent's host runs tools without asking (Cursor with
+auto-run chains both tools without a click). Decline, and the agent is told
+nothing ran. Settings → Agents turns this off, leaving the host's own prompt as
+the only check. What it does not stop is in
 [`mcp/README.md`](mcp/README.md#what-it-does-not-do).
 
 Underneath the classifier, the engine enforces the same boundary independently —

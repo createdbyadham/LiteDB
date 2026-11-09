@@ -12,9 +12,10 @@
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { decisionFileName, parseRequest, requestFileName, serializeDecision } from '../../src/lib/agentApproval';
 import { parseLog } from '../../src/lib/auditLog';
 import { pgSslHint } from '../../src/lib/pgSslHint';
 import {
@@ -571,6 +572,109 @@ async function main(): Promise<void> {
             'the write in a mixed script did not run',
             countRows(harness, 'customers', "country = 'FR'") === 0,
             'nothing in a script needing approval may execute before approval',
+        );
+    } finally {
+        await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
+    // ------------------------------------------ approval in the window ---
+    process.stdout.write('\napproval in the LiteDB window\n');
+
+    {
+        // The handoff switches it on; an app that does not say so keeps the old way.
+        const dir = mkdtempSync(join(tmpdir(), 'litedb-handoff-test-'));
+        const handoffPath = join(dir, 'mcp-handoff.json');
+        const base = { version: 1, connectionId: 'sqlite:x', label: 'x', dialect: 'sqlite', policy: 'guarded', sqlitePath: join(dir, 'x.db') };
+        try {
+            writeFileSync(handoffPath, JSON.stringify({ ...base, approveInApp: true }));
+            check(
+                'an app that shows requests gets them',
+                loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).approvalsDir === join(dirname(handoffPath), 'approvals'),
+            );
+            writeFileSync(handoffPath, JSON.stringify(base));
+            check(
+                'an older app leaves the asking to the host',
+                !loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).approvalsDir,
+                'it has no window to answer, so waiting on one would hang every write',
+            );
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }
+
+    approvals.reset();
+    harness = buildFixture();
+    config = { ...configFor(harness, 'guarded'), approvalsDir: join(harness.dir, 'approvals'), approvalWaitMs: 300 };
+    db = await openDatabase(config);
+    ctx = { db, config };
+    installAudit({
+        connection: config.connectionId,
+        dialect: 'sqlite',
+        policy: 'guarded',
+        path: harness.auditPath,
+    });
+
+    try {
+        const dir = join(harness.dir, 'approvals');
+        const before = countRows(harness, 'orders');
+        const tokenIn = (text: string) => /token: ([0-9a-f-]{36})/.exec(text)?.[1] ?? '';
+        const answer = (token: string, decision: 'approved' | 'declined') =>
+            writeFileSync(join(dir, decisionFileName(token)), serializeDecision({ token, decision, at: new Date().toISOString() }));
+
+        const token = tokenIn((await runQuery(ctx, "UPDATE orders SET status = 'refunded' WHERE customer_id = 1")).text);
+        const waiting = await runApproved(ctx, token);
+        check(
+            'with no answer, the call says it is waiting',
+            waiting.text.startsWith('WAITING FOR APPROVAL IN LITEDB') && waiting.isError !== true,
+        );
+        check('nothing ran while waiting', countRows(harness, 'orders', "status = 'refunded'") === 0);
+        check('the token survives the wait', approvals.size() === 1);
+
+        const requestPath = join(dir, requestFileName(token));
+        const request = existsSync(requestPath) ? parseRequest(readFileSync(requestPath, 'utf8')) : null;
+        check('the request is on disk for the window', request?.token === token);
+        check('it carries the exact row count', request?.statements[0]?.affectedRows === 2);
+        const diff = request?.statements[0]?.diff;
+        check(
+            'it shows the rows it changes, old and new',
+            diff?.mode === 'update' &&
+                diff.rows.length === 2 &&
+                diff.changes?.[0]?.column === 'status' &&
+                diff.changes[0].values.every((v) => v === 'refunded'),
+            JSON.stringify(diff),
+        );
+
+        answer(token, 'approved');
+        const approved = await runApproved(ctx, token);
+        check('after Approve in the window, it runs', approved.text.startsWith('Executed.'), approved.text);
+        check('the rows changed', countRows(harness, 'orders', "status = 'refunded'") === 2);
+        check(
+            'the request and the answer are cleaned up',
+            !existsSync(requestPath) && !existsSync(join(dir, decisionFileName(token))),
+        );
+
+        const second = tokenIn((await runQuery(ctx, 'DELETE FROM orders WHERE id = 4')).text);
+        // Answered while the call waits, as the window does.
+        setTimeout(() => answer(second, 'declined'), 50);
+        const declined = await runApproved(ctx, second);
+        check('Decline in the window refuses it', declined.isError === true && declined.text.startsWith('DECLINED in LiteDB'));
+        check('nothing was deleted', countRows(harness, 'orders') === before);
+        check('a declined token is spent', (await runApproved(ctx, second)).isError === true);
+        check(
+            'the log records the decline',
+            auditEntries(harness).some((e) => e.decision === 'declined' && e.outcome === 'not-run'),
+        );
+
+        const third = tokenIn((await runQuery(ctx, 'DELETE FROM orders WHERE id = 3')).text);
+        writeFileSync(
+            join(dir, decisionFileName(third)),
+            serializeDecision({ token: 'some-other-token', decision: 'approved', at: new Date().toISOString() }),
+        );
+        const forged = await runApproved(ctx, third);
+        check(
+            "an answer naming another token does not count",
+            forged.text.startsWith('WAITING') && countRows(harness, 'orders', 'id = 3') === 1,
         );
     } finally {
         await db.close();

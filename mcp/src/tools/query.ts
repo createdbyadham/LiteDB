@@ -33,6 +33,7 @@ import {
 import { ROW_PROBE_LIMIT } from '../../../src/lib/schemaSamples';
 import type { StatementClassification } from '../../../src/lib/sqlClassifier';
 import { evaluateScript, type GateDecision } from '../../../src/lib/sqlPolicy';
+import { askApp } from '../appApproval';
 import * as approvals from '../approvals';
 import { record } from '../audit';
 import type { ServerConfig } from '../config';
@@ -301,7 +302,58 @@ export const executeApprovedInput = {
         .describe("The token from the query tool's preview."),
 };
 
+/** What the agent hears while the request is still on screen. */
+function waitingText(approval: approvals.PendingApproval): string {
+    const expires = new Date(approval.createdAt + approvals.TTL_MS);
+    const at = `${String(expires.getHours()).padStart(2, '0')}:${String(expires.getMinutes()).padStart(2, '0')}`;
+    return [
+        'WAITING FOR APPROVAL IN LITEDB — nothing has run.',
+        '',
+        'The statement, its row count and the rows it changes are on screen in the ' +
+            'LiteDB window. Tell the person you are working for, and once they have ' +
+            'answered there, call execute_approved again with the same token:',
+        `  token: ${approval.token}`,
+        '',
+        `The token expires at ${at}, five minutes after the preview.`,
+    ].join('\n');
+}
+
+const DECLINED_TEXT = [
+    'DECLINED in LiteDB — nothing ran.',
+    '',
+    'The person at the LiteDB window said no to this write. Do not run it again ' +
+        'or work around it; ask them what they want instead.',
+].join('\n');
+
 export async function runApproved(ctx: ToolContext, token: string): Promise<ToolResult> {
+    // With LiteDB open, the window decides: the host may have asked, or may
+    // run tools without asking (Cursor's auto-run), and either way nothing
+    // runs until someone clicks Approve in the app.
+    if (ctx.config.approvalsDir) {
+        let held: approvals.PendingApproval;
+        try {
+            held = approvals.peek(token, ctx.config.connectionId, ctx.config.target);
+        } catch (error) {
+            return { text: error instanceof Error ? error.message : String(error), isError: true };
+        }
+        const answer = await askApp(ctx, held);
+        if (answer === 'waiting') return { text: waitingText(held) };
+        if (answer === 'declined') {
+            try {
+                approvals.claim(token, ctx.config.connectionId, ctx.config.target);
+            } catch {
+                // Expired while the window was open. It did not run either way.
+            }
+            await record({
+                statements: held.decision.statements,
+                decision: 'declined',
+                outcome: 'not-run',
+                estimatedRows: totalEstimate(held.estimates),
+            });
+            return { text: DECLINED_TEXT, isError: true };
+        }
+    }
+
     let approval: approvals.PendingApproval;
     try {
         approval = approvals.claim(token, ctx.config.connectionId, ctx.config.target);

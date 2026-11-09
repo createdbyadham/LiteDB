@@ -26,7 +26,7 @@ import { executeApprovedInput, runApproved, runQuery, type ToolResult } from './
 import { describeTable, listTables, renderSchema } from './tools/schema';
 import { listVectorColumns, semanticSearch, type DistanceMetric } from './tools/vector';
 
-const VERSION = '0.1.6';
+const VERSION = '0.1.7';
 
 /** stdout carries the protocol. Everything human-readable goes to stderr. */
 function log(message: string): void {
@@ -82,6 +82,7 @@ async function main(): Promise<void> {
         log(`  database: ${config.connectionId} (${config.source})`);
         log(`  policy:   ${config.policy}`);
         log(`  audit:    ${config.auditPath}`);
+        log(`  writes:   ${config.approvalsDir ? 'approved in the LiteDB window' : 'approved by the MCP host'}`);
         log(`  ${policyBlurb(config)}`);
     } catch (error) {
         if (error instanceof ConfigError && !error.retryable) {
@@ -183,7 +184,9 @@ async function main(): Promise<void> {
                 'previewed. Takes only the token — the SQL is held server-side, so what ' +
                 'runs is exactly what was previewed. Single-use, and expires five minutes ' +
                 'after the preview. Confirm the row count with the person you are working ' +
-                'for before calling this.',
+                'for before calling this. While LiteDB is open, the request appears in its ' +
+                'window and nothing runs until they approve it there: a call can come back ' +
+                'WAITING, and then you call again with the same token once they have answered.',
             inputSchema: executeApprovedInput,
             annotations: {
                 readOnlyHint: false,

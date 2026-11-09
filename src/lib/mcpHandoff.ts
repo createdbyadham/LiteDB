@@ -54,6 +54,12 @@ export interface McpHandoff {
     postgres?: HandoffPostgres;
     /** Tagged production in the app. */
     production?: boolean;
+    /**
+     * The app shows agents' write requests and answers them: the server asks
+     * the window instead of trusting the host to ask. Absent from older apps,
+     * which have no window to ask.
+     */
+    approveInApp?: boolean;
 }
 
 export class HandoffError extends Error {
@@ -142,6 +148,7 @@ export function parseHandoff(contents: string): McpHandoff {
         dialect,
         policy: asPolicy(raw.policy),
         ...(raw.production === true ? { production: true } : {}),
+        ...(raw.approveInApp === true ? { approveInApp: true } : {}),
     };
 
     if (dialect === 'sqlite') {
@@ -206,6 +213,7 @@ export interface HandoffConnection {
 export function writeActiveHandoff(
     connection: HandoffConnection,
     policy: SafetyPolicy,
+    options: { approveInApp?: boolean } = {},
 ): Promise<void> {
     const payload: McpHandoff = {
         version: HANDOFF_VERSION,
@@ -217,6 +225,7 @@ export function writeActiveHandoff(
         sqlitePath: connection.dialect === 'sqlite' ? (connection.sqlitePath ?? null) : undefined,
         postgres: connection.dialect === 'postgres' ? connection.postgres : undefined,
         ...(connection.production ? { production: true } : {}),
+        ...(options.approveInApp ? { approveInApp: true } : {}),
     };
 
     return persist(serializeHandoff(payload));

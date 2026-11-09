@@ -3,8 +3,10 @@ import { Check, Copy, Plug, Unplug } from 'lucide-react';
 import { BaseDirectory, exists } from '@tauri-apps/plugin-fs';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { Button } from './button';
+import { Switch } from './switch';
 import { useToast } from '@/hooks/use-toast';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
+import { approveInAppEnabled, setApproveInApp } from '@/lib/agentApprovals';
 import { installClaudeDesktopMcp } from '@/lib/claudeDesktopMcp';
 import { HANDOFF_FILENAME, mcpPolicyFromApp } from '@/lib/mcpHandoff';
 import {
@@ -70,6 +72,7 @@ export function AgentsPanel() {
     const { toast } = useToast();
     const [handoffOnDisk, setHandoffOnDisk] = useState(false);
     const [installing, setInstalling] = useState(false);
+    const [approveInApp, setApproveInAppState] = useState(approveInAppEnabled);
     const agentPolicy = mcpPolicyFromApp(policy);
 
     const refreshHandoff = useCallback(async () => {
@@ -136,6 +139,26 @@ export function AgentsPanel() {
                     </p>
                 </div>
             </div>
+
+            <label className="rounded-md border border-border/80 px-3 py-2.5 flex items-start gap-3 cursor-pointer">
+                <Switch
+                    checked={approveInApp}
+                    onCheckedChange={(on) => {
+                        setApproveInApp(on);
+                        setApproveInAppState(on);
+                    }}
+                    className="mt-0.5"
+                    aria-label="Ask in LiteDB before an agent changes anything"
+                />
+                <span className="min-w-0 space-y-1">
+                    <span className="block text-sm font-medium">Ask in LiteDB before an agent changes anything</span>
+                    <span className="block text-xs text-muted-foreground leading-relaxed">
+                        A write an agent sends shows up here with its row count and the rows it
+                        changes, and runs only when you approve it, even if the agent's app runs
+                        tools without asking. Off, the agent's app is the only thing that asks.
+                    </span>
+                </span>
+            </label>
 
             <div className="rounded-md border border-border/80 p-3 space-y-2">
                 <p className="text-sm font-medium">Claude Desktop</p>

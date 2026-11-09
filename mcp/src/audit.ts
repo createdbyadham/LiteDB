@@ -70,6 +70,11 @@ export function identifyClient(get: () => string | null): void {
     clientName = get;
 }
 
+/** The calling host's name for itself, once the handshake has said. */
+export function currentClient(): string | null {
+    return clientName();
+}
+
 /** Point `recordAudit` at a file and remember what to stamp entries with. */
 export function installAudit(next: AuditContext): void {
     context = next;

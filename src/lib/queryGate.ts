@@ -18,6 +18,7 @@ import {
     type AuditEntry,
     type AuditOutcome,
 } from './auditLog';
+import { approveInAppEnabled } from './agentApprovals';
 import { clearHandoff, writeActiveHandoff, type HandoffPostgres } from './mcpHandoff';
 import type { SqlDialect } from './schemaTypes';
 import type { StatementClassification } from './sqlClassifier';
@@ -101,7 +102,7 @@ export function setPolicyFor(connectionId: string, policy: SafetyPolicy): void {
         new CustomEvent('sqlPolicyChanged', { detail: { connectionId, policy } }),
     );
     if (active && active.id === connectionId) {
-        void writeActiveHandoff(active, policy);
+        void writeActiveHandoff(active, policy, { approveInApp: approveInAppEnabled() });
     }
 }
 
@@ -115,7 +116,15 @@ export function setActiveConnection(connection: ActiveConnection): void {
     window.dispatchEvent(
         new CustomEvent('sqlPolicyChanged', { detail: { connectionId: connection.id } }),
     );
-    void writeActiveHandoff(connection, policyFor(connection.id));
+    void writeActiveHandoff(connection, policyFor(connection.id), { approveInApp: approveInAppEnabled() });
+}
+
+// Turning in-app approval on or off in Settings takes effect for the agent's
+// next call: the server re-reads the handoff every time.
+if (typeof window !== 'undefined') {
+    window.addEventListener('agentApprovalSettingChanged', () => {
+        if (active) void writeActiveHandoff(active, policyFor(active.id), { approveInApp: approveInAppEnabled() });
+    });
 }
 
 export function clearActiveConnection(): void {

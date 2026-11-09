@@ -6,6 +6,7 @@ import { SidebarProvider } from "@/contexts/SidebarContext";
 import DatabaseView from "./components/DatabaseView";
 import ConnectionsView from '@/components/Connections/ConnectionsView';
 import TitleBar from '@/components/TitleBar';
+import { AgentApprovalDialog } from '@/components/AgentApprovalDialog';
 import { CommandPalette } from '@/components/CommandPalette';
 import { useEffect } from 'react';
 import { check } from '@tauri-apps/plugin-updater';
@@ -76,6 +77,7 @@ const App = () => {
               </div>
             </div>
             <CommandPalette />
+            <AgentApprovalDialog />
           </HashRouter>
           <Toaster />
         </TooltipProvider>
