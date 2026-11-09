@@ -7,31 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-09
+
 ### Added
 
 - **LiteDB is its own MCP server.** Agents start `LiteDB --mcp`, which connects to the running window: no Node, no npm package, nothing else on the agent's PATH. The tools are the same, they run on the connection on screen (so a Postgres password stays in the app and an SSH tunnel is the app's), approvals are the app's own dialog, and every call lands in the same audit log. While LiteDB is closed the agent still sees its tools and each call says to open it; once the window is up, the next call goes through. Settings → Agents and *Add to Claude Desktop* now write this install's path. The npm package `litedb-mcp` stays, for machines without the app.
 - **Let agents make small changes without asking**, per connection (Settings → Agents), for an agent that works with nobody watching. Its `write` tool then runs an INSERT of listed rows, or an UPDATE or DELETE with a WHERE clause, in one call when it changes no more rows than the limit you set. The rows are counted before it runs, and the write is rolled back if it changes more while it runs. Each one is in the audit log, marked as run without approval, and Undo still works. Schema changes, writes with no WHERE clause, DROP, TRUNCATE, upserts and anything over the limit still wait for approval, and `query` still never writes. Off by default, never on a connection tagged production, and named in the status bar while it is on.
-- **Approve agent writes in LiteDB.** With the app open, an agent's `execute_approved` puts the write in front of you in LiteDB: the statement, the exact row count, and the rows it deletes, changes (old → new) or adds. Nothing runs until you click Approve there, even when the agent's app runs tools without asking. Decline, and the agent is told nothing ran. A write with nothing limiting it asks for the table name typed out, the window flashes for attention, and every answer goes in the audit log. Settings → Agents turns it off. Needs litedb-mcp 0.1.7; older apps keep the agent's own prompt.
+- **Approve agent writes in LiteDB.** With the app open, an agent's `execute_approved` puts the write in front of you in LiteDB: the statement, the exact row count, and the rows it deletes, changes (old → new) or adds. Nothing runs until you click Approve there, even when the agent's app runs tools without asking. Decline, and the agent is told nothing ran. A write with nothing limiting it asks for the table name typed out, the window flashes for attention, and every answer goes in the audit log. Settings → Agents turns it off. Through the npm package it needs litedb-mcp 0.1.7; older versions leave the asking to the agent's app.
 - **Undo for agent writes.** Before an approved UPDATE or DELETE from an agent runs, the rows it touches (up to 5,000, keyed by primary key or SQLite's rowid) are saved next to the audit log, and **Undo** in the Audit panel puts them back; a SQLite INSERT's new rows can be removed the same way. Rows that changed again after the write are left alone, so undo never overwrites newer work, and the undo itself is logged. Not covered: scripts of several statements, upserts, Postgres INSERTs, Postgres tables without a primary key, and rows changed by cascades or triggers.
 - The Audit panel names the agent that sent a statement (Claude Code, Cursor) instead of "model".
 - **Inline suggestions** in the SQL editor, off by default (Settings → AI). After a pause in typing, the model's suggestion shows as grey text after the cursor: `Tab` accepts it, `Esc` dismisses it, and typing its next characters keeps the rest. Ollama is asked fill-in-the-middle, which FIM-trained models such as qwen2.5-coder complete best; other providers, and models that refuse it, are asked through chat. Suggestions can have a smaller model of their own. Each pause sends the statement you are writing, your table names and the columns of the tables it reads to the provider. They never appear while the column popup is open or on a connection tagged production, and accepting one marks the tab as written by AI, so its writes still ask first in Unrestricted and the audit log names the model.
-
-### Fixed
-
-- After an update installs on macOS or Linux, the app restarts into the new version. The restart used to fail without a word, and the old version kept running until you quit it.
-- On PostgreSQL, a query that returns no rows names its columns in one round trip to the server instead of three, which shows on a remote database.
-- Saved passwords, SSH secrets and AI provider keys are now kept in the OS keychain: Windows Credential Manager, the macOS Keychain, or on Linux a Secret Service such as GNOME Keyring or KWallet. Since 2.2.0 they had been held in memory only and never read back, so AI keys were gone after a restart and a saved connection asked for its password every time.
-
-### Security
-
-- The TLS stack behind AI provider requests and update checks is patched: rustls 0.23.46, rustls-webpki 0.103.16 and aws-lc-sys 0.47. `tar`, which unpacks macOS updates, is 0.4.46.
-- Tauri is 2.12. Since 2.11.1, a remote page whose address starts with one of the app's scheme names is no longer mistaken for the app on Windows, so it cannot call the app's commands. The updater plugin is 2.14.1, which unpacks Windows updates with `zip` 9.
-- PostgreSQL connections, SSL included, run on sqlx 0.8 and rustls 0.23. sqlx 0.7 held them on rustls 0.21, which no longer gets security fixes.
-
-## [2.5.0] - 2026-11-08
-
-### Added
-
 - **A real SQL editor.** Syntax highlighting, autocomplete for tables and for the columns of the tables in your query, without typing `table.` first (a name two tables share comes in as `o.id`), and errors underlined where the database points. `Ctrl/Cmd+Enter` runs the statement under the cursor or the selection; `Shift+Ctrl/Cmd+Enter` or `F5` runs the whole tab. Tabs keep their text across restarts, every run is kept in History, and **Cancel** stops a query that runs too long. Results stop at a row limit you choose, 1,000 by default.
 - **AI in the editor.** **Ask AI** (`Ctrl/Cmd+K`) opens Text to SQL, and the SQL it writes goes in after the statement you are on. **Explain** describes the statement under the cursor and its plan without running it. A failed query offers **Explain** and **Fix with AI**.
 - **Transactions in the editor.** With **Transaction** on, a script runs all or nothing. A `BEGIN` you type stays open until you end it; the editor says so and offers Commit and Roll back.
@@ -52,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The home screen lists your connections instead of asking for a file.
 - The SQL editor replaces the Batch Operations tab.
 - Grid edits and CSV imports obey the connection's safety mode and are written to the audit log.
-- Agents see every PostgreSQL schema (litedb-mcp 0.1.6); a table outside the search path is named `schema.table`. The handoff the MCP server follows carries the SSL mode, CA certificate and production tag, and a connection behind SSH goes through the app's tunnel while it is open.
+- Agents see every PostgreSQL schema (and so does litedb-mcp 0.1.7); a table outside the search path is named `schema.table`. The handoff the MCP server follows carries the SSL mode, CA certificate and production tag, and a connection behind SSH goes through the app's tunnel while it is open.
 
 ### Removed
 
@@ -63,11 +48,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - The webview CSP no longer allows `cdn.gpteng.co` or `rsms.me`, and `connect-src` is no longer `*`. Model downloads go to Hugging Face. The ONNX runtime is served with the app.
+- The TLS stack behind AI provider requests and update checks is patched: rustls 0.23.46, rustls-webpki 0.103.16 and aws-lc-sys 0.47. `tar`, which unpacks macOS updates, is 0.4.46.
+- Tauri is 2.12. Since 2.11.1, a remote page whose address starts with one of the app's scheme names is no longer mistaken for the app on Windows, so it cannot call the app's commands. The updater plugin is 2.14.1, which unpacks Windows updates with `zip` 9.
+- PostgreSQL connections, SSL included, run on sqlx 0.8 and rustls 0.23. sqlx 0.7 held them on rustls 0.21, which no longer gets security fixes.
 
 ### Fixed
 
 - Release assets are published on `v<version>`, the tag the README and changelog link to.
 - macOS installers are Developer ID signed and notarized. Windows installers are Authenticode-signed, so the download is not an unsigned file Gatekeeper or SmartScreen rejects.
+- After an update installs on macOS or Linux, the app restarts into the new version. The restart used to fail without a word, and the old version kept running until you quit it.
+- On PostgreSQL, a query that returns no rows names its columns in one round trip to the server instead of three, which shows on a remote database.
+- Saved passwords, SSH secrets and AI provider keys are now kept in the OS keychain: Windows Credential Manager, the macOS Keychain, or on Linux a Secret Service such as GNOME Keyring or KWallet. Since 2.2.0 they had been held in memory only and never read back, so AI keys were gone after a restart and a saved connection asked for its password every time.
 
 ## [2.4.0] - 2026-11-07
 
