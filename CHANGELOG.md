@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - After an update installs on macOS or Linux, the app restarts into the new version. The restart used to fail without a word, and the old version kept running until you quit it.
+- Saved passwords, SSH secrets and AI provider keys are now kept in the OS keychain: Windows Credential Manager, the macOS Keychain, or on Linux a Secret Service such as GNOME Keyring or KWallet. Since 2.2.0 they had been held in memory only and never read back, so AI keys were gone after a restart and a saved connection asked for its password every time.
 
 ### Security
 

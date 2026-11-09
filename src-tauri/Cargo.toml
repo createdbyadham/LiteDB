@@ -22,7 +22,10 @@ reqwest = { version = "0.13.2", features = ["json", "rustls"] }
 # Only to install the process-wide crypto provider in main(); see there.
 rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs"] }
 url = "2"
-keyring = "3"
+# keyring 3 has no default store: without these features it falls back to an
+# in-memory mock and nothing saved comes back. On Linux, the Secret Service
+# over libdbus; not linux-native, because Flatpak blocks the kernel keyring.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 tauri-plugin-log = "2.8.0"
 tauri-plugin-clipboard-manager = "2.3.2"
 # 0.32 because it shares libsqlite3-sys 0.30 with sqlx 0.8: the `links = "sqlite3"`
