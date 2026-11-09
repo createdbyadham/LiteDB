@@ -31,7 +31,7 @@ import { CLAUDE_STORE_PACKAGE, windowsClaudeConfigPaths } from '../../src/lib/cl
 import * as approvals from './approvals';
 import { installFileAudit as installAudit } from './auditFile';
 import { ConfigError, IN_MEMORY_MESSAGE, NO_DATABASE_MESSAGE, defaultAuditPath, loadConfig, type ServerConfig } from './config';
-import { openDatabase, postgresConnectFailure, ReadOnlyServerError, type Database } from './db';
+import { openDatabase, postgresConnectFailure, ReadOnlyServerError, TooManyChangesError, type Database } from './db';
 import { renderTable } from './render';
 import { LiveSession, nodeToolContext } from './session';
 import { executeApprovedInput, runApproved, runQuery, type ToolContext } from './tools/query';
@@ -589,6 +589,17 @@ async function main(): Promise<void> {
                 !loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).approvalsDir,
                 'it has no window to answer, so waiting on one would hang every write',
             );
+            check('without the switch, every write asks', !loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).directWrites);
+            writeFileSync(handoffPath, JSON.stringify({ ...base, directWrites: { maxRows: 25 } }));
+            check(
+                'the switch in the app reaches the server',
+                loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).directWrites?.maxRows === 25,
+            );
+            writeFileSync(handoffPath, JSON.stringify({ ...base, production: true, directWrites: { maxRows: 25 } }));
+            check(
+                'never on a production connection',
+                !loadConfig({ LITEDB_HANDOFF_PATH: handoffPath }).directWrites,
+            );
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }
@@ -739,6 +750,87 @@ async function main(): Promise<void> {
             'a script is not saved for undo: its statements depend on each other',
             auditEntries(harness).filter((e) => e.decision === 'approved').slice(-2).every((e) => !e.undo),
         );
+    } finally {
+        await db.close();
+        rmSync(harness.dir, { recursive: true, force: true });
+    }
+
+    // ---------------------------------------------- writes without asking ---
+    process.stdout.write('\nwrites without asking\n');
+
+    approvals.reset();
+    harness = buildFixture();
+    config = { ...configFor(harness, 'guarded'), directWrites: { maxRows: 2 } };
+    db = await openDatabase(config);
+    ctx = nodeToolContext(db, config);
+    installAudit(harness.auditPath);
+
+    try {
+        const write = (sql: string) => runQuery(ctx, sql, { direct: true });
+        const ran = (text: string) => text.startsWith('Executed without approval');
+        const asked = (text: string) => text.startsWith('APPROVAL REQUIRED');
+
+        const bounded = await write("UPDATE orders SET status = 'held' WHERE status = 'shipped'");
+        check(
+            'a bounded UPDATE within the limit runs in one call',
+            ran(bounded.text) && countRows(harness, 'orders', "status = 'held'") === 2,
+            bounded.text,
+        );
+        const entry = auditEntries(harness).pop();
+        check(
+            'it is logged as run without approval, with its limit, its rows and an undo',
+            entry?.decision === 'allowed' && entry.directLimit === 2 && entry.actualRows === 2 && Boolean(entry.undo),
+        );
+
+        const tooMany = await write('UPDATE orders SET total = 1 WHERE id > 0');
+        check(
+            'over the limit it asks, and says why',
+            asked(tooMany.text) && tooMany.text.includes('more than the 2') && countRows(harness, 'orders', 'total = 1') === 0,
+            tooMany.text,
+        );
+        check('a write with no WHERE clause asks', asked((await write('DELETE FROM customers')).text) && countRows(harness, 'customers') === 3);
+        check('a schema change asks', asked((await write('CREATE TABLE notes (id INTEGER PRIMARY KEY)')).text));
+
+        const two = await write("INSERT INTO customers (email) VALUES ('a@example.com'), ('b@example.com')");
+        check('an INSERT of listed rows within the limit runs', ran(two.text) && countRows(harness, 'customers') === 5, two.text);
+        check(
+            'an INSERT of more rows than the limit asks',
+            asked((await write("INSERT INTO customers (email) VALUES ('c@x'), ('d@x'), ('e@x')")).text) &&
+                countRows(harness, 'customers') === 5,
+        );
+        check(
+            'an INSERT fed by a SELECT asks: its size is not in the statement',
+            asked((await write('INSERT INTO customers (email) SELECT email FROM customers WHERE id = 1')).text),
+        );
+        const upsert = await write(
+            "INSERT INTO customers (id, email) VALUES (1, 'x@example.com') ON CONFLICT(id) DO UPDATE SET email = excluded.email",
+        );
+        check('an upsert asks', asked(upsert.text) && countRows(harness, 'customers', "email = 'x@example.com'") === 0);
+        check('INSERT OR REPLACE asks', asked((await write("INSERT OR REPLACE INTO customers (id, email) VALUES (1, 'y@x')")).text));
+
+        const viaQuery = await runQuery(ctx, 'DELETE FROM orders WHERE id = 4');
+        check('query never writes, even where write may', asked(viaQuery.text) && countRows(harness, 'orders', 'id = 4') === 1);
+
+        // The limit holds when the write runs, not only when it is counted.
+        let rolledBack = false;
+        try {
+            await db.writeAll(['UPDATE orders SET total = 2 WHERE id > 0'], { maxChanges: 2 });
+        } catch (error) {
+            rolledBack = error instanceof TooManyChangesError;
+        }
+        check('a run over its row limit is rolled back', rolledBack && countRows(harness, 'orders', 'total = 2') === 0);
+
+        const off = await runQuery({ ...ctx, config: { ...ctx.config, directWrites: null } }, 'DELETE FROM orders WHERE id = 4', {
+            direct: true,
+        });
+        check(
+            'switched off, write previews and says why',
+            asked(off.text) && off.text.includes('does not allow writes without approval') && countRows(harness, 'orders', 'id = 4') === 1,
+        );
+        const readOnly = await runQuery({ ...ctx, config: { ...ctx.config, policy: 'read-only' } }, 'DELETE FROM orders WHERE id = 4', {
+            direct: true,
+        });
+        check('a read-only connection refuses it all the same', readOnly.text.startsWith('REFUSED') && countRows(harness, 'orders', 'id = 4') === 1);
     } finally {
         await db.close();
         rmSync(harness.dir, { recursive: true, force: true });

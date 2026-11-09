@@ -60,6 +60,12 @@ export interface McpHandoff {
      * which have no window to ask.
      */
     approveInApp?: boolean;
+    /**
+     * Agents may make changes of up to this many rows without asking. Absent:
+     * every write waits for approval. Never written for a production
+     * connection.
+     */
+    directWrites?: { maxRows: number };
 }
 
 export class HandoffError extends Error {
@@ -122,6 +128,14 @@ function asPostgres(value: unknown): HandoffPostgres {
     };
 }
 
+/** A row limit that is a positive whole number, and never for production. */
+function directWritesFrom(value: unknown, production: boolean): Pick<McpHandoff, 'directWrites'> {
+    if (production || !value || typeof value !== 'object') return {};
+    const maxRows = (value as Record<string, unknown>).maxRows;
+    if (typeof maxRows !== 'number' || !Number.isInteger(maxRows) || maxRows < 1) return {};
+    return { directWrites: { maxRows } };
+}
+
 export function parseHandoff(contents: string): McpHandoff {
     let parsed: unknown;
     try {
@@ -149,6 +163,7 @@ export function parseHandoff(contents: string): McpHandoff {
         policy: asPolicy(raw.policy),
         ...(raw.production === true ? { production: true } : {}),
         ...(raw.approveInApp === true ? { approveInApp: true } : {}),
+        ...directWritesFrom(raw.directWrites, raw.production === true),
     };
 
     if (dialect === 'sqlite') {
@@ -213,7 +228,7 @@ export interface HandoffConnection {
 export function writeActiveHandoff(
     connection: HandoffConnection,
     policy: SafetyPolicy,
-    options: { approveInApp?: boolean } = {},
+    options: { approveInApp?: boolean; directWrites?: { maxRows: number } | null } = {},
 ): Promise<void> {
     const payload: McpHandoff = {
         version: HANDOFF_VERSION,
@@ -226,6 +241,7 @@ export function writeActiveHandoff(
         postgres: connection.dialect === 'postgres' ? connection.postgres : undefined,
         ...(connection.production ? { production: true } : {}),
         ...(options.approveInApp ? { approveInApp: true } : {}),
+        ...(options.directWrites && !connection.production ? { directWrites: options.directWrites } : {}),
     };
 
     return persist(serializeHandoff(payload));

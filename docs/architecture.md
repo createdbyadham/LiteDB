@@ -65,6 +65,10 @@ The tools live in `mcp/src/tools/` and register on an MCP server through
   changes. Served from the app, that is a call (`askInWindow` in
   `src/lib/agentApprovals.ts`); from the npm package, a request file in
   `<app data>/approvals/` that the window answers (`mcp/src/appApproval.ts`).
+- `mcp/src/directWrites.ts`: which writes the `write` tool may run in one call
+  when the app allows it for a connection (`src/lib/agentDirectWrites.ts`):
+  counted first, and held to the limit while they run by the `maxChanges`
+  run option in `src-tauri/src/db/`.
 - `mcp/src/undoCapture.ts`: saves the rows an approved write touches, for Undo.
 - `mcp/src/audit.ts`: writes to the same audit log, with the host's name.
 

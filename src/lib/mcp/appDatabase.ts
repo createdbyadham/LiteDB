@@ -15,7 +15,9 @@ import {
     PostgresCatalog,
     ReadOnlyServerError,
     SqliteCatalog,
+    TooManyChangesError,
     type QueryResult,
+    type WriteAllOptions,
 } from '../../../mcp/src/catalog';
 import { dbClose, dbOpenSqlite, dbRun, type RunOptions, type RunResponse, type StatementResult } from '@/lib/db/native';
 
@@ -25,9 +27,14 @@ const ROW_CAP = 10_000;
 const READ: RunOptions = { readOnly: true, fullBlobs: true, maxRows: ROW_CAP };
 const WRITE: RunOptions = { fullBlobs: true, maxRows: ROW_CAP };
 
-function failed(response: RunResponse): void {
+function failed(response: RunResponse, limit?: number): void {
     const error = response.errors[0];
-    if (error) throw new Error(error.message);
+    if (!error) return;
+    // Rust rolled the run back for changing more rows than it was allowed.
+    if (error.code === 'TooManyChanges' && limit !== undefined) {
+        throw new TooManyChangesError(limit, error.message);
+    }
+    throw new Error(error.message);
 }
 
 function shape(result: StatementResult | undefined): QueryResult {
@@ -43,8 +50,8 @@ function shape(result: StatementResult | undefined): QueryResult {
 }
 
 /** One result per statement sent: the last a string produced, when it held several. */
-function perStatement(response: RunResponse, count: number): QueryResult[] {
-    failed(response);
+function perStatement(response: RunResponse, count: number, limit?: number): QueryResult[] {
+    failed(response, limit);
     return Array.from({ length: count }, (_, i) => {
         const produced = response.results.filter((r) => r.statement === i);
         return shape(produced[produced.length - 1]);
@@ -87,9 +94,10 @@ export class AppSqliteDatabase extends SqliteCatalog {
         return perStatement(await dbRun(await this.writing(), [sql], WRITE), 1)[0];
     }
 
-    async writeAll(sqls: string[]): Promise<QueryResult[]> {
+    async writeAll(sqls: string[], options: WriteAllOptions = {}): Promise<QueryResult[]> {
         const id = await this.writing();
-        return perStatement(await dbRun(id, sqls, { ...WRITE, transaction: true }), sqls.length);
+        const run = { ...WRITE, transaction: true, maxChanges: options.maxChanges };
+        return perStatement(await dbRun(id, sqls, run), sqls.length, options.maxChanges);
     }
 
     async flushWrites(): Promise<void> {
@@ -136,9 +144,10 @@ export class AppPostgresDatabase extends PostgresCatalog {
         return perStatement(await dbRun(this.id, [sql], WRITE), 1)[0];
     }
 
-    async writeAll(sqls: string[]): Promise<QueryResult[]> {
+    async writeAll(sqls: string[], options: WriteAllOptions = {}): Promise<QueryResult[]> {
         this.check();
-        return perStatement(await dbRun(this.id, sqls, { ...WRITE, transaction: true }), sqls.length);
+        const run = { ...WRITE, transaction: true, maxChanges: options.maxChanges };
+        return perStatement(await dbRun(this.id, sqls, run), sqls.length, options.maxChanges);
     }
 
     async flushWrites(): Promise<void> {}

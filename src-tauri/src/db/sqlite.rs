@@ -6,7 +6,9 @@
 //! own locking; the busy timeout turns a brief lock into a short wait rather
 //! than an error.
 
-use super::{value, OpenInfo, RunError, RunOptions, RunResponse, StatementResult};
+use super::{
+    too_many_changes, value, OpenInfo, RunError, RunOptions, RunResponse, StatementResult,
+};
 use rusqlite::types::ValueRef;
 use rusqlite::{ffi, Batch, Connection, DatabaseName, InterruptHandle, OpenFlags, Statement};
 use serde_json::Value;
@@ -279,6 +281,22 @@ fn run_all(
         }
     }
 
+    if let (true, true, Some(limit)) = (
+        opts.transaction,
+        response.errors.is_empty(),
+        opts.max_changes,
+    ) {
+        // Only statements that changed rows count: SQLite reports none for a read.
+        let changed: u64 = response.results.iter().map(|r| r.rows_affected).sum();
+        if changed > limit {
+            response.errors.push(too_many_changes(
+                statements.len().saturating_sub(1),
+                changed,
+                limit,
+            ));
+        }
+    }
+
     if opts.transaction {
         if response.errors.is_empty() {
             if let Err(e) = conn.execute_batch("COMMIT") {
@@ -493,6 +511,42 @@ mod tests {
             RunOptions::default(),
         );
         assert!(after.errors.is_empty(), "{:?}", after.errors);
+        assert_eq!(count(&conn), json!(1));
+    }
+
+    #[test]
+    fn a_run_over_its_row_limit_is_rolled_back() {
+        let (conn, _) = open("max-changes");
+        exec(
+            &conn,
+            &[
+                "CREATE TABLE t (id INTEGER PRIMARY KEY)",
+                "INSERT INTO t VALUES (1), (2), (3)",
+            ],
+            RunOptions::default(),
+        );
+        let limited = |max| RunOptions {
+            transaction: true,
+            max_changes: Some(max),
+            ..Default::default()
+        };
+
+        let over = exec(
+            &conn,
+            &["DELETE FROM t WHERE id > 1", "SELECT * FROM t"],
+            limited(1),
+        );
+        assert!(over.rolled_back);
+        assert_eq!(over.errors[0].code.as_deref(), Some("TooManyChanges"));
+        assert_eq!(count(&conn), json!(3), "nothing changed");
+
+        // RETURNING rows are the changes, counted once.
+        let within = exec(
+            &conn,
+            &["DELETE FROM t WHERE id > 1 RETURNING id"],
+            limited(2),
+        );
+        assert!(within.errors.is_empty(), "{:?}", within.errors);
         assert_eq!(count(&conn), json!(1));
     }
 

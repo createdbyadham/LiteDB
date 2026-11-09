@@ -47,6 +47,24 @@ export class UnknownTableError extends Error {
     }
 }
 
+export interface WriteAllOptions {
+    maxChanges?: number;
+}
+
+/** A run rolled back for changing more rows than it was allowed to. */
+export class TooManyChangesError extends Error {
+    constructor(
+        readonly limit: number,
+        message = `Rolled back, nothing changed: this would change more than the ${limit} rows allowed.`,
+    ) {
+        super(message);
+        this.name = 'TooManyChangesError';
+    }
+}
+
+/** The statements whose changes count against a run's row limit. */
+const CHANGES_ROWS = /^\s*(INSERT|UPDATE|DELETE)\b/i;
+
 export class ReadOnlyServerError extends Error {
     constructor(source: 'env' | 'handoff' = 'env') {
         super(
@@ -70,9 +88,11 @@ export interface Database {
     write(sql: string): Promise<QueryResult>;
     /**
      * Run statements as one transaction: all of them, or none, with the
-     * failing statement's own error raised.
+     * failing statement's own error raised. With `maxChanges`, a run whose
+     * INSERT, UPDATE and DELETE statements change more rows than that is
+     * rolled back too, with a TooManyChangesError.
      */
-    writeAll(sqls: string[]): Promise<QueryResult[]>;
+    writeAll(sqls: string[], options?: WriteAllOptions): Promise<QueryResult[]>;
     /** Every base table, ordered by name. */
     tableNames(): Promise<string[]>;
     /**
@@ -148,11 +168,27 @@ export function resolveAgainst(name: string, known: string[]): string {
 export async function inTransaction(
     write: (sql: string) => Promise<QueryResult>,
     sqls: string[],
+    options: WriteAllOptions = {},
 ): Promise<QueryResult[]> {
     await write('BEGIN');
     try {
         const results: QueryResult[] = [];
         for (const sql of sqls) results.push(await write(sql));
+        if (options.maxChanges !== undefined) {
+            // A statement with RETURNING reports its changes as the rows it
+            // returns, and no rowsAffected.
+            const changed = results.reduce(
+                (sum, result, i) =>
+                    CHANGES_ROWS.test(sqls[i]) ? sum + (result.rowsAffected || result.rows.length) : sum,
+                0,
+            );
+            if (changed > options.maxChanges) {
+                throw new TooManyChangesError(
+                    options.maxChanges,
+                    `Rolled back, nothing changed: this would change ${changed} rows, more than the ${options.maxChanges} allowed.`,
+                );
+            }
+        }
         await write('COMMIT');
         return results;
     } catch (error) {
@@ -177,8 +213,8 @@ export abstract class SqliteCatalog implements Database {
     abstract release(): Promise<void>;
     abstract close(): Promise<void>;
 
-    writeAll(sqls: string[]): Promise<QueryResult[]> {
-        return inTransaction((sql) => this.write(sql), sqls);
+    writeAll(sqls: string[], options?: WriteAllOptions): Promise<QueryResult[]> {
+        return inTransaction((sql) => this.write(sql), sqls, options);
     }
 
     async tableNames(): Promise<string[]> {
@@ -262,8 +298,8 @@ export abstract class PostgresCatalog implements Database {
     abstract release(): Promise<void>;
     abstract close(): Promise<void>;
 
-    writeAll(sqls: string[]): Promise<QueryResult[]> {
-        return inTransaction((sql) => this.write(sql), sqls);
+    writeAll(sqls: string[], options?: WriteAllOptions): Promise<QueryResult[]> {
+        return inTransaction((sql) => this.write(sql), sqls, options);
     }
 
     /**

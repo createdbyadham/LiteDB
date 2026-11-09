@@ -25,6 +25,8 @@ export interface RunOptions {
     session?: boolean;
     /** Change nothing whatever the SQL says. For agents' reads; see src-tauri/src/db. */
     readOnly?: boolean;
+    /** With `transaction`: roll back if the writes change more rows than this. */
+    maxChanges?: number;
 }
 
 export interface StatementResult {

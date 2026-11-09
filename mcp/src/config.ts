@@ -263,6 +263,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     const inApp = {
         approvalsDir: handoff.approveInApp ? join(dirname(handoffPath), APPROVALS_DIR) : null,
         approvalWaitMs: shared.approvalWaitMs,
+        // What the app allows agents to do without asking. Never for a
+        // production connection; parseHandoff drops it there too.
+        directWrites: handoff.production ? null : (handoff.directWrites ?? null),
     };
 
     if (handoff.dialect === 'sqlite') {

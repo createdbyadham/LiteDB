@@ -379,9 +379,9 @@ Without the app — CI, a box that has never launched LiteDB — the same tools
 ship as [`litedb-mcp`](mcp/README.md) on npm (Node 22.5+): set
 `LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`.
 
-Seven tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
-`list_vector_columns`, `semantic_search`, `audit_log` — plus a `litedb://schema`
-resource.
+Eight tools — `list_tables`, `describe_table`, `query`, `execute_approved`,
+`write`, `list_vector_columns`, `semantic_search`, `audit_log` — plus a
+`litedb://schema` resource.
 
 **A write never runs on the first `query`.** That call classifies, measures
 impact, and returns a preview plus a single-use token. Running it is a second

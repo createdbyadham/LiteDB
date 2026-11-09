@@ -142,6 +142,7 @@ property.
 | `describe_table` | Columns, types, keys, foreign keys, indexes, and the values a low-cardinality column actually holds. |
 | `query` | Runs reads. **Previews** writes and returns a token. Refuses what the policy forbids. |
 | `execute_approved` | Runs a previewed statement. Takes only the token. |
+| `write` | Runs a small, bounded write in one call where the app allows it for the connection (Settings → Agents); otherwise previews it like `query`, with the reason. |
 | `list_vector_columns` | pgvector columns and their dimensions. |
 | `semantic_search` | Nearest-neighbour search, with the query text embedded on your machine. |
 | `audit_log` | What has been proposed, approved and run — including from the desktop app. |

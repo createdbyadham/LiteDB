@@ -60,7 +60,9 @@ export function serverInstructions(host: 'npm' | 'app'): string {
         'Start with list_tables and describe_table — describe_table reports the ' +
             'values a low-cardinality column actually holds, which is usually the ' +
             'difference between a query that runs and one that is right.',
-        'Writes are previewed; running them is a separate execute_approved call.',
+        'Writes are previewed; running them is a separate execute_approved call. ' +
+            'Where the person has allowed it for a connection, the write tool runs a small ' +
+            'bounded write in one call instead, and returns anything else as a preview.',
     ].join(' ');
 }
 
@@ -153,6 +155,33 @@ export function registerTools(server: McpServer, session: ToolSession): void {
         },
         async ({ token }) =>
             guard(() => session.run((ctx) => runApproved(ctx, token))),
+    );
+
+    // A separate tool rather than a mode of `query`, so `query` stays what
+    // its annotation promises: it never writes.
+    server.registerTool(
+        'write',
+        {
+            title: 'Write in one call',
+            description:
+                'Run a write in one call, where the person has allowed that for this ' +
+                'connection in LiteDB (Settings → Agents): an INSERT of listed rows, or an ' +
+                'UPDATE or DELETE with a WHERE clause, that changes no more rows than the ' +
+                'limit they set. The limit is checked before it runs and enforced while it ' +
+                'runs. Anything else, or any write when it is not allowed, comes back as a ' +
+                'preview with a token for execute_approved, exactly as from query, with the ' +
+                'reason it did not run.',
+            inputSchema: {
+                sql: z.string().describe('One or more SQL statements, separated by semicolons.'),
+            },
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+                openWorldHint: false,
+            },
+        },
+        async ({ sql }) => guard(() => session.run((ctx) => runQuery(ctx, sql, { direct: true }))),
     );
 
     // ------------------------------------------------------------ vectors ---

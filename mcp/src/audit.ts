@@ -45,6 +45,8 @@ export interface DecisionRecord {
     durationMs?: number | null;
     /** The Undo file for this write, relative to the audit folder. */
     undo?: string | null;
+    /** Ran without approval, under this connection's row limit for agents. */
+    directLimit?: number | null;
 }
 
 /**
@@ -85,6 +87,7 @@ export async function record(scope: AuditScope, entry: DecisionRecord): Promise<
             // name this is something the protocol does tell us.
             client: scope.client ?? null,
             ...(entry.undo ? { undo: entry.undo } : {}),
+            ...(entry.directLimit ? { directLimit: entry.directLimit } : {}),
         };
         await recordAudit(row);
     }

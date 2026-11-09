@@ -1,7 +1,8 @@
 //! Postgres: a pool for the app, a session for the editor, an optional tunnel.
 
 use super::{
-    ssh, value, Canceller, DbState, OpenInfo, RunError, RunOptions, RunResponse, StatementResult,
+    ssh, too_many_changes, value, Canceller, DbState, OpenInfo, RunError, RunOptions, RunResponse,
+    StatementResult,
 };
 use futures_util::future::BoxFuture;
 use futures_util::TryStreamExt;
@@ -552,6 +553,28 @@ fn run_statements<'a>(
             }
         }
 
+        if let (true, true, Some(limit)) = (
+            opts.transaction,
+            response.errors.is_empty(),
+            opts.max_changes,
+        ) {
+            // Postgres counts the rows a SELECT returns as affected, so reads
+            // are left out.
+            let changed: u64 = response
+                .results
+                .iter()
+                .filter(|r| !looks_like_query(&statements[r.statement]))
+                .map(|r| r.rows_affected)
+                .sum();
+            if changed > limit {
+                response.errors.push(too_many_changes(
+                    statements.len().saturating_sub(1),
+                    changed,
+                    limit,
+                ));
+            }
+        }
+
         if opts.transaction {
             let finish = if response.errors.is_empty() {
                 "COMMIT"
@@ -764,6 +787,44 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 1);
         assert!(!in_transaction(&mut conn).await, "nothing left open");
+
+        // A write over its row limit is rolled back; a read in the same run
+        // does not count towards it.
+        let limited = |max| RunOptions {
+            transaction: true,
+            max_changes: Some(max),
+            ..Default::default()
+        };
+        let statements: Vec<String> = vec![
+            "INSERT INTO row_json_probe (label) VALUES ('a'), ('b')".into(),
+            "SELECT * FROM row_json_probe".into(),
+        ];
+        let over = run_statements(
+            &mut conn,
+            None,
+            &pool,
+            &statements,
+            &limited(1),
+            &AtomicBool::new(false),
+        )
+        .await;
+        assert!(over.rolled_back);
+        assert_eq!(over.errors[0].code.as_deref(), Some("TooManyChanges"));
+        let within = run_statements(
+            &mut conn,
+            None,
+            &pool,
+            &statements,
+            &limited(2),
+            &AtomicBool::new(false),
+        )
+        .await;
+        assert!(within.errors.is_empty(), "{:?}", within.errors);
+        let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM row_json_probe")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 3);
 
         drop(conn);
         pool.execute("DROP TABLE row_json_probe").await.unwrap();

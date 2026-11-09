@@ -88,3 +88,23 @@ LiteDB* off, the host's prompt is the only check, and the preview text is the
 record; [`mcp/README.md`](../mcp/README.md#what-it-does-not-do) says what
 neither stops. For SQLite, the agent works on the file itself; edits made in
 the app are already there.
+
+## Letting an agent work on its own
+
+For an agent that edits a database with nobody watching, turn on Settings →
+Agents → **Let agents make small changes without asking** for that connection,
+and set how many rows one call may change. The status bar says so for as long
+as it is on, and it is not available on a connection tagged production.
+
+With it on, the agent's `write` tool runs a change in one call when it is an
+INSERT of listed rows, or an UPDATE or DELETE with a WHERE clause, and changes
+no more rows than the limit. The rows are counted before it runs, and the write
+is rolled back if it changes more while it runs. It is still in the audit log,
+marked as run without approval, and Undo still works for a single statement.
+
+Everything else still waits for approval: schema and permission changes, an
+UPDATE or DELETE with no WHERE clause, DROP, TRUNCATE, an upsert, an INSERT fed
+by a SELECT, and anything over the limit. `write` returns those as a preview
+with a token and the reason, and `query` never writes at all. To run those
+unattended too, turn *Ask in LiteDB* off and let the host run
+`execute_approved` without asking.

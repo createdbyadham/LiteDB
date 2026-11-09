@@ -19,6 +19,7 @@ import {
     type AuditOutcome,
 } from './auditLog';
 import { approveInAppEnabled } from './agentApprovals';
+import { DIRECT_WRITES_CHANGED, directWritesFor } from './agentDirectWrites';
 import { clearHandoff, writeActiveHandoff, type HandoffPostgres } from './mcpHandoff';
 import type { SqlDialect } from './schemaTypes';
 import type { StatementClassification } from './sqlClassifier';
@@ -101,9 +102,15 @@ export function setPolicyFor(connectionId: string, policy: SafetyPolicy): void {
     window.dispatchEvent(
         new CustomEvent('sqlPolicyChanged', { detail: { connectionId, policy } }),
     );
-    if (active && active.id === connectionId) {
-        void writeActiveHandoff(active, policy, { approveInApp: approveInAppEnabled() });
-    }
+    if (active && active.id === connectionId) advertise(active, policy);
+}
+
+/** Tell a separately started litedb-mcp what is open, and what it may do there. */
+function advertise(connection: ActiveConnection, policy: SafetyPolicy): void {
+    void writeActiveHandoff(connection, policy, {
+        approveInApp: approveInAppEnabled(),
+        directWrites: directWritesFor(connection.id, connection.production),
+    });
 }
 
 // The connection on screen: what the status bar shows, what the editor runs
@@ -116,15 +123,17 @@ export function setActiveConnection(connection: ActiveConnection): void {
     window.dispatchEvent(
         new CustomEvent('sqlPolicyChanged', { detail: { connectionId: connection.id } }),
     );
-    void writeActiveHandoff(connection, policyFor(connection.id), { approveInApp: approveInAppEnabled() });
+    advertise(connection, policyFor(connection.id));
 }
 
-// Turning in-app approval on or off in Settings takes effect for the agent's
-// next call: the server re-reads the handoff every time.
+// Changing what agents may do in Settings takes effect for the agent's next
+// call: the server re-reads the handoff every time.
 if (typeof window !== 'undefined') {
-    window.addEventListener('agentApprovalSettingChanged', () => {
-        if (active) void writeActiveHandoff(active, policyFor(active.id), { approveInApp: approveInAppEnabled() });
-    });
+    const readvertise = () => {
+        if (active) advertise(active, policyFor(active.id));
+    };
+    window.addEventListener('agentApprovalSettingChanged', readvertise);
+    window.addEventListener(DIRECT_WRITES_CHANGED, readvertise);
 }
 
 export function clearActiveConnection(): void {

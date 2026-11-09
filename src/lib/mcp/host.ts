@@ -25,6 +25,7 @@ import type { ToolContext } from '../../../mcp/src/tools/query';
 import { registerTools, serverInstructions, type ToolSession } from '../../../mcp/src/tools/register';
 import { captureUndo } from '../../../mcp/src/undoCapture';
 import { approveInAppEnabled, askInWindow } from '@/lib/agentApprovals';
+import { directWritesFor } from '@/lib/agentDirectWrites';
 import { inTauri } from '@/lib/db/native';
 import { mcpPolicyFromApp } from '@/lib/mcpHandoff';
 import { activeConnection, policyFor } from '@/lib/queryGate';
@@ -164,6 +165,9 @@ class Target {
                 policy,
                 maxRows: MAX_ROWS,
                 embeddingModelId: EMBEDDING_MODEL,
+                // Read on every call, like the policy: turning it off applies
+                // to the agent's next write. Never on a production connection.
+                directWrites: policy === 'read-only' ? null : directWritesFor(active.id, active.production),
             },
         };
     }

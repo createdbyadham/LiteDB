@@ -7,6 +7,7 @@
 
 import type { SqlDialect } from '../../src/lib/schemaTypes';
 import type { SafetyPolicy } from '../../src/lib/sqlPolicy';
+import type { DirectWrites } from './directWrites';
 
 export interface ToolConfig {
     dialect: SqlDialect;
@@ -28,6 +29,11 @@ export interface ToolConfig {
      * the app, where the webview's own cache keeps it.
      */
     modelCachePath?: string;
+    /**
+     * Writes small enough to run without asking (directWrites.ts). Null or
+     * absent: every write waits for approval.
+     */
+    directWrites?: DirectWrites | null;
 }
 
 /**

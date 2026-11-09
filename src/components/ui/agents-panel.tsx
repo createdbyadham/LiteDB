@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import { Check, Copy, Plug, Unplug } from 'lucide-react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { Button } from './button';
+import { Input } from './input';
 import { Switch } from './switch';
+import { useDirectWrites } from '@/hooks/useDirectWrites';
+import { clampDirectLimit, DEFAULT_DIRECT_LIMIT, MAX_DIRECT_LIMIT } from '@/lib/agentDirectWrites';
+import type { ActiveConnection } from '@/lib/queryGate';
 import { useToast } from '@/hooks/use-toast';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 import { approveInAppEnabled, setApproveInApp } from '@/lib/agentApprovals';
@@ -65,6 +69,73 @@ function CopyRow({
             <pre className="max-h-36 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-snug font-mono whitespace-pre-wrap">
                 {text.trim()}
             </pre>
+        </div>
+    );
+}
+
+/** "Let agents make small changes without asking", for the connection on screen. */
+function DirectWritesSetting({ connection }: { connection: ActiveConnection | null }) {
+    const { directWrites, setDirectWrites } = useDirectWrites(connection);
+    const [draft, setDraft] = useState(String(directWrites?.maxRows ?? DEFAULT_DIRECT_LIMIT));
+    useEffect(() => {
+        if (directWrites) setDraft(String(directWrites.maxRows));
+    }, [directWrites]);
+
+    const unavailable = !connection
+        ? 'Connect to a database first.'
+        : connection.production
+          ? 'Not available on a connection tagged production.'
+          : null;
+
+    const commit = () => {
+        const next = clampDirectLimit(Number(draft));
+        setDraft(String(next));
+        if (directWrites && next !== directWrites.maxRows) setDirectWrites({ maxRows: next });
+    };
+
+    return (
+        <div className="rounded-md border border-border/80 px-3 py-2.5 space-y-2">
+            <label className="flex items-start gap-3 cursor-pointer">
+                <Switch
+                    checked={directWrites !== null}
+                    disabled={unavailable !== null}
+                    onCheckedChange={(on) =>
+                        setDirectWrites(on ? { maxRows: clampDirectLimit(Number(draft)) } : null)
+                    }
+                    className="mt-0.5"
+                    aria-label="Let agents make small changes without asking"
+                />
+                <span className="min-w-0 space-y-1">
+                    <span className="block text-sm font-medium">Let agents make small changes without asking</span>
+                    <span className="block text-xs text-muted-foreground leading-relaxed">
+                        On this connection, an agent&apos;s <code className="font-mono">write</code> call
+                        runs at once when it adds listed rows, or updates or deletes rows with a WHERE
+                        clause, and changes no more rows than the limit below. It is still logged, and
+                        Undo still works. Schema changes, writes with no WHERE, DROP, TRUNCATE, upserts
+                        and anything bigger still wait for approval.
+                    </span>
+                    {unavailable && <span className="block text-xs text-muted-foreground">{unavailable}</span>}
+                </span>
+            </label>
+            {directWrites && (
+                <div className="flex items-center gap-2 pl-12 text-xs text-muted-foreground">
+                    <span>Up to</span>
+                    <Input
+                        type="number"
+                        min={1}
+                        max={MAX_DIRECT_LIMIT}
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onBlur={commit}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') commit();
+                        }}
+                        className="h-7 w-24 font-mono text-xs"
+                        aria-label="Rows an agent may change in one call"
+                    />
+                    <span>rows per call</span>
+                </div>
+            )}
         </div>
     );
 }
@@ -152,6 +223,8 @@ export function AgentsPanel() {
                     </span>
                 </span>
             </label>
+
+            <DirectWritesSetting connection={connection} />
 
             <div className="rounded-md border border-border/80 p-3 space-y-2">
                 <p className="text-sm font-medium">Claude Desktop</p>

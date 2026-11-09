@@ -212,7 +212,10 @@ export function AuditLogView() {
                                         {entry.kind}
                                     </Badge>
                                     <span className="text-[11px] text-muted-foreground">
-                                        {DECISION_LABEL[entry.decision]} · {entry.policy}
+                                        {entry.directLimit
+                                            ? `ran without approval · up to ${rows(entry.directLimit)} allowed`
+                                            : DECISION_LABEL[entry.decision]}{' '}
+                                        · {entry.policy}
                                     </span>
                                     <span className="text-[11px] text-muted-foreground ml-auto">
                                         {formatTimestamp(entry.at)}

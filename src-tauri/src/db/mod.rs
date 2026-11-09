@@ -48,6 +48,23 @@ pub struct RunOptions {
     /// statement per string. For agents' reads, where the classifier that
     /// decided this was a read is the thing being guarded against.
     pub read_only: bool,
+    /// With `transaction`: roll the run back if its INSERT, UPDATE and DELETE
+    /// statements change more rows than this. The limit agents' direct writes
+    /// are held to, enforced when they run rather than only when previewed.
+    pub max_changes: Option<u64>,
+}
+
+/// The error a run gets when it changes more rows than `max_changes` allows.
+pub fn too_many_changes(statement: usize, changed: u64, limit: u64) -> RunError {
+    RunError {
+        statement,
+        message: format!(
+            "Rolled back, nothing changed: this would change {changed} rows, more than the {limit} allowed."
+        ),
+        code: Some("TooManyChanges".into()),
+        cancelled: false,
+        position: None,
+    }
 }
 
 #[derive(Serialize, Default, Clone, Debug)]

@@ -92,6 +92,11 @@ export interface AuditEntry {
      * Absent when the write could not be saved that way.
      */
     undo?: string | null;
+    /**
+     * An agent's write that ran without approval, because it changed no more
+     * than this many rows and the connection allows that (Settings → Agents).
+     */
+    directLimit?: number | null;
 }
 
 const LOG_DIR = 'audit';
