@@ -7,9 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-11-10
+
 ### Added
 
 - **Claude and Gemini** as providers in Settings → AI: paste an Anthropic or Google AI Studio key and pick a model, no endpoint to type. Keys go to the OS keychain like the others. Defaults: Claude Sonnet 5.5 (Haiku 5.5 for inline suggestions) and Gemini 2.5 Flash.
+
+### Fixed
+
+- Audit panel cards stay inside the panel. A long statement or prompt used to push every card past its right edge; it now wraps.
+- The page size picker in the table editor shows its whole label, "100 per page", instead of "100 per...".
+- The typed confirmation for a write with nothing limiting it asks for the table name without its quotes. For a statement written with `` `Employees` ``, typing `Employees` never matched, so **Run anyway** stayed disabled. The quoted form is still accepted.
 
 ## [2.5.0] - 2026-11-09
 
@@ -139,6 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.6.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.0
 [2.5.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0
 [2.4.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.4.0
 [2.3.0]: https://github.com/createdbyadham/LiteDB/releases/tag/app-v2.3.0
