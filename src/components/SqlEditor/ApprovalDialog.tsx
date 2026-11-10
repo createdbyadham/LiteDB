@@ -51,6 +51,14 @@ const KIND_STYLE: Record<StatementKind, string> = {
     unknown: 'bg-destructive/15 text-destructive',
 };
 
+/** `schema`.`table`, "table" or [table] as schema.table and table: the name without its quotes. */
+function unquoteName(name: string): string {
+    return name
+        .split('.')
+        .map((part) => part.trim().replace(/^`(.*)`$|^"(.*)"$|^\[(.*)\]$/s, (_, a, b, c) => a ?? b ?? c))
+        .join('.');
+}
+
 function formatCount(value: number): string {
     return value.toLocaleString();
 }
@@ -147,8 +155,14 @@ export function ApprovalDialog({
     // The word to type: the table at risk, or the verb when no table was
     // identified. Naming the table makes the confirmation about this specific
     // object rather than a reflex.
-    const confirmPhrase = decision.worst?.table ?? decision.worst?.verb ?? 'RUN';
-    const confirmed = !decision.requireTypedConfirmation || typed.trim() === confirmPhrase.trim();
+    // The table comes as written in the SQL, quotes and all (`Employees`,
+    // "Employees", [Employees]). Asking for the quotes too made the phrase
+    // impossible to match by reading it, so the name is shown bare, and the
+    // quoted form is still accepted for anyone who copies it.
+    const written = (decision.worst?.table ?? decision.worst?.verb ?? 'RUN').trim();
+    const confirmPhrase = unquoteName(written);
+    const confirmed =
+        !decision.requireTypedConfirmation || typed.trim() === confirmPhrase || typed.trim() === written;
 
     const previewFor = (sql: string): ImpactEstimate | undefined =>
         previews.find((p) => p.statement.sql === sql);

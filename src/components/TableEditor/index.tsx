@@ -756,7 +756,8 @@ const TableEditor = ({
         </div>
         <div className="flex items-center gap-2">
           <Select value={String(query.limit)} onValueChange={(v) => onQueryChange({ ...query, limit: Number(v), offset: 0 })}>
-            <SelectTrigger className="h-7 w-[104px] text-xs">
+            {/* sized to its label: a fixed 104px cut "100 per page" to "100 per..." */}
+            <SelectTrigger className="h-7 w-auto gap-2 whitespace-nowrap text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

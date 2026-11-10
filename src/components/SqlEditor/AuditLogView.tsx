@@ -73,6 +73,19 @@ function formatTimestamp(iso: string): string {
     return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleString();
 }
 
+/**
+ * The time on a card: just the time for today, the date and time otherwise.
+ * The panel is narrow, and a full date and time with seconds took a line of
+ * its own on every entry. The full timestamp stays in the tooltip.
+ */
+function shortTimestamp(iso: string): string {
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return iso;
+    const time = parsed.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    if (parsed.toDateString() === new Date().toDateString()) return time;
+    return `${parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`;
+}
+
 export function AuditLogView() {
     const [entries, setEntries] = useState<AuditEntry[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -155,27 +168,28 @@ export function AuditLogView() {
 
     return (
         <div className="flex flex-col gap-3 h-full">
-            <div className="flex items-center justify-between gap-4">
-                <div className="space-y-0.5">
+            <div className="space-y-1 px-0.5">
+                <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-medium">Statement audit</h3>
-                    <p className="text-xs text-muted-foreground">
-                        Every generated statement, and every change you made by hand. Stored at{' '}
-                        <code className="font-mono">{auditLogLocation()}</code> and never sent
-                        anywhere.
-                    </p>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 text-muted-foreground"
+                        onClick={() => void refresh()}
+                        disabled={isLoading}
+                        title="Refresh"
+                        aria-label="Refresh"
+                    >
+                        <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                    </Button>
                 </div>
-                <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs shrink-0"
-                    onClick={() => void refresh()}
-                    disabled={isLoading}
-                >
-                    <RefreshCw
-                        className={`mr-1.5 h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`}
-                    />
-                    Refresh
-                </Button>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                    Every generated statement, and every change you made by hand. Kept on this
+                    machine, never sent anywhere.
+                </p>
+                <p className="truncate font-mono text-[11px] text-muted-foreground/70" title={auditLogLocation()}>
+                    {auditLogLocation()}
+                </p>
             </div>
 
             {entries.length === 0 && !isLoading ? (
@@ -183,23 +197,29 @@ export function AuditLogView() {
                     Nothing recorded yet.
                 </div>
             ) : (
-                <ScrollArea className="flex-1 pr-3">
+                // Radix wraps the content in a display: table div that grows to fit
+                // the widest line, which pushed cards past the panel's right edge.
+                // Block keeps every card the panel's width (as in the Sidebar).
+                <ScrollArea className="flex-1 pr-3 [&_[data-radix-scroll-area-viewport]>div]:!block">
                     <div className="space-y-2">
                         {entries.map((entry) => (
-                            <div key={entry.id} className="rounded-md border p-2.5 space-y-1.5">
-                                <div className="flex items-center gap-2 flex-wrap">
+                            <div key={entry.id} className="min-w-0 rounded-md border p-2.5 space-y-2">
+                                {/* Who and what on the left, when on the right; nothing wraps mid-label. */}
+                                <div className="flex items-center gap-1.5 min-w-0">
                                     {entry.provenance === 'ai' ? (
                                         <Badge
                                             variant="outline"
-                                            className="text-[11px] font-normal gap-1 border-0 bg-secondary text-foreground"
+                                            className="min-w-0 shrink text-[11px] font-normal gap-1 border-0 bg-secondary text-foreground whitespace-nowrap"
                                         >
-                                            <Bot className="h-3 w-3" />
-                                            {entry.model ?? (entry.client ? agentName(entry.client) : 'model')}
+                                            <Bot className="h-3 w-3 shrink-0" />
+                                            <span className="truncate">
+                                                {entry.model ?? (entry.client ? agentName(entry.client) : 'model')}
+                                            </span>
                                         </Badge>
                                     ) : (
                                         <Badge
                                             variant="outline"
-                                            className="text-[11px] font-normal gap-1 border-0 bg-muted text-muted-foreground"
+                                            className="shrink-0 text-[11px] font-normal gap-1 border-0 bg-muted text-muted-foreground whitespace-nowrap"
                                         >
                                             <User className="h-3 w-3" />
                                             you
@@ -207,33 +227,38 @@ export function AuditLogView() {
                                     )}
                                     <Badge
                                         variant="outline"
-                                        className={`font-mono text-[11px] font-normal border-0 ${KIND_STYLE[entry.kind]}`}
+                                        className={`shrink-0 font-mono text-[11px] font-normal border-0 ${KIND_STYLE[entry.kind]}`}
                                     >
                                         {entry.kind}
                                     </Badge>
-                                    <span className="text-[11px] text-muted-foreground">
-                                        {entry.directLimit
-                                            ? `ran without approval · up to ${rows(entry.directLimit)} allowed`
-                                            : DECISION_LABEL[entry.decision]}{' '}
-                                        · {entry.policy}
-                                    </span>
-                                    <span className="text-[11px] text-muted-foreground ml-auto">
-                                        {formatTimestamp(entry.at)}
+                                    <span
+                                        className="ml-auto shrink-0 whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
+                                        title={formatTimestamp(entry.at)}
+                                    >
+                                        {shortTimestamp(entry.at)}
                                     </span>
                                 </div>
 
+                                <p className="text-[11px] leading-snug text-muted-foreground">
+                                    {entry.directLimit
+                                        ? `Ran without approval, up to ${rows(entry.directLimit)} allowed`
+                                        : DECISION_LABEL[entry.decision].charAt(0).toUpperCase() + DECISION_LABEL[entry.decision].slice(1)}
+                                    <span className="text-muted-foreground/60"> · {entry.policy}</span>
+                                </p>
+
                                 {entry.prompt && (
-                                    <p className="text-[11px] text-muted-foreground">
+                                    <p className="text-[11px] text-muted-foreground break-words">
                                         &ldquo;{entry.prompt}&rdquo;
                                     </p>
                                 )}
 
-                                <pre className="text-[11px] font-mono bg-muted/50 rounded px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-words">
+                                <pre className="text-[11px] leading-relaxed font-mono bg-muted/50 rounded px-2 py-1.5 overflow-x-auto whitespace-pre-wrap break-words">
                                     {entry.sql}
                                 </pre>
 
-                                <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
-                                    <span className="min-w-0 max-w-[14rem] truncate" title={entry.connection}>
+                                {/* One line: the connection gives way first, the counts and Undo never wrap. */}
+                                <div className="flex items-center gap-2 text-[11px] text-muted-foreground [&>*]:shrink-0 [&>span]:whitespace-nowrap">
+                                    <span className="min-w-0 !shrink truncate" title={entry.connection}>
                                         {shortConnection(entry.connection)}
                                     </span>
                                     {entry.actualRows != null ? (
