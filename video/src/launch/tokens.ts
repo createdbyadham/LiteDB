@@ -36,5 +36,5 @@ export const C = {
 /** Inter stylistic sets the app turns on for body text. */
 export const INTER_FEATURES = '"ss01", "ss02", "cv01", "cv02", "cv03"';
 
-/** The agent cursor's name tag. One place to change it. */
-export const CURSOR_LABEL = "Sequel";
+/** The agent cursor's name tag: Star, the Text to SQL mascot (v2.4.0). */
+export const CURSOR_LABEL = "Star";

@@ -21,6 +21,8 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "si8": "npm:simple-icons@^8.15.0",
+    "simple-icons": "^16.37.0",
     "typescript": "^5.8.2"
   }
 }
