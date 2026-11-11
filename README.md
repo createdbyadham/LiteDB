@@ -23,17 +23,19 @@ Claude Code asks to move 13 customers from FR to DE. LiteDB shows exactly which
 rows and waits; after Approve, the audit log names the agent, and one click puts
 the rows back. ([Video version](./docs/assets/demo.mp4).)
 
+If this would make you trust an agent with your database, a ⭐ helps others find it.
+
 ## Install
 
-```bash
-brew install --cask litedb
-winget install -e --id AdhamEhab.LiteDB
-scoop bucket add extras && scoop install extras/litedb
-yay -S litedb-bin
-flatpak install flathub com.adhamehab.litedb
-```
+Download the installer for your platform from the [latest release](https://github.com/createdbyadham/LiteDB/releases/latest):
 
-The badge above is the GitHub release for this version. The installers are not code-signed yet. On Windows, SmartScreen may warn: choose **More info**, then **Run anyway**. On macOS, if LiteDB is called damaged, run `xattr -cr /Applications/LiteDB.app` once and open it again.
+- **Windows:** [LiteDB_2.6.0_x64-setup.exe](https://github.com/createdbyadham/LiteDB/releases/download/v2.6.0/LiteDB_2.6.0_x64-setup.exe), or the [.msi](https://github.com/createdbyadham/LiteDB/releases/download/v2.6.0/LiteDB_2.6.0_x64_en-US.msi)
+- **macOS:** [Apple silicon](https://github.com/createdbyadham/LiteDB/releases/download/v2.6.0/LiteDB_2.6.0_aarch64.dmg) or [Intel](https://github.com/createdbyadham/LiteDB/releases/download/v2.6.0/LiteDB_2.6.0_x64.dmg)
+- **Linux:** [AppImage](https://github.com/createdbyadham/LiteDB/releases/download/v2.6.0/LiteDB_2.6.0_amd64.AppImage), [.deb](https://github.com/createdbyadham/LiteDB/releases/download/v2.6.0/LiteDB_2.6.0_amd64.deb) or [.rpm](https://github.com/createdbyadham/LiteDB/releases/download/v2.6.0/LiteDB-2.6.0-1.x86_64.rpm)
+
+Homebrew, winget, Scoop, AUR and Flathub packages are on the way; until they are listed, use the downloads above.
+
+The installers are not code-signed yet. On Windows, SmartScreen may warn: choose **More info**, then **Run anyway**. On macOS, if LiteDB is called damaged, run `xattr -cr /Applications/LiteDB.app` once and open it again.
 
 ## Features
 
