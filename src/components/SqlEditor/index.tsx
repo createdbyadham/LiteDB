@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { mascot } from '@/lib/mascot';
-import { aiService } from '@/lib/aiService';
+import { aiService, describeAIError } from '@/lib/aiService';
 import { tauriService } from '@/lib/tauri';
 import { csvRow, rowsToJson } from '@/lib/exportFormat';
 import { buildXlsx } from '@/lib/xlsx';
@@ -698,7 +698,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
       toast({
         variant: 'destructive',
         title: 'Could not explain the error',
-        description: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
+        description: describeAIError(error),
       });
     } finally {
       setExplaining(false);
@@ -754,7 +754,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         error: f.error,
         fixed: null,
         loading: false,
-        failure: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
+        failure: describeAIError(error),
       });
     }
   };
@@ -850,7 +850,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         sql,
         plan,
         text: null,
-        error: error instanceof Error ? error.message : 'Check your AI provider in Settings and try again.',
+        error: describeAIError(error),
         loading: false,
       });
     }

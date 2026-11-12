@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { aiService } from '@/lib/aiService';
+import { aiService, describeAIError } from '@/lib/aiService';
+import { ToastAction } from '@/components/ui/toast';
 import { mascot } from '@/lib/mascot';
 import { Loader2, Zap } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -114,9 +115,15 @@ export function AiQueryDialog({
       toast({
         variant: "destructive",
         title: "SQL not generated",
-        description: error instanceof Error
-          ? error.message
-          : "Check your AI provider in Settings and try again.",
+        description: describeAIError(error),
+        action: (
+          <ToastAction
+            altText="Open AI settings"
+            onClick={() => window.dispatchEvent(new CustomEvent('openSettings', { detail: { tab: 'ai' } }))}
+          >
+            AI settings
+          </ToastAction>
+        ),
       });
     } finally {
       setIsLoading(false);

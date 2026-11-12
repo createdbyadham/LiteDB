@@ -300,11 +300,13 @@ function clientFor(provider: AIProvider, config: AIProviderConfig) {
         });
       }
       
-      // Force Origin to localhost to bypass Ollama's CORS check
-      headers['Origin'] = 'http://localhost';
+      // Ollama and similar local servers reject unknown origins, so claim
+      // localhost for them. Never for hosted APIs: Anthropic reads an Origin
+      // header as a browser request and answers 401 without the
+      // direct-browser-access opt-in, though this request comes from Rust.
+      if (needsEndpoint(provider)) headers['Origin'] = 'http://localhost';
 
       try {
-        console.log('Invoking proxy_request with url:', url);
         if (typeof tauriInvoke !== 'function') {
           console.error('tauriInvoke is not a function:', tauriInvoke);
           throw new Error('tauriInvoke is not defined');
@@ -333,6 +335,32 @@ function clientFor(provider: AIProvider, config: AIProviderConfig) {
       }
     }
   });
+}
+
+const PROVIDER_NAMES: Record<AIProvider, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Claude',
+  gemini: 'Gemini',
+  'openai-compatible': 'the AI endpoint',
+  ollama: 'Ollama',
+};
+
+/**
+ * What to tell the user when an AI request fails. The SDK reports an
+ * unreachable server as a bare "Connection error.", which on a first run
+ * without Ollama reads as "AI does not work here". Say what was tried and
+ * that the hosted providers need nothing installed.
+ */
+export function describeAIError(error: unknown): string {
+  const provider = getSettings().activeProvider;
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const unreachable = error instanceof OpenAI.APIConnectionError || /^connection error\.?$/i.test(message.trim());
+  if (unreachable && provider === 'ollama') {
+    const endpoint = getSettings().configs.ollama.endpoint || defaultSettings.configs.ollama.endpoint;
+    return `Could not reach Ollama at ${endpoint}. Start Ollama, or choose OpenAI, Claude or Gemini in Settings → AI and paste an API key.`;
+  }
+  if (unreachable) return `Could not reach ${PROVIDER_NAMES[provider]}. Check your network and the provider in Settings → AI.`;
+  return message || 'Check your AI provider in Settings → AI and try again.';
 }
 
 function createClient() {

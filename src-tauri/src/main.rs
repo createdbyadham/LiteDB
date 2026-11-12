@@ -110,7 +110,19 @@ async fn proxy_request(
     body: Option<String>,
 ) -> Result<ProxyResponse, String> {
     let parsed = reqwest::Url::parse(&url).map_err(|e| format!("invalid url: {e}"))?;
-    is_proxy_url_allowed(&parsed)?;
+    // Host and path only: the query string can carry a key (Gemini's does).
+    let target = format!(
+        "{} {}://{}{}",
+        method,
+        parsed.scheme(),
+        parsed.host_str().unwrap_or(""),
+        parsed.path()
+    );
+    if let Err(e) = is_proxy_url_allowed(&parsed) {
+        log::error!("AI request {target} refused: {e}");
+        return Err(e);
+    }
+    let started = std::time::Instant::now();
 
     let client = reqwest::Client::builder()
         .redirect(redirect::Policy::none())
@@ -135,7 +147,10 @@ async fn proxy_request(
         request_builder = request_builder.body(b);
     }
 
-    let response = request_builder.send().await.map_err(|e| e.to_string())?;
+    let response = request_builder.send().await.map_err(|e| {
+        log::error!("AI request {target} failed: {e}");
+        e.to_string()
+    })?;
 
     let status = response.status().as_u16();
     let status_text = response
@@ -151,7 +166,20 @@ async fn proxy_request(
         }
     }
 
-    let body_text = response.text().await.map_err(|e| e.to_string())?;
+    let body_text = response.text().await.map_err(|e| {
+        log::error!("AI request {target} returned {status} but the body could not be read: {e}");
+        e.to_string()
+    })?;
+
+    let elapsed = started.elapsed().as_millis();
+    if (200..300).contains(&status) {
+        log::info!("AI request {target} -> {status} in {elapsed} ms");
+    } else {
+        // Provider error bodies say what went wrong ("invalid x-api-key",
+        // "model not found") and never echo the key. Truncated: some are HTML.
+        let detail: String = body_text.chars().take(500).collect();
+        log::error!("AI request {target} -> {status} {status_text} in {elapsed} ms: {detail}");
+    }
 
     Ok(ProxyResponse {
         status,
@@ -219,7 +247,21 @@ fn main() {
     install_crypto_provider();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(
+            // The default is Trace for every crate, which fills the file with
+            // HTTP and TLS internals (and sqlx's statement log) and buries the
+            // app's own lines. Info for LiteDB, warnings only from libraries.
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .level_for("hyper", log::LevelFilter::Warn)
+                .level_for("hyper_util", log::LevelFilter::Warn)
+                .level_for("h2", log::LevelFilter::Warn)
+                .level_for("reqwest", log::LevelFilter::Warn)
+                .level_for("rustls", log::LevelFilter::Warn)
+                .level_for("tungstenite", log::LevelFilter::Warn)
+                .level_for("sqlx", log::LevelFilter::Warn)
+                .build(),
+        )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())

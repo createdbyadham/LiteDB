@@ -306,6 +306,11 @@ export function SettingsDialog() {
                   <SelectItem value="ollama">Ollama (local)</SelectItem>
                 </SelectContent>
               </Select>
+              {settings.activeProvider === 'ollama' && (
+                <p className="text-xs text-muted-foreground">
+                  Runs models on this computer and needs Ollama installed. Without it, choose OpenAI, Claude or Gemini and paste an API key.
+                </p>
+              )}
             </div>
 
             {settings.activeProvider !== 'ollama' && (
