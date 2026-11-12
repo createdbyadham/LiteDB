@@ -1,9 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTheme } from 'next-themes';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 import { useToast } from '@/hooks/use-toast';
 import { onAgentActivity } from '@/lib/agentActivity';
-import { mascot, useMascot, type MascotPerch } from '@/lib/mascot';
+import { useActiveConnection } from '@/lib/db/connections';
+import { mascot, starColor, useMascot, type MascotPerch } from '@/lib/mascot';
 import { registerDropTarget, useTableDrag } from '@/lib/tableDrag';
 import { cn } from '@/lib/utils';
 import { STAR, STAR_COLORS } from './art';
@@ -23,6 +25,18 @@ import { narrate } from './narrate';
  * agent is in the database over MCP. Drag a table onto it to ask about that
  * table; after a query fails, click it to have the error explained or fixed.
  *
+ * It dresses for the connection's mode. In Read-only it wears reading
+ * glasses, skims the table now and then, and peers over them at you when a
+ * write is refused. In YOLO it flips down a pair of sunglasses.
+ *
+ * Leave the cursor on its face and it goes cross-eyed; rub it back and forth
+ * and it is being petted. Left alone long enough it dozes, and Zs float up.
+ * Switch the theme and it squints at the light or opens its eyes wide in the
+ * dark. On a production connection it wears a detective's fedora and stays awake. It
+ * holds its breath while a transaction is open, sweats over an UPDATE or
+ * DELETE that has no WHERE yet, and waves to each agent the first time it
+ * shows up.
+ *
  * All motion is spring physics (./motion.ts); ./art.ts draws Star. The body
  * is clipped at the edge it peeks over and the fingertips are drawn in front
  * of that edge, which is what makes it look like it is holding on.
@@ -41,6 +55,9 @@ const PERCH_SELECTOR: Record<MascotPerch, string> = {
 const IDLE_AFTER = 12_000;
 const IDLE_GAP: [number, number] = [9_000, 16_000];
 
+/** Agents (by MCP client name) it has already waved to since the app opened; kept across databases. */
+const greeted = new Set<string>();
+
 interface StarProps {
   /** Open Text to SQL. */
   onActivate: () => void;
@@ -49,7 +66,7 @@ interface StarProps {
 }
 
 export function Star({ onActivate, onAsk }: StarProps) {
-  const { mood, perch, gaze, say, strain, look, prefs, help } = useMascot();
+  const { mood, perch, gaze, say, strain, look, prefs, help, waiting, bracing, sweating } = useMascot();
   const { policy } = useSafetyPolicy();
   const { toasts } = useToast();
   const drag = useTableDrag();
@@ -58,19 +75,27 @@ export function Star({ onActivate, onAsk }: StarProps) {
   const motion = motionRef.current;
   // The eyes are cut out with a mask, and the mask needs an id unique in the document.
   const uid = `star${useId().replace(/[^\w-]/g, '')}`;
+  // The colour it is drawn in: its own, or for Auto the one that suits the theme.
+  const { resolvedTheme } = useTheme();
+  const [color, setColor] = useState(() => starColor(look.color, resolvedTheme));
+  const shown = useRef({ look, theme: resolvedTheme, color });
 
   const [ready, setReady] = useState(false);
   const [traveling, setTraveling] = useState(false);
   const [hover, setHover] = useState(false);
   const [drowsy, setDrowsy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [petted, setPetted] = useState(false);
+  // On production it wears a fedora; with a transaction open it holds its breath.
+  const conn = useActiveConnection();
+  const production = !!conn?.production;
+  const inTransaction = !!conn?.inTransaction;
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const poseRef = useRef<HTMLDivElement>(null);
   const handsRef = useRef<HTMLDivElement>(null);
   const artRef = useRef<SVGSVGElement>(null);
   const fxRef = useRef<SVGSVGElement>(null);
-  const badgeRef = useRef<SVGSVGElement>(null);
   const blurRef = useRef<SVGFEGaussianBlurElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -79,15 +104,16 @@ export function Star({ onActivate, onAsk }: StarProps) {
   // --- engine wiring ------------------------------------------------------------
   useLayoutEffect(() => {
     const body = bodyRef.current, pose = poseRef.current, hands = handsRef.current;
-    const art = artRef.current, fx = fxRef.current, badge = badgeRef.current, blur = blurRef.current;
-    if (!body || !pose || !hands || !art || !fx || !badge || !blur) return;
+    const art = artRef.current, fx = fxRef.current, blur = blurRef.current;
+    if (!body || !pose || !hands || !art || !fx || !blur) return;
     const query = reducedMotionQuery();
     const syncReduced = () => {
       motion.reduced = !!query?.matches;
     };
     syncReduced();
-    motion.attach({ body, pose, hands, art, fx, badge, blur, blurId: `${uid}-blur` }, uid, mascot.get().look);
+    motion.attach({ body, pose, hands, art, fx, blur, blurId: `${uid}-blur` }, uid, { ...mascot.get().look, color: shown.current.color });
     motion.onLanded = () => setTraveling(false);
+    motion.onPetted = setPetted;
     query?.addEventListener('change', syncReduced);
     return () => {
       query?.removeEventListener('change', syncReduced);
@@ -156,10 +182,9 @@ export function Star({ onActivate, onAsk }: StarProps) {
   // --- what it pays attention to ------------------------------------------------------
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
-      motion.pointer = { x: e.clientX, y: e.clientY };
+      motion.movePointer({ x: e.clientX, y: e.clientY });
       lastMove.current = Date.now();
       setDrowsy(false);
-      motion.kick();
     };
     window.addEventListener('pointermove', onMove, { passive: true });
     return () => window.removeEventListener('pointermove', onMove);
@@ -184,15 +209,37 @@ export function Star({ onActivate, onAsk }: StarProps) {
 
   useEffect(() => motion.setMood(mood), [mood, motion]);
   useEffect(() => motion.setStrain(strain), [strain, motion]);
-  useEffect(() => motion.setLatched(policy === 'read-only'), [policy, motion]);
+  useEffect(() => motion.setWear(policy === 'read-only' ? 'reading' : policy === 'yolo' ? 'shades' : null), [policy, motion]);
+  useEffect(() => motion.setWaiting(waiting), [waiting, motion]);
+  useEffect(() => motion.setBracing(bracing), [bracing, motion]);
+  useEffect(() => motion.setSweating(sweating), [sweating, motion]);
+  useEffect(() => motion.setHat(production), [production, motion]);
+  useEffect(() => motion.setHolding(inTransaction), [inTransaction, motion]);
 
-  // Settings → Star changes its colour, eyes and mouth in place.
-  const drawnLook = useRef(look);
+  // Settings → Star redraws it in place. Switching the theme, it squints at a
+  // light window and opens its eyes wide in a dark one; in Auto colour it
+  // changes colour while its eyes are shut, so you never see the swap.
   useEffect(() => {
-    if (drawnLook.current === look) return;
-    drawnLook.current = look;
-    motion.setLook(look);
-  }, [look, motion]);
+    const was = shown.current;
+    if (was.look === look && was.theme === resolvedTheme) return;
+    shown.current = { look, theme: resolvedTheme, color: was.color };
+    // Draws what the latest look and theme call for, so a swap that lands
+    // after a second quick switch never draws a stale colour.
+    const redraw = () => {
+      const now = shown.current;
+      now.color = starColor(now.look.color, now.theme);
+      setColor(now.color);
+      motion.setLook({ ...now.look, color: now.color });
+    };
+    const recolour = starColor(look.color, resolvedTheme) !== was.color;
+    const themeChanged = !!was.theme && !!resolvedTheme && was.theme !== resolvedTheme;
+    if (!themeChanged) {
+      if (was.look !== look || recolour) redraw();
+      return;
+    }
+    if (resolvedTheme === 'light') motion.squint(recolour ? redraw : undefined);
+    else motion.widenInDark(recolour ? redraw : undefined);
+  }, [look, resolvedTheme, motion]);
 
   useEffect(
     () =>
@@ -201,6 +248,12 @@ export function Star({ onActivate, onAsk }: StarProps) {
         if (gesture === 'nod') motion.nodYes();
         if (gesture === 'shake') motion.shakeNo();
         if (gesture === 'rattle') motion.rattle();
+        if (gesture === 'refuse') motion.refuse();
+        if (gesture === 'shrug') motion.shrug();
+        if (gesture === 'whoa') motion.whoa();
+        if (gesture === 'rewind') motion.rewind();
+        if (gesture === 'commit') motion.commit();
+        if (gesture === 'rollback') motion.rollback();
       }),
     [motion],
   );
@@ -212,14 +265,15 @@ export function Star({ onActivate, onAsk }: StarProps) {
     motion.kick();
   }, [hover, perch, motion]);
 
-  // Dozes off at its perch when nobody has moved the mouse for a while.
+  // Dozes off at its perch when nobody has moved the mouse for a while. Not on
+  // production, where it keeps its fedora on and its eyes open.
   useEffect(() => {
     const t = setInterval(() => {
       const { perch: p, mood: m } = mascot.get();
-      setDrowsy(Date.now() - lastMove.current > 45_000 && p === 'home' && m === 'idle');
+      setDrowsy(Date.now() - lastMove.current > 45_000 && p === 'home' && m === 'idle' && !motion.onProduction);
     }, 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [motion]);
   useEffect(() => motion.setDrowsy(drowsy), [drowsy, motion]);
 
   // --- idle moments: a look around, a stretch, a yawn -----------------------------------
@@ -229,17 +283,19 @@ export function Star({ onActivate, onAsk }: StarProps) {
     let next = Date.now() + IDLE_AFTER;
     const t = setInterval(() => {
       const b = idleBlockers.current;
-      const { perch: p, mood: m } = mascot.get();
+      const { perch: p, mood: m, waiting: w } = mascot.get();
       const quiet = Date.now() - lastMove.current;
-      if (p !== 'home' || m !== 'idle' || b.hover || b.traveling || b.drowsy || b.menuOpen || b.dragging || quiet < IDLE_AFTER) {
+      if (p !== 'home' || m !== 'idle' || w || b.hover || b.traveling || b.drowsy || b.menuOpen || b.dragging || quiet < IDLE_AFTER) {
         next = Math.max(next, Date.now() + 2_000);
         return;
       }
       if (Date.now() < next) return;
       next = Date.now() + IDLE_GAP[0] + Math.random() * (IDLE_GAP[1] - IDLE_GAP[0]);
       const roll = Math.random();
-      if (roll < 0.55) motion.lookAround();
-      else if (roll < 0.8 || quiet < 25_000) motion.stretch();
+      // In reading glasses it often skims the table instead. It does not yawn on production.
+      if (motion.wearing === 'reading' && Math.random() < 0.45) motion.skim();
+      else if (roll < 0.55) motion.lookAround();
+      else if (roll < 0.8 || quiet < 25_000 || motion.onProduction) motion.stretch();
       else motion.yawn();
     }, 1000);
     return () => clearInterval(t);
@@ -265,9 +321,16 @@ export function Star({ onActivate, onAsk }: StarProps) {
         lastGlance = now;
         mascot.glance(document.querySelector('[data-mascot-mcp]'), 1400);
       }
+      // The first time an agent shows up while the app is open, it waves to it.
+      const client = entries.find(e => e.client)?.client ?? '';
+      if (!greeted.has(client)) {
+        greeted.add(client);
+        motion.hello();
+      }
       mascot.say(line.text, line.react ? 3200 : 2600);
       if (line.react === 'nod') motion.nodYes();
-      if (line.react === 'shake') motion.shakeNo();
+      // Refused or declined: a look over its reading glasses in Read-only, a head shake otherwise.
+      if (line.react === 'shake') motion.refuse();
       if (line.react === 'attend') motion.perk();
       if (line.react === 'wince') mascot.setMood('error', 1400);
     });
@@ -346,8 +409,9 @@ export function Star({ onActivate, onAsk }: StarProps) {
 
   // --- speech bubble: springs in, fades out ---------------------------------------------
   const dragLine = drag && perch === 'home' ? (drag.over ? `Ask about ${drag.table}` : `Drop ${drag.table} on me to ask about it`) : null;
+  // Being petted, it has nothing to sell you.
   const hoverLine =
-    hover && perch === 'home' && !traveling ? (help ? 'Click for help with that error' : 'Ask me for SQL') : null;
+    hover && perch === 'home' && !traveling && !petted ? (help ? 'Click for help with that error' : 'Ask me for SQL') : null;
   const text = prefs.bubbles && !menuOpen ? (dragLine ?? say ?? hoverLine) : null;
   const [bubble, setBubble] = useState<string | null>(null);
   const [bubbleVisible, setBubbleVisible] = useState(false);
@@ -382,7 +446,8 @@ export function Star({ onActivate, onAsk }: StarProps) {
   }, [bubble]);
 
   const z = perch !== 'home' || traveling ? 60 : 45;
-  const breathing = ready && perch === 'home' && mood === 'idle' && !hover && !traveling && !drag;
+  // No breathing while it holds its breath through a transaction.
+  const breathing = ready && perch === 'home' && mood === 'idle' && !hover && !traveling && !drag && !inTransaction;
   const anchor = perch === 'home' ? 'left-1/2 origin-bottom' : 'right-0 origin-bottom-right';
   const shift = perch === 'home' ? 'translateX(-50%) ' : '';
 
@@ -495,22 +560,6 @@ export function Star({ onActivate, onAsk }: StarProps) {
           aria-hidden
         />
 
-        {/* Read-only mode: a padlock by its top-right arm. Scaled in by the spring loop. */}
-        <svg
-          ref={badgeRef}
-          width={13}
-          height={15}
-          viewBox="0 0 13 15"
-          className="pointer-events-none absolute origin-bottom"
-          style={{ left: STAR.badge.x, top: STAR.badge.y }}
-          aria-hidden
-        >
-          <path d="M3.6 6.4 V4.6 A2.9 2.9 0 0 1 9.4 4.6 V6.4" fill="none" stroke="#ededed" strokeWidth="1.6" />
-          <rect x="1.4" y="6.2" width="10.2" height="8" rx="2.2" fill="#ededed" stroke="rgba(16,16,18,0.35)" strokeWidth="0.8" />
-          <circle cx="6.5" cy="9.6" r="1.1" fill="#161618" />
-          <rect x="6" y="9.8" width="1" height="2.4" rx="0.5" fill="#161618" />
-        </svg>
-
         {/* Directional blur for the fastest part of a hop; set by the spring loop. */}
         <svg width={0} height={0} className="absolute" aria-hidden>
           <filter id={`${uid}-blur`} x="-25%" y="-25%" width="150%" height="150%">
@@ -529,15 +578,16 @@ export function Star({ onActivate, onAsk }: StarProps) {
           height: H,
           zIndex: z + 2,
           visibility: ready ? 'visible' : 'hidden',
-          ['--star-body' as string]: STAR_COLORS[look.color].body,
-          ['--star-line' as string]: STAR_COLORS[look.color].line,
+          ['--star-body' as string]: STAR_COLORS[color].body,
+          ['--star-line' as string]: STAR_COLORS[color].line,
         }}
       >
-        {STAR.hands.map(x => (
-          <span key={`shadow-${x}`} className="star-shadow" style={{ top: PEEK + 1, left: x - 7 }} />
+        {/* The right hand is the one that taps while a slow query runs. */}
+        {STAR.hands.map((x, i) => (
+          <span key={`shadow-${x}`} className="star-shadow" data-tapper={i === 1 || undefined} style={{ top: PEEK + 1, left: x - 7 }} />
         ))}
-        {STAR.hands.map(x => (
-          <span key={x} className="star-hand" style={{ top: PEEK - 4, left: x - 4.5 }} />
+        {STAR.hands.map((x, i) => (
+          <span key={x} className="star-hand" data-tapper={i === 1 || undefined} style={{ top: PEEK - 4, left: x - 4.5 }} />
         ))}
       </div>
     </>,

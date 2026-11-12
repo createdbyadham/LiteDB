@@ -28,6 +28,7 @@ import { useToast } from '@/hooks/use-toast';
 import { auditLogLocation, readAudit, type AuditDecision, type AuditEntry } from '@/lib/auditLog';
 import { useActiveConnection } from '@/lib/db/connections';
 import { loadUndo, planUndoFor, runUndo } from '@/lib/db/undo';
+import { mascot } from '@/lib/mascot';
 import type { StatementKind } from '@/lib/sqlClassifier';
 import type { UndoPlan, UndoRecord } from '@/lib/undoWrite';
 
@@ -153,6 +154,7 @@ export function AuditLogView() {
         try {
             await runUndo(conn, link, record, plan, entry.id);
             setUndone((s) => new Set(s).add(link));
+            mascot.gesture('rewind');
             toast({ title: 'Undone', description: undoSummary(record, plan).split('. ')[0] });
             await refresh();
         } catch (error) {

@@ -37,6 +37,7 @@ import {
     inlineContext,
     reconcile,
     schemaComment,
+    spentOnThinking,
     typeThrough,
     type InlinePrompt,
 } from '../inlineSuggest';
@@ -429,6 +430,16 @@ check(
     'nothing left is null',
     cleanSuggestion('```\n```', 'SELECT ', '') === null && cleanSuggestion(' FROM users', 'SELECT *', ' FROM users', fim) === null,
 );
+equal('reasoning in <think> goes', cleanSuggestion('<think>they want a column; id fits</think>\n\nid FROM users', 'SELECT ', ''), 'id FROM users');
+equal('...and so does the end of a block opened in the template', cleanSuggestion('a column; id fits</think>\nid', 'SELECT ', ''), 'id');
+check('reasoning cut off by the token limit leaves nothing', cleanSuggestion('<think>they want a column', 'SELECT ', '') === null);
+
+process.stdout.write('\nInline suggestions: reasoning models\n');
+check('an empty reply cut off at the limit was spent thinking', spentOnThinking({ text: '', finishReason: 'length', reasoned: false }));
+check('...as is one that stopped with reasoning beside it', spentOnThinking({ text: '', finishReason: 'stop', reasoned: true }));
+check('...or that is all <think>', spentOnThinking({ text: '<think>the user typed SELECT', finishReason: 'length', reasoned: false }));
+check('an answer is not', !spentOnThinking({ text: ' id', finishReason: 'length', reasoned: true }));
+check('nor is an empty reply from a model that did not reason', !spentOnThinking({ text: '', finishReason: 'stop', reasoned: false }));
 const shownGhost = { pos: 10, text: 'FROM users' };
 equal('typing its next letters keeps the rest', typeThrough(shownGhost, 10, 10, 'FR'), { pos: 12, text: 'OM users' });
 check('typing anything else clears it', typeThrough(shownGhost, 10, 10, 'x') === null);

@@ -4,12 +4,16 @@
 // zooming in, the cursor moving during a hop) stays continuous.
 //
 // The rig moves the whole body (hops, squash and stretch, tilt, the hands on
-// the edge, the read-only padlock, puffs of air) and hands the character a
-// state each frame; ./art.ts draws Star and animates its arms and eyes.
+// the edge, puffs of air, Zs when it dozes), decides what it wears and when, and hands the
+// character a state each frame; ./art.ts draws Star and animates its arms,
+// eyes and glasses.
 
 import { Spring } from '@/lib/spring';
-import type { MascotMood, StarLook } from '@/lib/mascot';
-import { makeStar, STAR, type StarArt, type StarState } from './art';
+import type { DrawnLook, MascotMood } from '@/lib/mascot';
+import { makeStar, STAR, WEAR, type StarArt, type StarState } from './art';
+
+/** What it wears for the connection's mode: reading glasses in Read-only, sunglasses in YOLO. */
+export type Wear = 'reading' | 'shades' | null;
 
 export const { W, H, PEEK } = STAR;
 
@@ -29,8 +33,6 @@ export interface MotionElements {
   art: SVGSVGElement;
   /** Puffs of air. */
   fx: SVGSVGElement;
-  /** The padlock shown in Read-only mode. */
-  badge: SVGSVGElement;
   /** Directional blur for the fastest part of a hop, and the id of its filter. */
   blur: SVGFEGaussianBlurElement;
   blurId: string;
@@ -51,6 +53,24 @@ const LID_CLOSE = { response: 0.06, damping: 1 };
 const LID_OPEN = { response: 0.14, damping: 0.88 };
 const LID_DROWSY = { response: 1.2, damping: 1 };
 const LID_YAWN = { response: 0.45, damping: 1 };
+/** Opening by degrees after squinting at a light window. */
+const LID_ADJUST = { response: 0.35, damping: 1 };
+
+/** How near the cursor must be to the middle of its eyes, px, and for how long, ms, before it goes cross-eyed. */
+const CROSS_RADIUS = 12;
+const CROSS_AFTER = 600;
+/** A Z every this many ms while it dozes. */
+const SNORE_EVERY = 1700;
+/** Petting: rubbing within this many px of its middle, turning direction three times within this many ms. */
+const PET_RADIUS = 22;
+const PET_WINDOW = 1200;
+
+/** Reading glasses drop on with a little bounce on its nose: about 2 px past where they sit, from 34 px up. */
+const SPECS_ON = { response: 0.42, damping: 0.66 };
+const SPECS_OFF = { response: 0.4, damping: 0.9 };
+/** Sliding down its nose to peer over them: no bounce. */
+const SPECS_SLIDE = { response: 0.55, damping: 0.85 };
+const SPECS_PUSH = { response: 0.3, damping: 0.62 };
 
 /** How far behind the eyes the body turns, seconds. Real creatures look first, then turn. */
 const TURN_DELAY = 0.12;
@@ -126,6 +146,8 @@ export class MascotMotion {
   readonly tall = new Spring(0, { response: 0.6, damping: 0.85, precision: 0.002 });
   readonly eyeX = new Spring(0, { ...EYE_TRACKING, precision: 0.005 });
   readonly eyeY = new Spring(0, { ...EYE_TRACKING, precision: 0.005 });
+  /** Cross-eyed, 0..1. */
+  readonly cross = new Spring(0, { response: 0.35, damping: 0.68, precision: 0.002 });
   /** Eyelids: 1 open, 0 shut. */
   readonly lids = new Spring(1, { ...LID_OPEN, precision: 0.002 });
   readonly widen = new Spring(1, { response: 0.3, damping: 0.55, precision: 0.001 });
@@ -135,8 +157,22 @@ export class MascotMotion {
   /** How full the model's context window is, from the Text-to-SQL meter. */
   readonly strain = new Spring(0, { response: 0.5, damping: 0.72, precision: 0.002 });
   readonly grip = new Spring(1, { response: 0.32, damping: 0.6, precision: 0.002 });
-  readonly latch = new Spring(0, { response: 0.3, damping: 0.5, precision: 0.002 });
-  readonly wiggle = new Spring(0, { response: 0.2, damping: 0.2, precision: 0.05 });
+  /** Reading glasses, px from where they sit (see WEAR). */
+  readonly specs = new Spring(WEAR.specsOff, { ...SPECS_ON, precision: 0.02 });
+  /** Sunglasses, flipped up (WEAR.shadesOff) to down (1). Damped low so the flip snaps past and settles. */
+  readonly shades = new Spring(WEAR.shadesOff, { response: 0.36, damping: 0.56, precision: 0.002 });
+  /** The glint across the sunglasses, 0..1. */
+  readonly shine = new Spring(0, { response: 0.5, damping: 1, precision: 0.002 });
+  /** The lower right arm and its hand lifted off the edge, 0..1. Quick, for taps. */
+  readonly tap = new Spring(0, { response: 0.11, damping: 0.7, precision: 0.002 });
+  /** Paws over its eyes, 0..1. */
+  readonly cover = new Spring(0, { response: 0.32, damping: 0.72, precision: 0.002 });
+  /** How far apart the paws are: 0 shut, 1 parted to peek. */
+  readonly part = new Spring(1, { response: 0.16, damping: 0.75, precision: 0.002 });
+  /** Holding its breath through an open transaction, 0..1. */
+  readonly hold = new Spring(0, { response: 0.6, damping: 0.8, precision: 0.002 });
+  /** The fedora, px from where it sits (see WEAR). Drops on with a little bounce. */
+  readonly hat = new Spring(WEAR.hatOff, { response: 0.4, damping: 0.6, precision: 0.02 });
 
   pointer: Point | null = null;
   gaze: Point | null = null;
@@ -145,12 +181,14 @@ export class MascotMotion {
   reach = 0;
   reduced = false;
   onLanded: (() => void) | null = null;
+  /** Being petted starts or stops. */
+  onPetted: ((petted: boolean) => void) | null = null;
 
   private readonly body = [
     this.x, this.y, this.lift, this.rise, this.tilt, this.squash, this.press, this.shake,
     this.nod, this.wag, this.tall,
-    this.eyeX, this.eyeY, this.lids, this.widen, this.joy, this.wince, this.worry, this.strain,
-    this.grip, this.latch, this.wiggle,
+    this.eyeX, this.eyeY, this.cross, this.lids, this.widen, this.joy, this.wince, this.worry, this.strain,
+    this.grip, this.specs, this.shades, this.shine, this.tap, this.cover, this.part, this.hold, this.hat,
   ];
   private springs: Spring[] = this.body;
   private els: MotionElements | null = null;
@@ -175,9 +213,33 @@ export class MascotMotion {
   private blurring = false;
   private puffs: Puff[] = [];
   private readingTimer: ReturnType<typeof setInterval> | undefined;
+  /** Skimming the table in reading glasses: the reading saccades, without the work. */
+  private skimTimer: ReturnType<typeof setInterval> | undefined;
+  private wear: Wear = null;
+  /** Peering over its reading glasses at you. */
+  private peering = false;
+  /** Waiting to go cross-eyed: the cursor has just come to rest on its face. */
+  private parkTimer: ReturnType<typeof setTimeout> | undefined;
+  private snoreTimer: ReturnType<typeof setInterval> | undefined;
+  /** Taps while a slow query runs. */
+  private waiting = false;
+  private tapTimer: ReturnType<typeof setInterval> | undefined;
+  /** Covering its eyes for a destructive approval, and the nervous peeks while it does. */
+  private bracing = false;
+  private peekTimer: ReturnType<typeof setInterval> | undefined;
+  /** A held tilt of the head, degrees, on top of where it is looking: a shrug. */
+  private cocked = 0;
+  /** The statement being written would change every row. */
+  private sweating = false;
+  /** On a production connection: fedora on, no dozing or yawning. */
+  private hatOn = false;
+  /** Rubbing the cursor back and forth over it: when the direction last turned, and which way it is going. */
+  private rub = { dir: 0, x: 0, turns: [] as number[] };
+  private petted = false;
+  private petTimer: ReturnType<typeof setTimeout> | undefined;
   private lifeTimers = new Set<ReturnType<typeof setTimeout>>();
 
-  attach(els: MotionElements, uid: string, look: StarLook) {
+  attach(els: MotionElements, uid: string, look: DrawnLook) {
     this.els = els;
     this.uid = uid;
     this.setLook(look);
@@ -186,7 +248,7 @@ export class MascotMotion {
   }
 
   /** Redraws Star in another colour, eyes or mouth, keeping everything else in motion. */
-  setLook(look: StarLook) {
+  setLook(look: DrawnLook) {
     if (!this.els) return;
     this.art = makeStar(this.els.art, this.uid, look, (fn, ms) =>
       this.after(ms, () => {
@@ -203,12 +265,27 @@ export class MascotMotion {
     cancelAnimationFrame(this.frame);
     this.frame = 0;
     if (this.els) this.els.pose.style.filter = '';
+    this.els?.fx.querySelectorAll('.star-z-at').forEach(z => z.remove());
     this.blurring = false;
     this.els = null;
     this.art = null;
     this.cancelHop();
     clearInterval(this.readingTimer);
     this.readingTimer = undefined;
+    clearInterval(this.skimTimer);
+    this.skimTimer = undefined;
+    clearTimeout(this.parkTimer);
+    this.parkTimer = undefined;
+    clearInterval(this.snoreTimer);
+    this.snoreTimer = undefined;
+    clearInterval(this.tapTimer);
+    this.tapTimer = undefined;
+    clearInterval(this.peekTimer);
+    this.peekTimer = undefined;
+    clearTimeout(this.petTimer);
+    this.petTimer = undefined;
+    this.petted = false;
+    this.peering = false;
     this.lifeTimers.forEach(clearTimeout);
     this.lifeTimers.clear();
     this.puffs.forEach(p => p.el.remove());
@@ -274,12 +351,19 @@ export class MascotMotion {
     };
     this.hop = hop;
     this.scan = null;
+    clearTimeout(this.parkTimer);
+    this.parkTimer = undefined;
+    this.cross.target = 0;
     this.grip.target = 0;
+    // Paws down behind the edge while it crouches.
+    this.cover.target = 0;
     this.squash.velocity -= 0.9; // anticipation
     hop.timer = setTimeout(() => {
       hop.phase = 'air';
       hop.from = { x: this.x.value, y: this.y.value };
       hop.duration = flightTime(hop.from, hop.target);
+      // Nothing hides them below the edge in the air.
+      this.cover.snap(0);
       this.squash.velocity += 0.9; // springs off
       this.kick();
     }, 120);
@@ -306,7 +390,7 @@ export class MascotMotion {
   /** How full the model's context window is: it strains near the limit and worries past it. */
   setStrain(v: number) {
     this.strain.target = clamp(v, 0, 1.25);
-    this.worry.target = v > 1 ? 1 : 0;
+    this.worry.target = this.restingWorry();
     this.kick();
   }
 
@@ -316,7 +400,8 @@ export class MascotMotion {
     this.squash.velocity -= 1.1;
     STAR.puffs.forEach(([x, y], i) => {
       const el = document.createElementNS(SVGNS, 'circle');
-      el.setAttribute('fill', '#ededed');
+      // Theme ink, like the Zs: near-white puffs vanish on a light window.
+      el.style.fill = 'hsl(var(--muted-foreground))';
       el.setAttribute('r', '0');
       this.els!.fx.append(el);
       this.puffs.push({ el, x, y, vx: (i - 1) * 5, born: this.clock + i * 0.07 });
@@ -324,16 +409,500 @@ export class MascotMotion {
     this.kick();
   }
 
-  /** Shows the padlock in Read-only mode: it clicks shut with a little wiggle. */
-  setLatched(on: boolean) {
-    if ((this.latch.target === 1) === on) return;
+  get wearing(): Wear {
+    return this.wear;
+  }
+
+  /**
+   * Puts on what the connection's mode calls for: reading glasses in
+   * Read-only, sunglasses in YOLO, nothing otherwise. Whatever it had on
+   * comes off first.
+   */
+  setWear(wear: Wear) {
+    if (wear === this.wear) return;
+    const was = this.wear;
+    this.wear = wear;
+    if (this.peering) this.endPeer();
     if (this.reduced) {
-      this.latch.snap(on ? 1 : 0);
+      this.specs.snap(wear === 'reading' ? 0 : WEAR.specsOff);
+      this.shades.snap(wear === 'shades' ? 1 : WEAR.shadesOff);
+      this.kick();
+      return;
+    }
+    if (was === 'reading') {
+      this.specs.configure(SPECS_OFF);
+      this.specs.target = WEAR.specsOff;
+      this.specs.velocity -= 40;
+    }
+    if (was === 'shades') this.shades.target = WEAR.shadesOff;
+    const putOn = () => {
+      if (this.wear !== wear) return;
+      if (wear === 'reading') this.putOnSpecs();
+      if (wear === 'shades') this.putOnShades();
+    };
+    if (was) this.after(260, putOn);
+    else putOn();
+    this.kick();
+  }
+
+  /** The reading glasses drop onto its nose; it blinks, then pushes them up. */
+  private putOnSpecs() {
+    this.specs.configure(SPECS_ON);
+    this.specs.target = 0;
+    this.after(280, () => {
+      this.blink(false);
+      this.squash.velocity -= 0.25;
+    });
+    this.after(520, () => this.pushUpSpecs());
+  }
+
+  private pushUpSpecs() {
+    if (this.wear !== 'reading' || this.peering) return;
+    this.specs.configure(SPECS_PUSH);
+    this.specs.target = 0;
+    this.specs.velocity -= 48;
+    this.art?.gesture('nudge');
+  }
+
+  /** The sunglasses flip down; a little tilt of the head, and a glint across the lenses. */
+  private putOnShades() {
+    this.shine.snap(0);
+    this.shades.target = 1;
+    this.after(240, () => {
+      if (this.wear !== 'shades') return;
+      this.tilt.velocity += (Math.random() < 0.5 ? -1 : 1) * 45;
+      this.squash.velocity -= 0.3;
+      this.shine.target = 1;
+    });
+  }
+
+  /**
+   * The connection's mode refused something. In reading glasses it peers
+   * over them at you: they slide down its nose, its eyes look up over the
+   * rims, half-lidded, and after a beat it pushes them back up. Without them
+   * it shakes its head.
+   */
+  refuse() {
+    if (this.reduced) return;
+    if (this.wear !== 'reading' || this.hop) {
+      this.shakeNo();
+      return;
+    }
+    if (this.peering) return;
+    this.peering = true;
+    this.scan = null;
+    this.stopSkim();
+    this.faceHeldUntil = performance.now() + 1650;
+    this.specs.configure(SPECS_SLIDE);
+    this.specs.target = WEAR.peer;
+    // Lowered lids, but not so far that cut-out eyes squash into dots.
+    this.lids.configure(LID_OPEN);
+    this.lids.target = 0.85;
+    this.nod.target = 1.2;
+    this.after(1500, () => {
+      if (!this.peering) return;
+      this.endPeer();
+      this.after(140, () => this.pushUpSpecs());
+    });
+    this.kick();
+  }
+
+  private endPeer() {
+    this.peering = false;
+    this.nod.target = 0;
+    this.lids.configure(this.drowsy ? LID_DROWSY : LID_OPEN);
+    this.lids.target = this.restingLids();
+  }
+
+  /**
+   * The cursor moved. Left on its face for a moment, it goes cross-eyed
+   * trying to look at it; when the cursor leaves, it blinks and shakes it off.
+   */
+  movePointer(p: Point) {
+    this.pointer = p;
+    this.trackRub(p);
+    const near = this.nearFace(p);
+    if (near && this.parkTimer === undefined && this.cross.target === 0) {
+      this.parkTimer = setTimeout(() => {
+        this.parkTimer = undefined;
+        // Not while it reaches for a dragged table, when the cursor has moved
+        // on, or when the cursor is rubbing rather than resting.
+        const rubbing = this.petted || this.rub.turns.some(t => performance.now() - t < CROSS_AFTER);
+        if (this.reduced || this.reach > 0 || rubbing || !this.pointer || !this.nearFace(this.pointer)) return;
+        this.cross.target = 1;
+        this.kick();
+      }, CROSS_AFTER);
+    } else if (!near) {
+      clearTimeout(this.parkTimer);
+      this.parkTimer = undefined;
+      if (this.cross.target === 1) {
+        this.cross.target = 0;
+        this.blink(false);
+        this.wag.velocity += 60;
+      }
+    }
+    this.kick();
+  }
+
+  /** Whether a point is on its face, near the middle of its eyes. */
+  private nearFace(p: Point) {
+    const ex = this.x.value + STAR.eye.x;
+    const ey = this.y.value + this.lift.value + this.rise.value + STAR.eye.y;
+    return Math.hypot(p.x - ex, p.y - ey) < CROSS_RADIUS;
+  }
+
+  // --- being petted ------------------------------------------------------------------
+
+  /**
+   * Rubbing the cursor back and forth over it is petting: three turns of
+   * direction over its body within a moment.
+   */
+  private trackRub(p: Point) {
+    const cx = this.x.value + 32;
+    const cy = this.y.value + this.lift.value + this.rise.value + 32;
+    const over = Math.hypot(p.x - cx, p.y - cy) < PET_RADIUS && p.y < this.edge;
+    if (!over || this.hop) {
+      this.rub.dir = 0;
+      this.rub.turns = [];
+      this.rub.x = p.x;
+      if (this.petted) this.endPetSoon(250);
+      return;
+    }
+    const dx = p.x - this.rub.x;
+    if (Math.abs(dx) < 1.5) return;
+    const dir = Math.sign(dx);
+    this.rub.x = p.x;
+    if (this.rub.dir && dir !== this.rub.dir) {
+      const now = performance.now();
+      this.rub.turns = this.rub.turns.filter(t => now - t < PET_WINDOW).concat(now);
+      if (this.rub.turns.length >= 3) this.pet(dir);
+    }
+    this.rub.dir = dir;
+  }
+
+  /** Petted: a happy squint and rosy cheeks, leaning into each stroke. */
+  private pet(dir: number) {
+    if (this.reduced) return;
+    if (!this.petted) {
+      this.petted = true;
+      clearTimeout(this.parkTimer);
+      this.parkTimer = undefined;
+      this.cross.target = 0;
+      this.joy.target = 1;
+      this.lift.velocity -= 80;
+      this.onPetted?.(true);
+    }
+    this.cocked = dir * 5;
+    this.tilt.velocity += dir * 25;
+    this.endPetSoon(700);
+    this.kick();
+  }
+
+  private endPetSoon(ms: number) {
+    clearTimeout(this.petTimer);
+    this.petTimer = setTimeout(() => this.endPet(), ms);
+  }
+
+  private endPet() {
+    clearTimeout(this.petTimer);
+    this.petTimer = undefined;
+    if (!this.petted) return;
+    this.petted = false;
+    this.cocked = 0;
+    this.rub.turns = [];
+    this.joy.target = this.mood === 'happy' ? 1 : 0;
+    this.onPetted?.(false);
+    // A contented blink once its eyes are open again.
+    this.after(300, () => this.blink(false));
+    this.kick();
+  }
+
+  /**
+   * The window went light: it squints against the glare, then its eyes
+   * adjust by degrees. `whileShut` runs once they are narrowed: the moment
+   * to change its colour without anyone seeing it happen.
+   */
+  squint(whileShut?: () => void) {
+    if (this.reduced) {
+      whileShut?.();
+      return;
+    }
+    this.faceHeldUntil = performance.now() + 1500;
+    this.lids.configure(LID_CLOSE);
+    this.lids.target = 0.2;
+    this.squash.velocity -= 0.5;
+    if (whileShut) this.after(90, whileShut);
+    this.after(650, () => {
+      this.lids.configure(LID_ADJUST);
+      this.lids.target = 0.6;
+    });
+    this.after(1100, () => {
+      this.lids.configure(this.drowsy ? LID_DROWSY : LID_OPEN);
+      this.lids.target = this.restingLids();
+    });
+    this.kick();
+  }
+
+  /**
+   * The window went dark: its eyes open wide to take it in, then a blink.
+   * With `whileShut` it blinks first and that runs with its eyes closed.
+   */
+  widenInDark(whileShut?: () => void) {
+    if (this.reduced) {
+      whileShut?.();
+      return;
+    }
+    const widen = () => {
+      this.widen.target = 1.25;
+      this.widen.velocity += 1.2;
+      this.after(750, () => {
+        this.widen.target = this.hover ? 1.1 : 1;
+        this.blink(false);
+      });
+    };
+    if (whileShut) {
+      this.faceHeldUntil = performance.now() + 300;
+      this.lids.configure(LID_CLOSE);
+      this.lids.target = 0.04;
+      this.after(80, () => {
+        whileShut();
+        this.lids.configure(LID_OPEN);
+        this.lids.target = this.restingLids();
+        widen();
+      });
     } else {
-      this.latch.target = on ? 1 : 0;
+      widen();
+    }
+    this.kick();
+  }
+
+  // --- reacting to results ----------------------------------------------------------
+
+  /** A query found nothing: the upper side arms lift, the head tilts, the eyes go up to one side. */
+  shrug() {
+    if (this.reduced || this.hop) return;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    this.cocked = side * 6;
+    this.scan = { x: side * 0.5, y: -0.7 };
+    // Shoulders up: the body bobs up with the arms.
+    this.lift.velocity -= 130;
+    this.art?.gesture('shrug');
+    this.after(700, () => {
+      this.cocked = 0;
+      this.scan = null;
+    });
+    this.kick();
+  }
+
+  /** A query found more rows than the editor shows: eyes wide, a little round mouth, and it rears back. */
+  whoa() {
+    if (this.reduced || this.hop) return;
+    this.widen.target = 1.32;
+    this.widen.velocity += 2;
+    this.worry.target = 1;
+    this.lift.velocity -= 150;
+    this.tall.target = 0.35;
+    this.after(900, () => {
+      this.widen.target = this.hover ? 1.1 : 1;
+      this.worry.target = this.restingWorry();
+      this.tall.target = 0;
+    });
+    this.kick();
+  }
+
+  /** An agent's write undone: the happy spin played backwards, with a hop and a pleased face. */
+  rewind() {
+    if (this.reduced) return;
+    this.art?.gesture('rewind');
+    this.lift.velocity -= 240;
+    this.tilt.velocity -= (Math.random() < 0.5 ? -1 : 1) * 70;
+    this.joy.target = 1;
+    this.after(1000, () => {
+      this.joy.target = this.mood === 'happy' ? 1 : 0;
+    });
+    this.kick();
+  }
+
+  /**
+   * A query is taking its time: the arm that holds the edge on its right
+   * taps, three at a time, until it finishes. Then it lets its breath out.
+   */
+  setWaiting(on: boolean) {
+    if (on === this.waiting) return;
+    this.waiting = on;
+    clearInterval(this.tapTimer);
+    this.tapTimer = undefined;
+    this.tap.target = 0;
+    if (on) {
+      if (this.reduced) return;
+      const burst = () => [0, 170, 340].forEach(ms => this.after(ms, () => this.tapOnce()));
+      this.tapTimer = setInterval(burst, 1300);
+      burst();
+    } else {
+      this.exhale();
+    }
+    this.kick();
+  }
+
+  private tapOnce() {
+    if (!this.waiting || this.hop) return;
+    this.tap.target = 1;
+    this.after(70, () => {
+      this.tap.target = 0;
+    });
+  }
+
+  /**
+   * An approval for a statement that destroys data is up: it lets go of the
+   * edge and covers its eyes, then peeks between its paws, hiding again now
+   * and then. If it is still hopping onto the dialog, it does this on landing.
+   */
+  setBracing(on: boolean) {
+    if (on === this.bracing) return;
+    this.bracing = on;
+    if (on) this.raisePaws();
+    else this.lowerPaws();
+    this.kick();
+  }
+
+  private raisePaws() {
+    if (!this.bracing || this.hop) return;
+    clearInterval(this.peekTimer);
+    if (this.reduced) {
+      this.cover.snap(1);
+      this.part.snap(1);
+      this.grip.snap(0);
+      return;
+    }
+    this.part.snap(0);
+    this.cover.target = 1;
+    this.grip.target = 0;
+    this.after(650, () => {
+      if (this.bracing) this.part.target = 1;
+    });
+    this.peekTimer = setInterval(() => {
+      if (!this.bracing || this.hop) return;
+      this.part.target = 0;
+      this.after(420, () => {
+        if (this.bracing) this.part.target = 1;
+      });
+      this.kick();
+    }, 2600);
+    this.kick();
+  }
+
+  private lowerPaws() {
+    clearInterval(this.peekTimer);
+    this.peekTimer = undefined;
+    if (this.reduced) {
+      this.cover.snap(0);
+      if (!this.hop) this.grip.snap(1);
+      return;
+    }
+    this.cover.target = 0;
+    // Hopping home: it takes hold again when it lands.
+    if (!this.hop) this.grip.target = 1;
+  }
+
+  // --- what the editor and the connection are up to ------------------------------------
+
+  /**
+   * The statement being written would change every row (no WHERE): a bead
+   * of sweat and a worried brow. When it gets its WHERE, it wipes its brow.
+   */
+  setSweating(on: boolean) {
+    if (on === this.sweating) return;
+    this.sweating = on;
+    this.worry.target = this.restingWorry();
+    if (!this.reduced) {
+      if (on) this.widen.velocity += 1.4;
+      else {
+        this.art?.gesture('wipe');
+        this.squash.velocity -= 0.3;
+      }
+    }
+    this.kick();
+  }
+
+  /** Worried while it sweats over a statement, or while the prompt will not fit. */
+  private restingWorry() {
+    return this.sweating || this.strain.target > 1 ? 1 : 0;
+  }
+
+  /** A transaction is open: it holds its breath, puffed up and mouth pressed shut, until COMMIT or ROLLBACK. */
+  setHolding(on: boolean) {
+    if (on === (this.hold.target === 1)) return;
+    if (this.reduced) {
+      this.hold.snap(on ? 1 : 0);
+    } else {
+      this.hold.target = on ? 1 : 0;
+      // A breath in.
       if (on) {
-        this.squash.velocity -= 0.45;
-        this.wiggle.velocity += 300;
+        this.squash.velocity += 0.5;
+        this.lift.velocity -= 90;
+      }
+    }
+    // Eyes scrunched a little while it holds it; a face without a mouth still shows the effort.
+    this.lids.configure(this.drowsy ? LID_DROWSY : LID_ADJUST);
+    this.lids.target = this.restingLids();
+    this.kick();
+  }
+
+  /** Where its eyelids rest between blinks: heavy when drowsy, scrunched while it holds its breath. */
+  private restingLids() {
+    return this.drowsy ? 0.32 : this.hold.target === 1 ? 0.72 : 1;
+  }
+
+  /** COMMIT: the breath it held comes out in one big exhale. */
+  commit() {
+    this.hold.target = 0;
+    this.lids.target = this.restingLids();
+    this.exhale();
+    this.after(140, () => this.exhale());
+    this.kick();
+  }
+
+  /** ROLLBACK: relief. It sags and shuts its eyes for a moment; nothing to blow out. */
+  rollback() {
+    this.hold.target = 0;
+    if (this.reduced) {
+      this.hold.snap(0);
+      this.lids.target = this.restingLids();
+      this.kick();
+      return;
+    }
+    this.squash.velocity -= 1.3;
+    this.nod.velocity += 120;
+    this.faceHeldUntil = performance.now() + 700;
+    this.lids.configure(LID_ADJUST);
+    this.lids.target = 0.15;
+    this.after(550, () => {
+      this.lids.configure(this.drowsy ? LID_DROWSY : LID_OPEN);
+      this.lids.target = this.restingLids();
+    });
+    this.kick();
+  }
+
+  get onProduction(): boolean {
+    return this.hatOn;
+  }
+
+  /** On a production connection it wears a detective's fedora, which drops onto its head with a little bounce, the top arm tucking away under it. */
+  setHat(on: boolean) {
+    if (on === this.hatOn) return;
+    this.hatOn = on;
+    if (this.reduced) {
+      this.hat.snap(on ? 0 : WEAR.hatOff);
+    } else {
+      this.hat.target = on ? 0 : WEAR.hatOff;
+      if (on) {
+        this.after(250, () => {
+          if (!this.hatOn) return;
+          this.squash.velocity -= 0.45;
+          this.blink(false);
+        });
+      } else {
+        this.hat.velocity -= 60;
       }
     }
     this.kick();
@@ -376,7 +945,16 @@ export class MascotMotion {
     if (drowsy === this.drowsy) return;
     this.drowsy = drowsy;
     this.lids.configure(drowsy ? LID_DROWSY : LID_OPEN);
-    this.lids.target = drowsy ? 0.32 : 1;
+    this.lids.target = this.restingLids();
+    clearInterval(this.snoreTimer);
+    this.snoreTimer = undefined;
+    if (drowsy) {
+      // The first Z once its eyes are mostly shut.
+      this.after(900, () => this.snore());
+      this.snoreTimer = setInterval(() => this.snore(), SNORE_EVERY);
+    } else {
+      this.hushSnores();
+    }
     if (!drowsy) {
       this.widen.velocity += 1.2; // wakes with a little start
       // ...then a yawn and a stretch.
@@ -386,6 +964,36 @@ export class MascotMotion {
       });
     }
     this.kick();
+  }
+
+  /**
+   * A Z floats up from above its head. The float is a CSS animation
+   * (.star-z in index.css), not the spring loop, so a long nap does not keep
+   * the frame loop awake.
+   */
+  private snore() {
+    const fx = this.els?.fx;
+    if (this.reduced || !fx || !this.drowsy) return;
+    // A nap in a hidden window stacks them up while animations are paused: keep the last few.
+    const waiting = fx.querySelectorAll('.star-z-at');
+    if (waiting.length >= 3) waiting[0].remove();
+    const at = document.createElementNS(SVGNS, 'g');
+    at.setAttribute('class', 'star-z-at');
+    at.setAttribute('transform', `translate(${STAR.snore.x} ${STAR.snore.y})`);
+    const z = document.createElementNS(SVGNS, 'path');
+    z.setAttribute('class', 'star-z');
+    z.setAttribute('d', 'M-2 -2.1 H2 L-2 2.1 H2');
+    z.addEventListener('animationend', () => at.remove());
+    at.append(z);
+    fx.append(at);
+  }
+
+  /** Woken: the Zs in the air vanish. */
+  private hushSnores() {
+    this.els?.fx.querySelectorAll('.star-z-at').forEach(at => {
+      at.classList.add('is-hushed');
+      setTimeout(() => at.remove(), 200);
+    });
   }
 
   /** Something new to look at: the eyes perk up and an arm lifts. */
@@ -421,6 +1029,37 @@ export class MascotMotion {
     });
   }
 
+  /**
+   * Skims the table above it like a page: the saccades it reads with while
+   * it works, without the spinning. Its idle moment in reading glasses.
+   */
+  skim(ms = 2600) {
+    if (this.reduced || this.hop || this.scan || this.peering) return;
+    if (this.skimTimer !== undefined || this.readingTimer !== undefined) return;
+    this.eyeX.configure(EYE_READING);
+    this.eyeY.configure(EYE_READING);
+    let step = 0;
+    const next = () => {
+      const [ex, ey] = READING[step++ % READING.length];
+      this.eyeX.target = ex;
+      this.eyeY.target = ey - 0.8;
+      this.kick();
+    };
+    next();
+    this.skimTimer = setInterval(next, 210);
+    this.after(ms, () => this.stopSkim());
+  }
+
+  private stopSkim() {
+    if (this.skimTimer === undefined) return;
+    clearInterval(this.skimTimer);
+    this.skimTimer = undefined;
+    if (this.readingTimer === undefined) {
+      this.eyeX.configure(EYE_TRACKING);
+      this.eyeY.configure(EYE_TRACKING);
+    }
+  }
+
   /** Stretches up tall, arms raised. */
   stretch() {
     if (this.reduced || this.hop) return;
@@ -442,7 +1081,7 @@ export class MascotMotion {
     this.art?.gesture('yawn');
     this.after(1150, () => {
       this.lids.configure(this.drowsy ? LID_DROWSY : LID_OPEN);
-      this.lids.target = this.drowsy ? 0.32 : 1;
+      this.lids.target = this.restingLids();
       this.tall.target = 0;
     });
     this.kick();
@@ -475,7 +1114,7 @@ export class MascotMotion {
     this.after(85, () => {
       // It may have dozed off mid-blink.
       this.lids.configure(this.drowsy ? LID_DROWSY : LID_OPEN);
-      this.lids.target = this.drowsy ? 0.32 : 1;
+      this.lids.target = this.restingLids();
       if (twice) this.after(170, () => this.blink(false));
     });
   }
@@ -489,6 +1128,8 @@ export class MascotMotion {
   }
 
   private setReading(on: boolean) {
+    // A change of mood means something happened: whatever it was skimming can wait.
+    this.stopSkim();
     clearInterval(this.readingTimer);
     this.readingTimer = undefined;
     const eyes = on ? EYE_READING : EYE_TRACKING;
@@ -552,7 +1193,7 @@ export class MascotMotion {
 
   /** Point the eyes at what it is attending to; the body turns toward it a beat later. */
   private aim() {
-    const reading = this.readingTimer !== undefined;
+    const reading = this.readingTimer !== undefined || this.skimTimer !== undefined;
     const target = this.gaze ?? (this.scan ? null : this.pointer);
     let lean = 0;
     if (target) {
@@ -573,6 +1214,11 @@ export class MascotMotion {
       this.eyeX.target = this.jitter.x;
       this.eyeY.target = this.jitter.y;
     }
+    if (this.peering) {
+      // Up over the rims, straight at you.
+      this.eyeX.target = 0;
+      this.eyeY.target = -2.6;
+    }
 
     // Eyes lead; the body turns after them. Keep the lean targets of the last
     // moment and steer by the one from TURN_DELAY ago.
@@ -580,7 +1226,7 @@ export class MascotMotion {
     line.push({ t: this.clock, v: lean });
     while (line.length > 2 && line[1].t <= this.clock - TURN_DELAY) line.shift();
     // Travel is not delayed: it leans into a hop the moment it moves.
-    this.tilt.target = line[0].v + clamp(this.x.velocity / 1500, -1, 1) * 9;
+    this.tilt.target = line[0].v + clamp(this.x.velocity / 1500, -1, 1) * 9 + this.cocked;
   }
 
   /** Move along the arc. Runs after the springs, so the arc has the last word on position. */
@@ -639,6 +1285,8 @@ export class MascotMotion {
     this.cancelHop();
     this.grip.target = 1;
     this.art?.gesture('land', 0.2 + 0.5 * impact);
+    // Landed on a destructive approval: it takes hold, then covers its eyes.
+    if (this.bracing) this.after(220, () => this.raisePaws());
     this.onLanded?.();
   }
 
@@ -664,14 +1312,17 @@ export class MascotMotion {
     els.hands.style.transform = `translate3d(${(this.x.value + this.shake.value * 0.3).toFixed(2)}px, ${handsY.toFixed(2)}px, 0)`;
     els.hands.style.opacity = clamp(grip, 0, 1).toFixed(3);
     els.hands.style.setProperty('--grip', grip.toFixed(3));
+    els.hands.style.setProperty('--tap', clamp(this.tap.value, 0, 1.2).toFixed(3));
 
     const vx = this.x.velocity;
     const vy = this.lift.velocity + this.y.velocity;
     const stretch = this.reduced ? 0 : clamp(Math.abs(vy) / 2800, 0, 0.05);
     const s = this.squash.value;
     const tall = this.tall.value;
-    const sy = (1 + stretch + s + this.strain.value * 0.012 + tall * 0.08) * this.press.value;
-    const sx = (1 - stretch * 0.6 - s * 0.75 + this.strain.value * 0.02 - tall * 0.04) * this.press.value;
+    // A held breath puffs it up, wider more than taller.
+    const held = this.hold.value;
+    const sy = (1 + stretch + s + this.strain.value * 0.012 + tall * 0.08 + held * 0.025) * this.press.value;
+    const sx = (1 - stretch * 0.6 - s * 0.75 + this.strain.value * 0.02 - tall * 0.04 + held * 0.045) * this.press.value;
     const angle = this.tilt.value + this.wag.value;
     els.pose.style.transform = `rotate(${angle.toFixed(2)}deg) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
 
@@ -689,15 +1340,13 @@ export class MascotMotion {
       this.blurring = false;
     }
 
-    const latch = clamp(this.latch.value, 0, 1.4);
-    els.badge.style.transform = `scale(${latch.toFixed(3)}) rotate(${this.wiggle.value.toFixed(2)}deg)`;
-    els.badge.style.opacity = clamp(this.latch.value, 0, 1).toFixed(3);
-
     const st: StarState = {
-      t: this.clock, dt, ex: this.eyeX.value, ey: this.eyeY.value, open: this.lids.value, widen: this.widen.value,
+      t: this.clock, dt, ex: this.eyeX.value, ey: this.eyeY.value, cross: this.cross.value, open: this.lids.value, widen: this.widen.value,
       joy: this.joy.value, wince: this.wince.value, worry: this.worry.value, strain: this.strain.value,
       think: this.readingTimer !== undefined, hover: this.hover, reach: this.reach, rattle: rattling,
-      vx, reduced: this.reduced,
+      vx, specs: this.specs.value, shades: this.shades.value, shine: this.shine.value,
+      tap: this.tap.value, cover: this.cover.value, part: this.part.value,
+      sweat: this.sweating, hold: this.hold.value, hat: this.hat.value, reduced: this.reduced,
     };
     this.art.render(st);
 

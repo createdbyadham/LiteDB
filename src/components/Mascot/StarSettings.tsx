@@ -1,11 +1,13 @@
 import { useLayoutEffect, useRef } from 'react';
+import { useTheme } from 'next-themes';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { DEFAULT_LOOK, mascot, useMascot, type StarLook } from '@/lib/mascot';
+import { DEFAULT_LOOK, mascot, starColor, useMascot, type StarLook } from '@/lib/mascot';
 import { cn } from '@/lib/utils';
 import { AT_REST, makeStar } from './art';
 
 const COLORS: [StarLook['color'], string][] = [
+  ['auto', 'Auto'],
   ['white', 'White'],
   ['graphite', 'Graphite'],
 ];
@@ -23,11 +25,13 @@ const MOUTH: [string, string][] = [
 /** Settings → Star: whether it shows and talks, and its colour, eyes and mouth, with a preview. Applies right away. */
 export function StarSettings() {
   const { look, prefs } = useMascot();
+  const { resolvedTheme } = useTheme();
   const preview = useRef<SVGSVGElement>(null);
+  const color = starColor(look.color, resolvedTheme);
 
   useLayoutEffect(() => {
-    if (preview.current) makeStar(preview.current, 'star-preview', look, () => {}).render(AT_REST);
-  }, [look]);
+    if (preview.current) makeStar(preview.current, 'star-preview', { ...look, color }, () => {}).render(AT_REST);
+  }, [look, color]);
 
   const isDefault =
     look.color === DEFAULT_LOOK.color && look.eyes === DEFAULT_LOOK.eyes && look.mouth === DEFAULT_LOOK.mouth;
@@ -62,7 +66,13 @@ export function StarSettings() {
         />
       </div>
 
-      <Choice label="Colour" options={COLORS} value={look.color} onChange={color => mascot.setLook({ color })} />
+      <Choice
+        label="Colour"
+        options={COLORS}
+        value={look.color}
+        hint={look.color === 'auto' ? 'White in dark mode, graphite in light mode' : undefined}
+        onChange={color => mascot.setLook({ color })}
+      />
       <Choice label="Eyes" options={EYES} value={look.eyes} onChange={eyes => mascot.setLook({ eyes })} />
       <Choice
         label="Mouth"

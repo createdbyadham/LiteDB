@@ -68,6 +68,8 @@ export interface SqlCodeEditorProps {
   onRunAll: () => void;
   onAi: () => void;
   onExplain: () => void;
+  /** The cursor moved without the text changing. Called often: keep it cheap. */
+  onCursorMove?: () => void;
 }
 
 const highlight = HighlightStyle.define([
@@ -203,6 +205,7 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
     onRunAll,
     onAi,
     onExplain,
+    onCursorMove,
   },
   ref,
 ) {
@@ -220,8 +223,8 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
    */
   const lastEmitted = useRef(value);
   const hasErrors = useRef(false);
-  const handlers = useRef({ onChange, onRunStatement, onRunAll, onAi, onExplain, onSuggestionAccepted });
-  handlers.current = { onChange, onRunStatement, onRunAll, onAi, onExplain, onSuggestionAccepted };
+  const handlers = useRef({ onChange, onRunStatement, onRunAll, onAi, onExplain, onSuggestionAccepted, onCursorMove });
+  handlers.current = { onChange, onRunStatement, onRunAll, onAi, onExplain, onSuggestionAccepted, onCursorMove };
   // Read on each pause, like the catalog, so switching connections needs no reconfigure.
   const inlineRef = useRef(inlineSuggestions);
   inlineRef.current = inlineSuggestions;
@@ -281,6 +284,8 @@ export const SqlCodeEditor = forwardRef<SqlCodeEditorHandle, SqlCodeEditorProps>
         ),
         keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
         EditorView.updateListener.of((update) => {
+          // A click or an arrow key: an edit reports through onChange instead.
+          if (update.selectionSet && !update.docChanged) handlers.current.onCursorMove?.();
           if (!update.docChanged) return;
           const text = update.state.doc.toString();
           lastEmitted.current = text;

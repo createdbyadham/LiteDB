@@ -13,7 +13,17 @@ import {
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
 import type { DatabaseSchema } from './schemaTypes';
 import { FEW_SHOT, REPLY_TOKENS, knownContextWindow, withoutSampleValues } from './contextBudget';
-import { INLINE_MAX_TOKENS, INLINE_STOP, cleanSuggestion, fimPrompt, inlineChatMessages, type InlinePrompt } from './inlineSuggest';
+import {
+  INLINE_MAX_TOKENS,
+  INLINE_REASONING_TOKENS,
+  INLINE_STOP,
+  cleanSuggestion,
+  fimPrompt,
+  inlineChatMessages,
+  spentOnThinking,
+  type ChatReply,
+  type InlinePrompt,
+} from './inlineSuggest';
 
 export type { ColumnSchema, DatabaseSchema, SqlDialect, TableSchema } from './schemaTypes';
 
@@ -376,6 +386,7 @@ export interface ConnectionTestResult {
 // Re-create client when settings change
 window.addEventListener('aiSettingsChanged', () => {
   noFillInMiddle.clear();
+  reasoningModels.clear();
   void loadAISettingsAsync().then(() => {
     client = createClient();
   });
@@ -452,28 +463,96 @@ async function ollamaWindow(endpoint: string, model: string): Promise<ContextWin
 /** Room for a short explanation of an error: a few sentences, not an essay. */
 const EXPLAIN_TOKENS = 220;
 
-/** One completion with the active provider, and its model unless another is given. */
+/**
+ * Sampling settings in a form the provider accepts. Claude 4.7 and later
+ * (the Claude 5 defaults included) return a 400 for a temperature below 1,
+ * for a top_p other than its default, and for the two together, so Claude is
+ * sent neither and runs at its defaults.
+ */
+function samplingFor(provider: AIProvider, temperature: number): { temperature?: number; top_p?: number } {
+  return provider === 'anthropic' ? {} : { temperature, top_p: 1.0 };
+}
+
+/** Claude takes only stop sequences with something besides whitespace in them: `\n\n` is a 400. */
+function stopFor(provider: AIProvider, stop: string[] | undefined): string[] | undefined {
+  const usable = provider === 'anthropic' ? stop?.filter((s) => s.trim() !== '') : stop;
+  return usable && usable.length > 0 ? usable : undefined;
+}
+
+/**
+ * Reasoning some servers return beside the answer: `reasoning` (OpenRouter,
+ * Ollama) or `reasoning_content` (DeepSeek, vLLM). Not in the OpenAI types.
+ */
+type ReasoningFields = { reasoning?: unknown; reasoning_content?: unknown };
+
+function replyOf(response: OpenAI.Chat.Completions.ChatCompletion): ChatReply {
+  const choice = response.choices[0];
+  const message = choice?.message as (OpenAI.Chat.Completions.ChatCompletionMessage & ReasoningFields) | undefined;
+  const reasoningText = [message?.reasoning, message?.reasoning_content].some((r) => typeof r === 'string' && r.trim() !== '');
+  const reasoningTokens = response.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+  return {
+    text: message?.content ?? '',
+    finishReason: choice?.finish_reason ?? null,
+    reasoned: reasoningText || reasoningTokens > 0,
+  };
+}
+
+/** One chat completion with the active provider, and its model unless another is given. */
+async function chat(
+  messages: ChatMessage[],
+  maxTokens: number,
+  temperature: number,
+  options: { model?: string; stop?: string[]; maxRetries?: number; extra?: Record<string, unknown> } = {},
+): Promise<ChatReply> {
+  const settings = getSettings();
+  const provider = settings.activeProvider;
+  const model = options.model || settings.configs[provider].modelName || defaultModelFor(provider);
+  const stop = stopFor(provider, options.stop);
+  const body = {
+    messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    ...samplingFor(provider, temperature),
+    max_tokens: maxTokens,
+    model,
+    ...(stop ? { stop } : {}),
+    // Fields the OpenAI types do not know, for a provider that does.
+    ...options.extra,
+  } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
+  const response = await client.chat.completions.create(
+    body,
+    options.maxRetries === undefined ? undefined : { maxRetries: options.maxRetries },
+  );
+  return replyOf(response);
+}
+
+/**
+ * Request fields for inline suggestions that only OpenRouter understands. Its
+ * default routing spreads requests across providers by price: measured with
+ * gpt-oss-120b, a suggestion took 4 to 13 seconds that way, and under one
+ * second from the fastest provider at low reasoning effort. Text to SQL keeps
+ * the defaults, where the answer is worth the wait.
+ */
+function inlineHintsFor(settings: AISettings): Record<string, unknown> | undefined {
+  const endpoint = settings.configs[settings.activeProvider].endpoint;
+  if (!needsEndpoint(settings.activeProvider) || !endpoint) return undefined;
+  let host: string;
+  try {
+    host = new URL(endpoint.trim()).hostname;
+  } catch {
+    return undefined;
+  }
+  if (host !== 'openrouter.ai' && !host.endsWith('.openrouter.ai')) return undefined;
+  // `low`, not `none`: a model that must reason (gpt-oss) refuses `none`.
+  return { provider: { sort: 'latency' }, reasoning: { effort: 'low' } };
+}
+
+/** The text of one chat completion; see chat. */
 async function complete(
   messages: ChatMessage[],
   maxTokens: number,
   temperature: number,
   options: { model?: string; stop?: string[]; maxRetries?: number } = {},
 ): Promise<string> {
-  const settings = getSettings();
-  const model = options.model || settings.configs[settings.activeProvider].modelName || defaultModelFor(settings.activeProvider);
-  const response = await client.chat.completions.create(
-    {
-      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-      temperature,
-      // Claude refuses temperature and top_p together.
-      ...(settings.activeProvider === 'anthropic' ? {} : { top_p: 1.0 }),
-      max_tokens: maxTokens,
-      model,
-      ...(options.stop ? { stop: options.stop } : {}),
-    },
-    options.maxRetries === undefined ? undefined : { maxRetries: options.maxRetries },
-  );
-  return response.choices[0]?.message.content ?? '';
+  return (await chat(messages, maxTokens, temperature, options)).text;
 }
 
 /** The model inline suggestions use: their own if one is set, otherwise the provider's. */
@@ -502,18 +581,44 @@ function refusedRequest(error: unknown): boolean {
   );
 }
 
+/**
+ * Provider, endpoint and model combinations that reason before they answer.
+ * Asked with room to think from then on, so a pause costs one request, not
+ * two.
+ */
+const reasoningModels = new Set<string>();
+
 /** An inline suggestion through chat, for providers and models without fill-in-the-middle. */
-async function chatSuggestion(prompt: InlinePrompt, model: string): Promise<string | null> {
+async function chatSuggestion(prompt: InlinePrompt, model: string, key: string): Promise<string | null> {
   const messages = inlineChatMessages(prompt);
-  let text: string;
-  try {
-    text = await complete(messages, INLINE_MAX_TOKENS, 0, { model, stop: INLINE_STOP, maxRetries: 0 });
-  } catch (error) {
-    // Some models refuse `stop`. The answer is cut where the statement ends anyway.
-    if (!refusedRequest(error) || !/\bstop\b/i.test(error instanceof Error ? error.message : '')) throw error;
-    text = await complete(messages, INLINE_MAX_TOKENS, 0, { model, maxRetries: 0 });
+  const extra = inlineHintsFor(getSettings());
+  const ask = async (thinks: boolean): Promise<ChatReply> => {
+    // Room to think, and no stop sequences: OpenRouter applies them to the
+    // reasoning too, which then ends at its first `;` with no answer. The
+    // answer is cut where the statement ends anyway.
+    if (thinks) return chat(messages, INLINE_REASONING_TOKENS, 0, { model, maxRetries: 0, extra });
+    try {
+      return await chat(messages, INLINE_MAX_TOKENS, 0, { model, stop: INLINE_STOP, maxRetries: 0, extra });
+    } catch (error) {
+      // Some models refuse `stop` ("stop", "'stop'", "stop_sequences"). The answer is cut where the statement ends anyway.
+      if (!refusedRequest(error) || !/\bstop/i.test(error instanceof Error ? error.message : '')) throw error;
+      return chat(messages, INLINE_MAX_TOKENS, 0, { model, maxRetries: 0, extra });
+    }
+  };
+
+  const known = reasoningModels.has(key);
+  let reply = await ask(known);
+  if (!known && spentOnThinking(reply)) {
+    // The short budget went on reasoning and nothing was written: ask again
+    // with room, once, and remember the model.
+    reasoningModels.add(key);
+    console.info(`Inline suggestions: ${model} reasons before it answers, so it gets room to think. A model that does not reason answers faster.`);
+    reply = await ask(true);
   }
-  return cleanSuggestion(text, prompt.prefix, prompt.suffix);
+  if (reply.finishReason === 'length' && spentOnThinking(reply)) {
+    console.warn(`Inline suggestion: ${model} spent all ${INLINE_REASONING_TOKENS} tokens reasoning and wrote no answer.`);
+  }
+  return cleanSuggestion(reply.text, prompt.prefix, prompt.suffix);
 }
 
 export const aiService = {
@@ -592,14 +697,15 @@ export const aiService = {
    * Ollama is asked fill-in-the-middle, with the text after the cursor sent
    * as `suffix`: FIM-trained models such as qwen2.5-coder complete that far
    * better than they follow a chat prompt. A model or server that refuses it
-   * is asked through chat instead, as the other providers are.
+   * is asked through chat instead, as the other providers are. A model that
+   * reasons first is given room to (see chatSuggestion).
    */
   async suggestInline(prompt: InlinePrompt): Promise<string | null> {
     const settings = getSettings();
     const provider = settings.activeProvider;
     const model = inlineModelFor(settings);
-    const fimKey = `${settings.configs[provider].endpoint ?? ''}|${model}`;
-    if (provider !== 'ollama' || noFillInMiddle.has(fimKey)) return chatSuggestion(prompt, model);
+    const key = `${provider}|${settings.configs[provider].endpoint ?? ''}|${model}`;
+    if (provider !== 'ollama' || noFillInMiddle.has(key)) return chatSuggestion(prompt, model, key);
     try {
       const fim = fimPrompt(prompt);
       const response = await client.completions.create(
@@ -609,8 +715,8 @@ export const aiService = {
       return cleanSuggestion(response.choices[0]?.text ?? '', prompt.prefix, prompt.suffix, { fim: true });
     } catch (error) {
       if (!refusedRequest(error)) throw error;
-      const text = await chatSuggestion(prompt, model);
-      noFillInMiddle.add(fimKey);
+      const text = await chatSuggestion(prompt, model, key);
+      noFillInMiddle.add(key);
       return text;
     }
   },
@@ -718,8 +824,7 @@ export const aiService = {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const response = await client.chat.completions.create({
           messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-          temperature: 0,
-          top_p: 1.0,
+          ...samplingFor(settings.activeProvider, 0),
           max_tokens: REPLY_TOKENS,
           model: modelName
         });

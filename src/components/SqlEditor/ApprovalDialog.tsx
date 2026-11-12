@@ -139,6 +139,9 @@ export function ApprovalDialog({
     // not wait on it: there would be no edge left to hold. The nod or the shake
     // of the head plays as it hops home.
     useEffect(() => (open ? mascot.perchOn('approval') : undefined), [open]);
+    // For a statement that destroys data, it covers its eyes and peeks.
+    const destroys = decision?.kind === 'destructive';
+    useEffect(() => (open && destroys ? mascot.brace() : undefined), [open, destroys]);
 
     const approve = () => {
         mascot.gesture('nod');

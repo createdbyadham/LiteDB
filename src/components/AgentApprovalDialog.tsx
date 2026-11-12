@@ -158,8 +158,10 @@ export function AgentApprovalDialog() {
     setSending(false);
   }, [token]);
 
-  // Star hops onto the card while it is up.
+  // Star hops onto the card while it is up, and covers its eyes if the statement destroys data.
   useEffect(() => (token ? mascot.perchOn('approval') : undefined), [token]);
+  const destroys = !!request?.destructive;
+  useEffect(() => (token && destroys ? mascot.brace() : undefined), [token, destroys]);
 
   if (!request) return null;
 

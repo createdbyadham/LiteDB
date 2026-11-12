@@ -7,17 +7,44 @@ import { useSyncExternalStore } from 'react';
 export type MascotMood = 'idle' | 'listening' | 'thinking' | 'happy' | 'error';
 /** Where it peeks from: the status bar, the Text-to-SQL dialog, or the approval dialog. */
 export type MascotPerch = 'home' | 'dialog' | 'approval';
-/** One-off moves, as opposed to the moods it holds. */
-export type MascotGesture = 'exhale' | 'nod' | 'shake' | 'rattle';
+/**
+ * One-off moves, as opposed to the moods it holds. `refuse` is for something
+ * the connection's mode refused: Star picks the reaction (in Read-only it
+ * peers over its reading glasses). `shrug` is a query that found nothing,
+ * `whoa` one that found more than the editor shows, and `rewind` an agent's
+ * write undone. `commit` and `rollback` end a transaction it held its breath
+ * through.
+ */
+export type MascotGesture =
+  | 'exhale' | 'nod' | 'shake' | 'rattle' | 'refuse' | 'shrug' | 'whoa' | 'rewind' | 'commit' | 'rollback';
+
+/** The colours Star is drawn in. */
+export type StarColor = 'white' | 'graphite';
 
 /** How Star looks: a preference, chosen in Settings and kept on this device. */
 export interface StarLook {
-  color: 'white' | 'graphite';
+  /** Auto follows the theme: white on a dark window, graphite on a light one. */
+  color: StarColor | 'auto';
   eyes: 'cutout' | 'bubble' | 'lines' | 'none';
   mouth: boolean;
 }
-export const DEFAULT_LOOK: StarLook = { color: 'white', eyes: 'cutout', mouth: false };
+export const DEFAULT_LOOK: StarLook = { color: 'auto', eyes: 'cutout', mouth: false };
 const LOOK_KEY = 'litedb.star.look';
+
+/** Star's look with its colour settled: what is drawn. */
+export type DrawnLook = Omit<StarLook, 'color'> & { color: StarColor };
+
+/**
+ * The colour to draw Star in: its own, or for Auto the one that stands out
+ * against the theme. White on a light window would lose its cut-out eyes,
+ * which show the background through. Before the theme is known, the class
+ * on <html> (set before the first render) says which it is.
+ */
+export function starColor(color: StarLook['color'], theme: string | undefined): StarColor {
+  if (color !== 'auto') return color;
+  const light = theme ? theme === 'light' : document.documentElement.classList.contains('light');
+  return light ? 'graphite' : 'white';
+}
 
 /** Whether Star shows at all, and whether it talks. */
 export interface StarPrefs {
@@ -40,7 +67,7 @@ function loadLook(): StarLook {
     const saved = JSON.parse(localStorage.getItem(LOOK_KEY) ?? 'null') as Partial<StarLook> | null;
     if (!saved) return DEFAULT_LOOK;
     return {
-      color: ['white', 'graphite'].includes(saved.color as string) ? (saved.color as StarLook['color']) : DEFAULT_LOOK.color,
+      color: ['auto', 'white', 'graphite'].includes(saved.color as string) ? (saved.color as StarLook['color']) : DEFAULT_LOOK.color,
       eyes: ['cutout', 'bubble', 'lines', 'none'].includes(saved.eyes as string) ? (saved.eyes as StarLook['eyes']) : DEFAULT_LOOK.eyes,
       mouth: typeof saved.mouth === 'boolean' ? saved.mouth : DEFAULT_LOOK.mouth,
     };
@@ -82,6 +109,12 @@ export interface MascotState {
   prefs: StarPrefs;
   /** Set while the last query in the SQL editor failed: clicking Star offers to explain or fix it. */
   help: HelpOffer | null;
+  /** A query is taking its time: Star taps an arm and watches for the results. */
+  waiting: boolean;
+  /** An approval for a statement that destroys data is up: Star covers its eyes and peeks. */
+  bracing: boolean;
+  /** The statement being written would change every row (no WHERE): Star sweats until it has one. */
+  sweating: boolean;
 }
 
 let state: MascotState = {
@@ -93,7 +126,12 @@ let state: MascotState = {
   look: loadLook(),
   prefs: loadPrefs(),
   help: null,
+  waiting: false,
+  bracing: false,
+  sweating: false,
 };
+/** Open destructive approvals: the agent's card can sit on top of the editor's dialog. */
+let braces = 0;
 const listeners = new Set<() => void>();
 const gestureListeners = new Set<(gesture: MascotGesture) => void>();
 const timers: Partial<Record<'mood' | 'gaze' | 'say' | 'glance', ReturnType<typeof setTimeout>>> = {};
@@ -226,6 +264,41 @@ export const mascot = {
   /** Offer help with a failed query, or withdraw the offer (null). */
   offerHelp(help: HelpOffer | null) {
     if (help !== state.help) set({ help });
+  },
+  /**
+   * A query is running long: wait, watching `watch` (the results) until it
+   * finishes. False when it finishes, slow or not.
+   */
+  setWaiting(on: boolean, watch?: Element | null) {
+    if (on === state.waiting) return;
+    if (on) {
+      const point = pointOf(watch);
+      if (point) mascot.lookAt(point, 10 * 60_000);
+    } else if (follow) {
+      // Stop watching; a glance at the results in progress finishes on its own.
+      follow = null;
+      if (!glancing) {
+        clearTimeout(timers.gaze);
+        set({ gaze: null });
+      }
+    }
+    set({ waiting: on });
+  },
+  /** The statement being written would change every row, or no longer would. */
+  setSweating(on: boolean) {
+    if (on !== state.sweating) set({ sweating: on });
+  },
+  /** Brace for a destructive statement while its approval is open; call the returned function when it closes. */
+  brace() {
+    braces++;
+    if (!state.bracing) set({ bracing: true });
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      braces--;
+      if (!braces) set({ bracing: false });
+    };
   },
   gesture(gesture: MascotGesture) {
     gestureListeners.forEach(fn => fn(gesture));

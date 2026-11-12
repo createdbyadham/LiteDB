@@ -10,7 +10,7 @@ import type OpenAI from 'openai';
 import { compareResultSets } from './compare';
 import { guardReadOnly } from '../../src/lib/sqlGuard';
 import { splitStatements, tokenize } from '../../src/lib/sqlTokenizer';
-import { classifyScript, classifyStatement } from '../../src/lib/sqlClassifier';
+import { classifyScript, classifyStatement, losesData } from '../../src/lib/sqlClassifier';
 import { evaluateScript } from '../../src/lib/sqlPolicy';
 import { buildCountQuery, buildExplainQuery, buildTableCountQuery, previewStatement } from '../../src/lib/impactPreview';
 import { ROW_PROBE_LIMIT } from '../../src/lib/schemaSamples';
@@ -171,6 +171,58 @@ async function main(): Promise<void> {
         'ALTER that removes a column is destructive',
         classifyStatement(`ALTER TABLE t ${drop} COLUMN c`).kind === 'destructive',
     );
+    // A DROP inside an ALTER that removes a rule rather than data is a schema
+    // change: no typed confirmation, no "destroys data".
+    for (const [form, sql] of [
+        ['NOT NULL', `ALTER TABLE users ALTER COLUMN email ${drop} NOT NULL`],
+        ['a default', `ALTER TABLE users ALTER COLUMN email ${drop} DEFAULT`],
+        ['a constraint', `ALTER TABLE users ${drop} CONSTRAINT IF EXISTS users_email_key`],
+        ['a generated expression', `ALTER TABLE t ALTER COLUMN total ${drop} EXPRESSION`],
+        ['an identity', `ALTER TABLE t ALTER COLUMN id ${drop} IDENTITY IF EXISTS`],
+    ]) {
+        const c = classifyStatement(sql);
+        check(`ALTER that drops ${form} is DDL and keeps its rows`, c.kind === 'ddl' && !c.unbounded);
+    }
+    check(
+        'ALTER that drops a column without the COLUMN keyword is destructive',
+        classifyStatement(`ALTER TABLE t ${drop} c`).kind === 'destructive',
+    );
+    check(
+        'ALTER that drops a column IF EXISTS is destructive',
+        classifyStatement(`ALTER TABLE t ${drop} IF EXISTS c`).kind === 'destructive',
+    );
+    check(
+        'one column drop among harmless drops makes the ALTER destructive',
+        classifyStatement(`ALTER TABLE t ${drop} CONSTRAINT k, ${drop} COLUMN c`).unbounded,
+    );
+    check(
+        'an ALTER that drops nothing it recognises stays destructive',
+        classifyStatement(`ALTER TYPE address ${drop} ATTRIBUTE zip`).kind === 'destructive',
+    );
+    // losesData: the narrower question Star's sweat asks.
+    for (const [sql, loses] of [
+        [`UPDATE users SET paid = 1`, true],
+        [`${del} FROM users`, true],
+        [`${del} FROM users WHERE id = 3`, false],
+        [`TRUNCATE logs`, true],
+        [`${drop} TABLE IF EXISTS tmp`, true],
+        [`${drop} SCHEMA app`, true],
+        [`ALTER TABLE users ${drop} COLUMN age`, true],
+        [`ALTER TABLE users ALTER COLUMN email ${drop} NOT NULL`, false],
+        [`${drop} INDEX idx_users_email`, false],
+        [`${drop} VIEW active_users`, false],
+        [`${drop} MATERIALIZED VIEW totals`, false],
+        [`${drop} FUNCTION f()`, false],
+        [`${drop} TYPE mood CASCADE`, true],
+        [`SELECT 1`, false],
+    ] as const) {
+        check(`${loses ? 'loses' : 'keeps'} data: ${sql.replace(drop, 'DROP').replace(del, 'DELETE')}`, losesData(classifyStatement(sql)) === loses);
+    }
+    check(
+        'the reason says what goes and that the data stays',
+        classifyStatement(`ALTER TABLE users ALTER COLUMN email ${drop} NOT NULL, ALTER COLUMN name ${drop} DEFAULT`).reason ===
+            'drops NOT NULL and a default from users; every row and value stays',
+    );
     check(
         'an unrecognised statement is not waved through',
         classifyStatement('FROBNICATE t').kind === 'unknown',
@@ -223,6 +275,19 @@ async function main(): Promise<void> {
         !evaluateScript(`${del} FROM t WHERE id = 1`, 'guarded', 'user').requireTypedConfirmation,
         'a row count is a better safeguard than friction',
     );
+    {
+        const notNull = `ALTER TABLE users ALTER COLUMN email ${drop} NOT NULL`;
+        const guarded = evaluateScript(notNull, 'guarded', 'user');
+        check(
+            'dropping NOT NULL still asks, but without typed confirmation',
+            guarded.action === 'confirm' && !guarded.requireTypedConfirmation && guarded.kind === 'ddl',
+        );
+        check('Read-only still refuses it', evaluateScript(notNull, 'read-only', 'user').action === 'block');
+        check(
+            'dropping a column still demands typed confirmation',
+            evaluateScript(`ALTER TABLE users ${drop} COLUMN email`, 'guarded', 'user').requireTypedConfirmation,
+        );
+    }
     check(
         'an unrecognised statement is gated as destructive',
         evaluateScript('FROBNICATE t', 'read-only', 'user').action === 'block',

@@ -36,6 +36,13 @@ const WINDOW_AFTER = 5_000;
 export const INLINE_MAX_TOKENS = 64;
 /** A statement ends at a `;` or a blank line, and so does a suggestion. */
 export const INLINE_STOP = [';', '\n\n'];
+/**
+ * Room for a model that reasons before it answers (gpt-oss, the o-series,
+ * Gemini 2.5, Claude 5). Reasoning counts against the reply's token limit, so
+ * at INLINE_MAX_TOKENS such a model runs out before it writes anything. A
+ * ceiling, not a target: the answer is still cut where the statement ends.
+ */
+export const INLINE_REASONING_TOKENS = 2048;
 
 const isWordChar = (ch: string | undefined): boolean => ch !== undefined && /[A-Za-z0-9_$]/.test(ch);
 
@@ -269,6 +276,40 @@ export function inlineChatMessages(prompt: InlinePrompt): ChatMessage[] {
     ];
 }
 
+// --- reasoning models -------------------------------------------------------------------
+
+/**
+ * The answer without reasoning written into it: `<think>` blocks as some
+ * servers return them, one cut off by the token limit, and the end of one
+ * whose start was in the prompt template.
+ */
+function withoutThinking(text: string): string {
+    let rest = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
+    const close = rest.indexOf('</think>');
+    if (close !== -1) rest = rest.slice(close + '</think>'.length);
+    // The break after the reasoning is not part of the answer.
+    return rest === text ? text : rest.replace(/^\s*\n/, '');
+}
+
+/** A chat model's reply, as far as a suggestion is concerned. */
+export interface ChatReply {
+    text: string;
+    /** `length` when the reply hit its token limit. */
+    finishReason: string | null;
+    /** The provider reported reasoning beside the answer: its text, or a count of its tokens. */
+    reasoned: boolean;
+}
+
+/**
+ * A reply with no answer because the model spent it reasoning. At the short
+ * suggestion budget a reasoning model runs out before it writes a word
+ * (`length`), and a provider that applies stop sequences to the reasoning
+ * ends it at the first `;` it thinks. Either way nothing comes back to show.
+ */
+export function spentOnThinking(reply: ChatReply): boolean {
+    return !withoutThinking(reply.text).trim() && (reply.finishReason === 'length' || reply.reasoned);
+}
+
 // --- cleaning the answer -------------------------------------------------------------
 
 /** Where the text before the cursor leaves off: inside a quote or a comment, and how many brackets are open. */
@@ -424,13 +465,13 @@ function dropSuffixOverlap(text: string, suffix: string): string {
 }
 
 /**
- * What to show of a model's answer, or null if nothing is left. Strips code
- * fences, drops text that repeats the prefix (see dropRepeatedPrefix; `fim`
- * says which kind of model answered), stops at the end of the statement, and
- * drops a tail that repeats the start of the suffix.
+ * What to show of a model's answer, or null if nothing is left. Strips
+ * reasoning and code fences, drops text that repeats the prefix (see
+ * dropRepeatedPrefix; `fim` says which kind of model answered), stops at the
+ * end of the statement, and drops a tail that repeats the start of the suffix.
  */
 export function cleanSuggestion(raw: string, prefix: string, suffix: string, options: { fim?: boolean } = {}): string | null {
-    let text = raw.replace(/\r\n?/g, '\n');
+    let text = withoutThinking(raw.replace(/\r\n?/g, '\n'));
     const fence = /^\s*```[\w+-]*[ \t]*\n?/.exec(text);
     if (fence) text = text.slice(fence[0].length);
     const close = text.indexOf('```');

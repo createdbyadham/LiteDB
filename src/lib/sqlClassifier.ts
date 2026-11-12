@@ -105,6 +105,48 @@ const DROP_OBJECTS = new Set([
     'FUNCTION', 'PROCEDURE', 'TYPE', 'EXTENSION', 'MATERIALIZED',
 ]);
 
+/**
+ * What can follow DROP inside an ALTER without taking any data with it, and
+ * how to say it: a constraint, a column's default or NOT NULL, a generated
+ * column's expression (its values stay, as plain data) or an identity
+ * (likewise). Postgres spellings; SQLite's ALTER has none of these, and its
+ * only DROP is DROP COLUMN.
+ */
+const ALTER_DROP_KEEPS_DATA = new Map([
+    ['CONSTRAINT', 'a constraint'],
+    ['DEFAULT', 'a default'],
+    ['NOT', 'NOT NULL'],
+    ['EXPRESSION', 'a generated expression'],
+    ['IDENTITY', 'an identity'],
+]);
+
+/** What a DROP can name that takes rows with it. */
+const DROP_LOSES_ROWS = new Set(['TABLE', 'SCHEMA', 'DATABASE']);
+
+/**
+ * Whether running a statement would lose data the database cannot give back:
+ * an UPDATE or DELETE with no WHERE, a TRUNCATE, dropping a table, schema,
+ * database or column, or any DROP with CASCADE (which can take columns and
+ * tables with it). Narrower than `unbounded`, which also covers dropping an
+ * index, view, trigger or function: those lose a definition, not rows. For
+ * reactions meant for real risk, like Star breaking into a sweat; the safety
+ * gate goes by `kind` and `unbounded`.
+ */
+export function losesData(statement: StatementClassification): boolean {
+    if (!statement.unbounded) return false;
+    if (statement.verb !== 'DROP') return true;
+    const words = tokenize(statement.sql)
+        .filter((t) => t.kind === 'word' && t.depth === 0)
+        .map((t) => t.value);
+    // DROP TABLE, or DROP TEMPORARY TABLE where that is spelled out.
+    return words.includes('CASCADE') || words.slice(1, 3).some((w) => DROP_LOSES_ROWS.has(w));
+}
+
+/** "a", "a and b", "a, b and c". */
+function listOf(items: string[]): string {
+    return items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 /** Index of the first top-level `WHERE`, or -1. */
 function topLevelWhereIndex(tokens: SqlToken[]): number {
     return tokens.findIndex((t) => t.kind === 'word' && t.value === 'WHERE' && t.depth === 0);
@@ -300,27 +342,45 @@ export function classifyStatement(sql: string, recursionDepth = 0): StatementCla
 
         case 'ALTER': {
             const table = extractTarget(trimmed, tokens, 0);
-            // ALTER TABLE t DROP COLUMN c destroys that column's data; every
-            // other ALTER adds, renames or re-types.
-            const drops = tokens.some(
-                (t) => t.kind === 'word' && t.depth === 0 && t.value === 'DROP',
+            // ALTER TABLE t DROP [COLUMN] c destroys that column's data. A
+            // DROP that removes a constraint, a default, NOT NULL, a generated
+            // column's expression or an identity loses nothing: every row and
+            // value is still there afterwards. Each top-level DROP must be one
+            // of those for the ALTER to count as a schema change; any other,
+            // including a form not recognised here, stays destructive.
+            const top = tokens.filter((t) => t.depth === 0);
+            const dropped = top.flatMap((t, i) =>
+                t.kind === 'word' && t.value === 'DROP' ? [top[i + 1]] : [],
             );
-            return drops
-                ? {
-                      ...base,
-                      kind: 'destructive',
-                      verb,
-                      table,
-                      unbounded: true,
-                      reason: `drops part of ${table ?? 'a table'}, destroying the data it holds`,
-                  }
-                : {
-                      ...base,
-                      kind: 'ddl',
-                      verb,
-                      table,
-                      reason: `changes the structure of ${table ?? 'a table'}`,
-                  };
+            const keepsData = (next: SqlToken | undefined) =>
+                next?.kind === 'word' && ALTER_DROP_KEEPS_DATA.has(next.value);
+            if (dropped.some((next) => !keepsData(next))) {
+                return {
+                    ...base,
+                    kind: 'destructive',
+                    verb,
+                    table,
+                    unbounded: true,
+                    reason: `drops part of ${table ?? 'a table'}, destroying the data it holds`,
+                };
+            }
+            if (dropped.length) {
+                const what = [...new Set(dropped.map((next) => ALTER_DROP_KEEPS_DATA.get(next!.value)!))];
+                return {
+                    ...base,
+                    kind: 'ddl',
+                    verb,
+                    table,
+                    reason: `drops ${listOf(what)} from ${table ?? 'a table'}; every row and value stays`,
+                };
+            }
+            return {
+                ...base,
+                kind: 'ddl',
+                verb,
+                table,
+                reason: `changes the structure of ${table ?? 'a table'}`,
+            };
         }
 
         case 'CREATE':

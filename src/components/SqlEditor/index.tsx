@@ -28,7 +28,7 @@ import { evaluateScript, type GateDecision, type Provenance } from '@/lib/sqlPol
 import { previewImpact, type ImpactEstimate, type PreviewRunner } from '@/lib/impactPreview';
 import { activePolicy, auditableStatements, isYolo, recordDecision, ReadOnlyConnectionError } from '@/lib/queryGate';
 import { canValidate, validateScript } from '@/lib/sqlValidator';
-import { classifyStatement } from '@/lib/sqlClassifier';
+import { classifyStatement, losesData } from '@/lib/sqlClassifier';
 import type { AuditDecision, AuditOutcome } from '@/lib/auditLog';
 import { placeAfterStatement, statementAt, statementRanges, type StatementRange } from '@/lib/sqlCursor';
 import { completionName } from '@/lib/types';
@@ -40,6 +40,7 @@ import { dbCancel, newQueryId, type RunError, type StatementResult } from '@/lib
 import { setInTransaction, visibleTables, type OpenConnection } from '@/lib/db/connections';
 import { PgClient } from '@/lib/db/pgClient';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
+import { useInlineSuggestionsSetting } from '@/hooks/useInlineSuggestionsSetting';
 import { ApprovalDialog } from './ApprovalDialog';
 import { SqlCodeEditor, type InlineSuggestionSource, type SqlCodeEditorHandle } from './SqlCodeEditor';
 import { AiQueryDialog } from './AiQueryDialog';
@@ -57,6 +58,8 @@ interface SqlEditorProps {
    */
   requestAiDialog?: { seed?: string } | null;
   onAiDialogRequested?: () => void;
+  /** False while the editor is kept but hidden (another view of the database is showing). */
+  active?: boolean;
 }
 
 /**
@@ -92,6 +95,16 @@ interface Failure {
 }
 
 const ROW_LIMITS = [100, 500, 1000, 5000, 10000];
+/** Rows that make Star say "whoa", when the result was not already cut off at the row limit. */
+const HUGE_RESULT = 5000;
+/**
+ * Star says "whoa" at most this often; a big result in between gets the
+ * usual cheer. With the default limit, any query matching more than 1,000
+ * rows is cut off, so without this it would be a habit rather than a moment.
+ * Shared by every editor tab.
+ */
+const WHOA_EVERY = 10 * 60_000;
+let lastWhoa = -Infinity;
 const LIMIT_KEY = 'editorRowLimit';
 const SCRIPTS_KEY = 'savedScripts';
 
@@ -159,7 +172,7 @@ function ToolbarButton({ label, shortcut, onClick, disabled, children, variant =
   );
 }
 
-const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequested }: SqlEditorProps) => {
+const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequested, active = true }: SqlEditorProps) => {
   const client = conn.client;
   const dialect = conn.dialect;
   const editorRef = useRef<SqlCodeEditorHandle>(null);
@@ -234,6 +247,8 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
   const [saveOpen, setSaveOpen] = useState(false);
   const [scriptName, setScriptName] = useState('');
   const { policy } = useSafetyPolicy();
+  // Suggestions are always off on production; say so when the user expects them.
+  const inlineSuggestionsOn = useInlineSuggestionsSetting();
 
   const [editorFraction, setEditorFraction] = useState(0.5);
   const splitRef = useRef<HTMLDivElement>(null);
@@ -348,6 +363,8 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
     setExplanation(null);
     editorRef.current?.clearErrors();
     const transaction = useTransaction && statements.length > 1 && !managesTransaction(statements);
+    // Still running after two seconds: Star waits, tapping, watching for the results.
+    const slow = setTimeout(() => mascot.setWaiting(true, resultsRef.current), 2000);
     try {
       const response = await client.execute(statements, {
         session: true,
@@ -357,6 +374,12 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         maxRows: rowLimit ?? undefined,
         stopAtLimit: statements.length === 1 && rowLimit !== null,
       });
+      // Star has held its breath since the transaction opened: COMMIT lets it
+      // out, ROLLBACK is a relieved sag.
+      if (conn.inTransaction && !response.inTransaction) {
+        const rolledBack = response.rolledBack || statements.some((s) => /^\s*(rollback|abort)\b/i.test(s));
+        mascot.gesture(rolledBack ? 'rollback' : 'commit');
+      }
       setInTransaction(conn.id, response.inTransaction);
       const result: RunOutcome = {
         statements,
@@ -381,8 +404,17 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         error: response.errors[0]?.message,
       });
       if (!success) markError(response.errors[0], ranges);
-      // Star cheers at a clean run and winces at a failed one.
-      mascot.setMood(success ? 'happy' : 'error', success ? 1200 : 1600);
+      // Star winces at a failed run. At a clean one it cheers, unless the
+      // rows say otherwise: a shrug when a query found nothing, and now and
+      // then a "whoa" when it found more than the editor will show.
+      mascot.setWaiting(false);
+      const huge = !!lastSet && (lastSet.truncated || lastSet.rows.length >= HUGE_RESULT);
+      if (!success) mascot.setMood('error', 1600);
+      else if (lastSet && lastSet.rows.length === 0) mascot.gesture('shrug');
+      else if (huge && Date.now() - lastWhoa >= WHOA_EVERY) {
+        lastWhoa = Date.now();
+        mascot.gesture('whoa');
+      } else mascot.setMood('happy', 1200);
       if (success && writes.some(Boolean)) {
         toast({
           title: rowsAffected === 0 ? 'No rows changed' : 'Done',
@@ -406,12 +438,17 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         limit: rowLimit,
         writes,
       });
-      mascot.setMood('error', 1600);
       if (error instanceof ReadOnlyConnectionError) {
+        // A refusal, not a failure: Star gives you a look rather than a wince.
+        mascot.gesture('refuse');
         toast({ title: 'Read-only connection', description: message, variant: 'destructive' });
+      } else {
+        mascot.setMood('error', 1600);
       }
       return { success: false, errors: [message], rowsAffected: 0, failedStatement: 0 };
     } finally {
+      clearTimeout(slow);
+      mascot.setWaiting(false);
       setRunning(null);
     }
   };
@@ -492,6 +529,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         writes: decision.statements.map((s) => s.kind !== 'read'),
       });
       toast({ title: 'Blocked by connection policy', description: decision.reason, variant: 'destructive' });
+      mascot.gesture('refuse');
       void recordDecision({
         statements: auditableStatements(decision.statements, origin.provenance, decision.appliedPolicy),
         decision: 'blocked',
@@ -735,6 +773,40 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
     });
   }, [failure, explaining, fixState?.loading]);
   useEffect(() => () => mascot.offerHelp(null), []);
+
+  // Star sweats while the statement under the cursor (the one Mod+Enter would
+  // run) would lose data: an UPDATE or DELETE with no WHERE, a TRUNCATE, a
+  // dropped table or column. It wipes its brow once that changes. Checked a
+  // moment after typing stops or the cursor settles, so a WHERE on its way
+  // does not count. Not in Read-only, where none of it would run, and not
+  // while the editor is hidden behind another view.
+  const sweat = useRef({ policy, active, timer: undefined as ReturnType<typeof setTimeout> | undefined });
+  sweat.current.policy = policy;
+  sweat.current.active = active;
+  const recheckSweat = useCallback(() => {
+    clearTimeout(sweat.current.timer);
+    sweat.current.timer = setTimeout(() => {
+      const editor = editorRef.current;
+      const { policy: mode, active: shown } = sweat.current;
+      const statement = editor && shown && mode !== 'read-only' ? statementAt(editor.getValue(), editor.getCursor()) : null;
+      mascot.setSweating(!!statement?.sql.trim() && losesData(classifyStatement(statement.sql)));
+    }, 600);
+  }, []);
+  useEffect(() => {
+    if (active) {
+      recheckSweat();
+    } else {
+      clearTimeout(sweat.current.timer);
+      mascot.setSweating(false);
+    }
+  }, [activeTab.sql, policy, active, recheckSweat]);
+  useEffect(() => {
+    const state = sweat.current;
+    return () => {
+      clearTimeout(state.timer);
+      mascot.setSweating(false);
+    };
+  }, []);
 
   // Results arriving are something that changed: Star glances at them.
   useEffect(() => {
@@ -1020,7 +1092,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
 
       <div className="flex min-h-0 flex-1">
         <div ref={splitRef} className="flex min-w-0 flex-1 flex-col">
-          <div style={{ height: `${editorFraction * 100}%` }} className="min-h-0">
+          <div style={{ height: `${editorFraction * 100}%` }} className="relative min-h-0">
             <SqlCodeEditor
               ref={editorRef}
               docKey={activeTab.id}
@@ -1048,7 +1120,13 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
               onRunAll={runAll}
               onAi={() => setAiOpen(true)}
               onExplain={() => void explainQuery()}
+              onCursorMove={recheckSweat}
             />
+            {conn.production && inlineSuggestionsOn && (
+              <p className="pointer-events-none absolute bottom-2 right-4 select-none rounded bg-background/90 px-1.5 text-[11px] text-muted-foreground">
+                Inline suggestions are off on production connections
+              </p>
+            )}
           </div>
           <div
             onMouseDown={startSplitDrag}

@@ -334,6 +334,54 @@
   transform: scaleX(calc(0.6 + 0.4 * var(--grip, 1)));
 }
 
+/* While a slow query runs, the right hand taps the edge: --tap (0..1) is set
+   by the spring loop, and the hand follows the arm up and out. Its shadow
+   fades as it lifts. */
+.star-hand[data-tapper] { translate: calc(var(--tap, 0) * 2.4px) calc(var(--tap, 0) * -5.5px); }
+.star-shadow[data-tapper] { opacity: calc(1 - var(--tap, 0) * 0.7); }
+
+/* A bead of sweat runs down its temple and forms again while the statement
+   being written would change every row. CSS, so the frame loop can sleep. */
+.star-sweat {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: star-sweat 1.9s ease-in infinite;
+}
+@keyframes star-sweat {
+  0% { opacity: 0; transform: translateY(-1px) scale(0.5); }
+  18% { opacity: 1; transform: translateY(0) scale(1); }
+  45% { transform: translateY(0.6px) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(6.5px) scale(0.85); }
+}
+
+/* Zs float up while it dozes. CSS rather than the spring loop, like the
+   breath, so a long nap lets the frame loop sleep. In the theme's muted ink,
+   so they show on a light window as well as a dark one. */
+.star-z {
+  fill: none;
+  stroke: hsl(var(--muted-foreground));
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: star-z 2.6s linear forwards;
+}
+@keyframes star-z {
+  0% { opacity: 0; transform: translate(0, 0) rotate(-10deg) scale(0.55); }
+  15% { opacity: 0.85; }
+  25% { transform: translate(3px, -4.2px) rotate(-16deg) scale(0.7); }
+  50% { transform: translate(5.5px, -8.5px) rotate(-4deg) scale(0.85); }
+  60% { opacity: 0.85; }
+  75% { transform: translate(7.5px, -12.8px) rotate(-14deg) scale(1); }
+  100% { opacity: 0; transform: translate(10px, -17px) rotate(-6deg) scale(1.15); }
+}
+.star-z-at { transition: opacity 160ms ease-out; }
+.star-z-at.is-hushed { opacity: 0; }
+
 @media (prefers-reduced-motion: reduce) {
   .star-breathe.is-breathing { animation: none; }
+  .star-z-at { display: none; }
+  .star-sweat { animation: none; }
 }

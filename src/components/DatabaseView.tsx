@@ -17,7 +17,7 @@ import { toast } from '@/hooks/use-toast';
 import { ExportDialog } from '@/components/ExportDialog';
 import { ImportDialog } from '@/components/ImportDialog';
 import { Star } from '@/components/Mascot/Star';
-import { useMascot } from '@/lib/mascot';
+import { mascot, useMascot } from '@/lib/mascot';
 import { SemanticSearch, VectorInspector, SimilarRowsModal, MockDataGenerator } from '@/components/VectorAdmin';
 import {
   refreshConnectionTables,
@@ -48,6 +48,7 @@ const DatabaseView = () => {
 };
 
 function reportError(title: string, error: unknown) {
+  if (error instanceof ReadOnlyConnectionError) mascot.gesture('refuse');
   toast({
     title: error instanceof ReadOnlyConnectionError ? 'Read-only connection' : title,
     description: error instanceof Error ? error.message : String(error),
@@ -464,6 +465,7 @@ function Workspace({ conn }: { conn: OpenConnection }) {
             <div className={activeTab === 'query' ? 'h-full' : 'hidden'}>
               <SqlEditor
                 conn={conn}
+                active={activeTab === 'query'}
                 refreshTables={refreshAfterWrite}
                 requestAiDialog={aiRequest}
                 onAiDialogRequested={clearAiRequest}

@@ -10,6 +10,7 @@ import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { tauriService } from '@/lib/tauri';
 import { ReadOnlyConnectionError } from '@/lib/queryGate';
+import { mascot } from '@/lib/mascot';
 import { quoteIdent, type ColumnInfo } from '@/lib/types';
 import { DELIMITERS, detectDelimiter, headerNames, inferColumnType, parseCsv, sqlTypeFor, type Delimiter, type InferredType } from '@/lib/db/csv';
 import { fileName } from '@/lib/db/savedConnections';
@@ -153,6 +154,7 @@ export function ImportDialog({ open, onOpenChange, conn, initialTable, onImporte
       onImported(tableName);
     } catch (error) {
       if (attempted) auditGridWrite(conn, [attempted], { ok: false, error: error instanceof Error ? error.message : String(error) });
+      if (error instanceof ReadOnlyConnectionError) mascot.gesture('refuse');
       toast({
         title: error instanceof ReadOnlyConnectionError ? 'Read-only connection' : 'Import failed',
         description: error instanceof Error ? error.message : String(error),
