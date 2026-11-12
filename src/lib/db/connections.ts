@@ -254,9 +254,10 @@ export async function testPostgres(config: PgConnectConfig): Promise<OpenInfo> {
 }
 
 export async function openPostgres(config: PgConnectConfig, meta: ConnectMeta): Promise<OpenConnection> {
-    // Identity is host, port and database, never credentials, so policies
-    // and audit history follow the database, whichever user connects.
-    const id = postgresConnectionId(config.host, config.port, config.database);
+    // Which database, never the password: policies and audit history follow
+    // the database whichever role connects. On Supabase the project ref is
+    // the only part of the username that matters; the role itself does not.
+    const id = postgresConnectionId(config.host, config.port, config.database, config.username);
     const existing = getOpenConnection(id);
     if (existing) {
         activateConnection(id);

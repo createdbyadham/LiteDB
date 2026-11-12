@@ -167,14 +167,27 @@ function parseMaxRows(raw: string | undefined): number {
     return value;
 }
 
-/** Host, port and database from a Postgres URL, for the connection identity. */
+/**
+ * Host, port and database from a Postgres URL, for the connection identity.
+ * The username is passed only so a Supabase pooler URL is named after its
+ * project; the password is not part of the id.
+ */
 function describePostgres(url: string): string {
     try {
         const parsed = new URL(url);
+        // `postgres:` is not a special scheme, so the username comes back
+        // percent-encoded. A raw `%` is not an escape; keep it as written.
+        let username = parsed.username;
+        try {
+            username = decodeURIComponent(username);
+        } catch {
+            // already the raw text
+        }
         return postgresConnectionId(
             parsed.hostname || 'localhost',
             parsed.port || 5432,
             decodeURIComponent(parsed.pathname.replace(/^\//, '')) || 'postgres',
+            username,
         );
     } catch {
         // A connection string pg accepts but URL does not (a bare keyword/value

@@ -34,6 +34,17 @@ pub fn float_value(v: f64) -> Value {
     }
 }
 
+/// `real` is float4. Casting it with `as f64` keeps the extra bits, so `0.1`
+/// reaches the grid as `0.10000000149011612`. Display is the shortest decimal
+/// that round-trips the f32; that decimal, read as f64, is what JSON can hold.
+/// NaN and the infinities still go through `float_value`.
+pub fn float32_value(v: f32) -> Value {
+    match v.to_string().parse::<f64>() {
+        Ok(n) => float_value(n),
+        Err(_) => float_value(v as f64),
+    }
+}
+
 pub fn blob_value(bytes: &[u8], full: bool) -> Value {
     if full || bytes.len() <= BLOB_INLINE_LIMIT {
         json!({
@@ -66,6 +77,19 @@ mod tests {
         assert_eq!(float_value(f64::NAN), json!("NaN"));
         assert_eq!(float_value(f64::INFINITY), json!("Infinity"));
         assert_eq!(float_value(f64::NEG_INFINITY), json!("-Infinity"));
+    }
+
+    #[test]
+    fn real_float4_uses_the_shortest_round_trip_decimal() {
+        assert_eq!(float32_value(0.1), json!(0.1));
+        assert_ne!(float_value(0.1f32 as f64), json!(0.1));
+        for value in [0.1f32, -0.1, 0.3, 1.0, -2.5, 1.0e-20, 3.4028234e38] {
+            let parsed = float32_value(value).as_f64().expect("finite") as f32;
+            assert_eq!(parsed, value, "{value}");
+        }
+        assert_eq!(float32_value(f32::NAN), json!("NaN"));
+        assert_eq!(float32_value(f32::INFINITY), json!("Infinity"));
+        assert_eq!(float32_value(f32::NEG_INFINITY), json!("-Infinity"));
     }
 
     #[test]

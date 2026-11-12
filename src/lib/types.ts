@@ -16,9 +16,9 @@ export interface TableInfo {
 }
 
 /**
- * Hidden column carrying a row's physical address (SQLite rowid, Postgres
- * ctid) for tables with no primary key, so their rows can still be edited
- * and deleted one at a time. Never shown, never exported.
+ * Hidden column carrying a row's physical address (SQLite rowid, or Postgres
+ * `tableoid` and `ctid`) for tables with no primary key, so their rows can
+ * still be edited and deleted one at a time. Never shown, never exported.
  */
 export const ROW_LOCATOR = '__litedb_row__';
 

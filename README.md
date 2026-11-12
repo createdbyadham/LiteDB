@@ -41,6 +41,8 @@ The installers are not code-signed yet. On Windows, SmartScreen may warn: choose
 
 - **SQLite, opened in place**: files are read and written natively (rusqlite), so a multi-gigabyte database opens as fast as a small one and shares the file with your app or an agent through SQLite's own locking. Writes from another program show up in the grid on their own.
 - **PostgreSQL the way it is used**: every schema the role can see (Supabase's `auth` and `storage` included), paste a `postgres://` URL to fill the form, SSL from off to verify-full with your CA, and SSH tunnels through a bastion with a key, a password or your SSH agent.
+
+  On Supabase, paste the connection string from the project's Connect panel and type the password. The panel shows `[YOUR-PASSWORD]` in its place. Prefer the Session pooler string (port 5432) for a desktop app. The direct connection (`db.<ref>.supabase.co`) is IPv6-only unless the project has the IPv4 add-on. The Transaction pooler (port 6543) works, but `SET` and temporary tables do not last between runs, and Cancel can only stop waiting, not stop the server.
 - **Saved connections**: as many as you like, each with a name and a colour. Passwords and SSH passphrases go to the OS keychain, only if you ask.
 - **Production tag**: a connection tagged production opens read-only, for you and for any agent following the app, and turns the title bar red while it is on screen. Leaving read-only asks first.
 - **Several databases open at once**, as tabs in the title bar. Switching does not reconnect.
@@ -342,11 +344,25 @@ MCP server.
 LiteDB is the server. The agent's app starts `LiteDB --mcp`, which connects to
 the running window, so there is nothing else to install: no Node, no package.
 The agent follows whatever you have open, no paths in the config, no restart
-when you switch database, and its queries run on the app's own connection, so
-a Postgres password never leaves the app. While LiteDB is closed the agent
-still sees its tools, and every call says to open LiteDB. Fastest path:
-Settings → **Agents**, or the status-bar **MCP** chip, which copies the command
-for this install. Host-by-host: [Connect an agent](docs/connect-an-agent.md).
+when you switch database. Its queries run on the app's own connection, so
+`LiteDB --mcp` never hands a Postgres password to the agent. While LiteDB is
+closed the agent still sees its tools, and every call says to open LiteDB.
+Fastest path: Settings → **Agents**, or the status-bar **MCP** chip, which
+copies the command for this install. Host-by-host:
+[Connect an agent](docs/connect-an-agent.md).
+
+While a Postgres connection is on screen, the app also writes that connection
+to `mcp-handoff.json`, password included in plaintext, so the standalone
+package `litedb-mcp` can follow it. The file is in the app's local data
+folder, beside the `audit` folder:
+
+- Windows: `%LOCALAPPDATA%\com.adhamehab.litedb\mcp-handoff.json`
+- macOS: `~/Library/Application Support/com.adhamehab.litedb/mcp-handoff.json`
+- Linux: `~/.local/share/com.adhamehab.litedb/mcp-handoff.json` (`$XDG_DATA_HOME/com.adhamehab.litedb/mcp-handoff.json` when that variable is set)
+
+Disconnecting, or closing the window, deletes the file. Switching to another
+database rewrites it. A crash or a killed process can leave it, password
+included, until the next time the LiteDB window opens, which deletes it on startup.
 
 Windows (the default install path; the app copies yours):
 
@@ -563,7 +579,7 @@ src/lib/
   ├── impactPreview.ts   # exact row counts and EXPLAIN
   ├── auditLog.ts        # append-only JSONL
   ├── queryGate.ts       # per-connection policy, the audit write path
-  ├── mcpHandoff.ts      # file the MCP server reads when you connect in the app
+  ├── mcpHandoff.ts      # mcp-handoff.json for litedb-mcp; Postgres password in plaintext while connected
   ├── mcpAgentConfig.ts  # copy-paste snippets (Claude Code, Cursor, OpenCode, VS Code)
   └── claudeDesktopMcp.ts # Settings → Agents “Add to Claude Desktop”
 ```

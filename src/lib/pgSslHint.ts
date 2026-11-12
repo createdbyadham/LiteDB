@@ -17,3 +17,21 @@ export function pgSslHint(message: string, sslRequired: boolean): string | null 
     }
     return null;
 }
+
+/**
+ * Supabase's `db.<ref>.supabase.co` address is IPv6-only unless the project
+ * bought the IPv4 add-on. On an IPv4-only network the failure is a raw OS
+ * error about an unreachable route, a name that did not resolve, or the
+ * connect giving up. None of those mention Supabase or IPv6. The poolers
+ * (`*.pooler.supabase.com`) are reachable over IPv4, so they get no hint.
+ */
+export function pgSupabaseDirectHint(host: string, message: string): string | null {
+    if (!/^db\.[^.]+\.supabase\.co$/i.test(host.trim())) return null;
+    const unreachable =
+        /unreachable network|unreachable host|network is unreachable|no route to host|ENETUNREACH|EHOSTUNREACH|os error 10051|os error 10065/i;
+    const unresolved =
+        /no such host is known|failed to lookup address information|name or service not known|nodename nor servname|temporary failure in name resolution/i;
+    const timedOut = /timed out|\btimeout\b|ETIMEDOUT|os error 10060|deadline has elapsed|did not properly respond/i;
+    if (!unreachable.test(message) && !unresolved.test(message) && !timedOut.test(message)) return null;
+    return "Supabase's direct connection (db.<ref>.supabase.co) is IPv6-only unless the project has the IPv4 add-on, and this network can't reach it. In Supabase, open Connect and copy the Session pooler string instead (port 5432).";
+}

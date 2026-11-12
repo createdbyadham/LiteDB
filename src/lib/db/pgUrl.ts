@@ -27,6 +27,8 @@ export interface ParsedPostgresUrl {
     database: string;
     username: string;
     password: string;
+    // Set when the URL's password was a stand-in such as [YOUR-PASSWORD], which was discarded.
+    passwordPlaceholder?: boolean;
     sslMode?: SslMode;
     sslRootCert?: string;
 }
@@ -38,6 +40,40 @@ function decode(text: string): string {
         // A raw `%` in a password is not an escape; keep it as typed.
         return text;
     }
+}
+
+// Dashboards that never show the password again, Supabase in particular, print
+// a stand-in in the connection string. It is the whole password or nothing:
+// a real password that merely contains brackets is left alone. The paste may
+// still be percent-encoded, or already decoded.
+function isPlaceholderPassword(text: string): boolean {
+    let value = text.trim();
+    for (let i = 0; i < 3 && value; i++) {
+        if (placeholderToken(value)) return true;
+        const decoded = decode(value).trim();
+        if (decoded === value) return false;
+        value = decoded;
+    }
+    return placeholderToken(value);
+}
+
+function placeholderToken(value: string): boolean {
+    let inner = value.trim();
+    let bracketed = false;
+    const wrapped = /^(\[|<|\{)\s*([\s\S]*?)\s*(\]|>|\})$/.exec(inner);
+    if (wrapped) {
+        const open = wrapped[1];
+        const close = wrapped[3];
+        if ((open === '[' && close === ']') || (open === '<' && close === '>') || (open === '{' && close === '}')) {
+            inner = wrapped[2].trim();
+            bracketed = true;
+        }
+    }
+    const token = inner.toLowerCase().replace(/[\s_]+/g, '-');
+    if (token === 'your-password' || token === 'yourpassword') return true;
+    // The word "password" on its own is something a person might have set.
+    // The bracketed forms are what the dashboards print.
+    return bracketed && token === 'password';
 }
 
 export function sslModeFromParam(value: string | null | undefined): SslMode | undefined {
@@ -95,10 +131,15 @@ export function parsePostgresUrl(input: string): ParsedPostgresUrl | null {
 
     let username = '';
     let password = '';
+    let passwordPlaceholder = false;
     if (userinfo) {
         const colon = userinfo.indexOf(':');
         username = decode(colon === -1 ? userinfo : userinfo.slice(0, colon));
-        password = colon === -1 ? '' : decode(userinfo.slice(colon + 1));
+        if (colon !== -1) {
+            const rawPassword = userinfo.slice(colon + 1);
+            if (isPlaceholderPassword(rawPassword)) passwordPlaceholder = true;
+            else password = decode(rawPassword);
+        }
     }
 
     // A host list (failover) connects to the first.
@@ -137,7 +178,11 @@ export function parsePostgresUrl(input: string): ParsedPostgresUrl | null {
     if (param('port') && /^\d+$/.test(param('port')!)) port = Number(param('port'));
     if (param('dbname') && !database) database = param('dbname')!;
     if (param('user') && !username) username = param('user')!;
-    if (param('password') && !password) password = param('password')!;
+    if (param('password') && !password && !passwordPlaceholder) {
+        const rawPassword = param('password')!;
+        if (isPlaceholderPassword(rawPassword)) passwordPlaceholder = true;
+        else password = rawPassword;
+    }
 
     let sslMode = sslModeFromParam(param('sslmode'));
     if (!sslMode && (param('ssl') === 'true' || param('ssl') === '1')) sslMode = 'require';
@@ -151,6 +196,7 @@ export function parsePostgresUrl(input: string): ParsedPostgresUrl | null {
         database,
         username,
         password,
+        ...(passwordPlaceholder ? { passwordPlaceholder: true } : {}),
         ...(sslMode ? { sslMode } : {}),
         ...(param('sslrootcert') ? { sslRootCert: param('sslrootcert') } : {}),
     };

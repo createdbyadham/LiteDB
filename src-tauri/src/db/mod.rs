@@ -37,6 +37,8 @@ pub struct RunOptions {
     pub continue_on_error: bool,
     /// Ask the server to stop producing rows once `max_rows` is reached.
     /// Only honoured for a single statement, where nothing else can be hit.
+    /// A transaction pooler has no stable backend to signal, so the extra rows
+    /// are dropped here and the server runs the statement out.
     pub stop_at_limit: bool,
     /// Send blobs whole rather than as a size (exports).
     pub full_blobs: bool,
@@ -143,9 +145,18 @@ pub enum Canceller {
         interrupt: Arc<rusqlite::InterruptHandle>,
         cancelled: Arc<AtomicBool>,
     },
+    /// Direct connection, or a session-mode pooler: the backend process stays
+    /// put, so `pg_cancel_backend` names this run.
     Postgres {
         pool: sqlx::PgPool,
         pid: i32,
+        cancelled: Arc<AtomicBool>,
+    },
+    /// Transaction-mode pooler. The backend process changes with every
+    /// transaction, so a pid would cancel someone else. Wake the run and let
+    /// it drop the connection; the server is not signalled.
+    PostgresDetach {
+        notify: Arc<tokio::sync::Notify>,
         cancelled: Arc<AtomicBool>,
     },
 }
@@ -187,6 +198,49 @@ impl DbState {
                 running.remove(id);
             }
         }
+    }
+
+    pub(crate) async fn cancel(&self, query_id: &str) -> Result<bool, String> {
+        let canceller = self
+            .running
+            .lock()
+            .map_err(|_| "cancel registry poisoned".to_string())?
+            .remove(query_id);
+        match canceller {
+            None => Ok(false),
+            Some(Canceller::Sqlite {
+                interrupt,
+                cancelled,
+            }) => {
+                cancelled.store(true, Ordering::SeqCst);
+                interrupt.interrupt();
+                Ok(true)
+            }
+            Some(Canceller::Postgres {
+                pool,
+                pid,
+                cancelled,
+            }) => {
+                cancelled.store(true, Ordering::SeqCst);
+                postgres::cancel_backend(&pool, pid).await?;
+                Ok(true)
+            }
+            Some(Canceller::PostgresDetach { notify, cancelled }) => {
+                // No server process is signalled. The run is selecting on this
+                // notify, including a statement that has not produced a row.
+                cancelled.store(true, Ordering::SeqCst);
+                notify.notify_one();
+                Ok(true)
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_running(&self, query_id: &str) -> bool {
+        self.running
+            .lock()
+            .map(|running| running.contains_key(query_id))
+            .unwrap_or(false)
     }
 }
 
@@ -365,31 +419,7 @@ pub async fn db_run(
 /// Stop a run. True when something was running under that id.
 #[tauri::command]
 pub async fn db_cancel(state: State<'_, DbState>, query_id: String) -> Result<bool, String> {
-    let canceller = state
-        .running
-        .lock()
-        .map_err(|_| "cancel registry poisoned".to_string())?
-        .remove(&query_id);
-    match canceller {
-        None => Ok(false),
-        Some(Canceller::Sqlite {
-            interrupt,
-            cancelled,
-        }) => {
-            cancelled.store(true, Ordering::SeqCst);
-            interrupt.interrupt();
-            Ok(true)
-        }
-        Some(Canceller::Postgres {
-            pool,
-            pid,
-            cancelled,
-        }) => {
-            cancelled.store(true, Ordering::SeqCst);
-            postgres::cancel_backend(&pool, pid).await?;
-            Ok(true)
-        }
-    }
+    state.cancel(&query_id).await
 }
 
 /// SQLite's `data_version`: changes when another connection writes the file.

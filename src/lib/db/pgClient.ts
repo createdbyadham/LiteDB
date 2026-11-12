@@ -38,6 +38,52 @@ function cell(row: unknown[], i: number): string {
     return value == null ? '' : String(value);
 }
 
+/**
+ * `<tableoid>:<ctid>`. ctid repeats on every partition and inheritance
+ * child, so it is not enough to name one row. It still changes when the
+ * row is updated: an edit of a row someone else just changed matches
+ * nothing, instead of a different row. The ctid comparison stays a TID scan.
+ */
+export const PG_ROW_LOCATOR_EXPR = "tableoid::text || ':' || ctid::text";
+
+/**
+ * tableoid is an unsigned 32-bit oid. A ctid is `(block,offset)`:
+ * the block is 32-bit, the offset 16-bit.
+ */
+const UINT32_MAX = 4294967295n;
+const UINT16_MAX = 65535n;
+const PG_ROW_ADDRESS = /^(0|[1-9][0-9]{0,9}):\((0|[1-9][0-9]{0,9}),(0|[1-9][0-9]{0,4})\)$/;
+
+export interface PgRowAddress {
+    oid: string;
+    block: string;
+    offset: string;
+}
+
+function fitsUint(text: string, max: bigint): boolean {
+    return BigInt(text) <= max;
+}
+
+/**
+ * The pieces of a row address. Null when `value` is not exactly
+ * `<oid>:(block,offset)` within those widths: the pieces are written into SQL.
+ */
+export function parsePgRowAddress(value: unknown): PgRowAddress | null {
+    if (typeof value !== 'string') return null;
+    const match = PG_ROW_ADDRESS.exec(value);
+    if (!match) return null;
+    const [, oid, block, offset] = match;
+    if (!fitsUint(oid, UINT32_MAX) || !fitsUint(block, UINT32_MAX) || !fitsUint(offset, UINT16_MAX)) return null;
+    return { oid, block, offset };
+}
+
+/** WHERE naming the one row `PG_ROW_LOCATOR_EXPR` selected. */
+export function pgLocatorWhere(value: unknown): string {
+    const address = parsePgRowAddress(value);
+    if (!address) throw new Error('This row has no usable address.');
+    return `tableoid = ${address.oid} AND ctid = ${quoteString(`(${address.block},${address.offset})`)}::tid`;
+}
+
 function distanceExpressions(metric: DistanceMetric, left: string, right: string) {
     const distance = `${left} ${metric} ${right}`;
     const similarity =
@@ -286,17 +332,11 @@ export class PgClient extends DbClient {
     }
 
     protected async rowLocator(): Promise<string | null> {
-        return 'ctid::text';
+        return PG_ROW_LOCATOR_EXPR;
     }
 
-    /**
-     * ctid is the row's physical address. It changes when the row is updated,
-     * so an edit to a row someone else just changed matches nothing and is
-     * reported, instead of hitting a different row.
-     */
     protected locatorWhere(value: unknown): string {
-        if (typeof value !== 'string') throw new Error('This row has no usable address.');
-        return `ctid = ${quoteString(value)}::tid`;
+        return pgLocatorWhere(value);
     }
 
     protected containsExpr(column: string, pattern: string): string {

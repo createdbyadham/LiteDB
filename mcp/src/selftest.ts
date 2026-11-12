@@ -226,6 +226,32 @@ async function main(): Promise<void> {
     );
 
     check(
+        'a Supabase pooler URL is the same project as the direct host',
+        (() => {
+            const refA = 'a'.repeat(20);
+            const refB = 'b'.repeat(20);
+            const pooler = 'aws-0-eu-central-1.pooler.supabase.com';
+            const a = loadConfig({
+                LITEDB_DATABASE_URL: `postgres://postgres.${refA}:hunter2@${pooler}:6543/postgres`,
+            }).connectionId;
+            const b = loadConfig({
+                LITEDB_DATABASE_URL: `postgres://postgres.${refB}:hunter2@${pooler}:5432/postgres`,
+            }).connectionId;
+            const direct = loadConfig({
+                LITEDB_DATABASE_URL: `postgres://postgres:hunter2@db.${refA}.supabase.co:5432/postgres`,
+            }).connectionId;
+            return (
+                a !== b &&
+                a === direct &&
+                a === `postgres:db.${refA}.supabase.co:5432/postgres` &&
+                !a.includes('hunter2') &&
+                !a.includes(`postgres.${refA}`)
+            );
+        })(),
+        'the project ref is in the username, and the password must not be',
+    );
+
+    check(
         'the audit path lands under the app identifier',
         defaultAuditPath({ LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' }).includes(
             'com.adhamehab.litedb',

@@ -28,7 +28,7 @@ import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import icon from '/titlebaricon2.png';
 import { tauriService } from '@/lib/tauri';
-import { pgSslHint } from '@/lib/pgSslHint';
+import { pgSslHint, pgSupabaseDirectHint } from '@/lib/pgSslHint';
 import { formatPostgresUrl, looksLikePostgresUrl } from '@/lib/db/pgUrl';
 import { inTauri, type PgConnectConfig } from '@/lib/db/native';
 import { activateConnection, openPostgres, openSqliteFile, useConnections } from '@/lib/db/connections';
@@ -134,7 +134,9 @@ const ConnectionsView = () => {
         navigate('/database');
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const hint = pgSslHint(message, (entry.sslMode ?? 'disable') !== 'disable');
+        const hint =
+          pgSslHint(message, (entry.sslMode ?? 'disable') !== 'disable') ??
+          pgSupabaseDirectHint(entry.host ?? '', message);
         toast({
           title: `Could not connect to ${entry.name}`,
           description: hint ? `${hint} (${message})` : message,

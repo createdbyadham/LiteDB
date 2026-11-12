@@ -8,8 +8,12 @@
 // sent, and they are cheap to pin down.
 
 import { formatPostgresUrl, looksLikePostgresUrl, parsePostgresUrl } from './pgUrl';
+import { postgresConnectionId } from '../connectionId';
+import { pgSupabaseDirectHint } from '../pgSslHint';
 import { detectDelimiter, headerNames, inferColumnType, parseCsv, sqlTypeFor } from './csv';
 import { cellText, formatRows, sqlLiteral } from './sqlLiteral';
+import { refusedEditMessage } from './client';
+import { PG_ROW_LOCATOR_EXPR, parsePgRowAddress, pgLocatorWhere } from './pgClient';
 import { OmittedBlob } from './blob';
 import { asJsonDocument, parseCellText, typeFamily } from './cellParse';
 import { placeAfterStatement, statementAt, statementRanges } from '../sqlCursor';
@@ -90,6 +94,151 @@ check(
     'the URL written back leaves the password out',
     formatPostgresUrl({ host: 'h', port: 5432, database: 'd b', username: 'u', password: 'secret', sslMode: 'require' }) ===
         'postgresql://u@h:5432/d%20b?sslmode=require',
+);
+
+process.stdout.write('\nPostgres connection identity\n');
+{
+    // Supabase puts the project in the username. These refs are the 20-character ids it issues.
+    const refA = 'a'.repeat(20);
+    const refB = 'b'.repeat(20);
+    const sessionHost = 'aws-0-eu-central-1.pooler.supabase.com';
+    const transactionHost = 'aws-1-eu-central-1.pooler.supabase.com';
+    const directHost = `db.${refA}.supabase.co`;
+    const canonical = `postgres:${directHost}:5432/postgres`;
+
+    const session = postgresConnectionId(sessionHost, 5432, 'postgres', `postgres.${refA}`);
+    const transaction = postgresConnectionId(transactionHost, 6543, 'postgres', `postgres.${refA}`);
+    const direct = postgresConnectionId(directHost, 5432, 'postgres', 'postgres');
+    const other = postgresConnectionId(sessionHost, 5432, 'postgres', `postgres.${refB}`);
+
+    check(
+        'two Supabase projects on one pooler get different ids',
+        session !== other && other === `postgres:db.${refB}.supabase.co:5432/postgres`,
+        `${session} vs ${other}`,
+    );
+    check(
+        'direct host, session pooler and transaction pooler share one id',
+        direct === session && session === transaction && direct === canonical,
+        `direct ${direct}, session ${session}, transaction ${transaction}`,
+    );
+    equal('the dedicated pooler on the direct host shares that id', postgresConnectionId(directHost, '6543', 'postgres', 'postgres'), canonical);
+    equal(
+        'the direct host is matched ignoring case',
+        postgresConnectionId(`DB.${refA.toUpperCase()}.SUPABASE.CO`, 5432, 'postgres', 'postgres'),
+        canonical,
+    );
+    equal(
+        'the pooler host is matched ignoring case',
+        postgresConnectionId(sessionHost.toUpperCase(), '6543', 'postgres', `Postgres.${refA.toUpperCase()}`),
+        canonical,
+    );
+    equal(
+        "a pooler host with no project ref keeps today's id",
+        postgresConnectionId(sessionHost, 6543, 'postgres', 'postgres'),
+        `postgres:${sessionHost}:6543/postgres`,
+    );
+    equal(
+        "a dotted user that is not a ref keeps today's id on the pooler",
+        postgresConnectionId(sessionHost, 5432, 'postgres', 'john.doe'),
+        `postgres:${sessionHost}:5432/postgres`,
+    );
+    equal(
+        "a direct host on another port keeps today's id",
+        postgresConnectionId(directHost, 5433, 'postgres', 'postgres'),
+        `postgres:${directHost}:5433/postgres`,
+    );
+    equal("a normal host keeps today's id", postgresConnectionId('db.internal', 5433, 'shop', 'someone'), 'postgres:db.internal:5433/shop');
+    equal(
+        "a dotted username on a normal host keeps today's id",
+        postgresConnectionId('db.example.com', 5432, 'shop', 'john.doe'),
+        'postgres:db.example.com:5432/shop',
+    );
+    equal('the role is not part of the id', postgresConnectionId(sessionHost, 6543, 'postgres', `service_role.${refA}`), canonical);
+}
+
+// Supabase prints a stand-in instead of the password, and its direct host is IPv6-only.
+process.stdout.write('\nSupabase placeholders and direct host\n');
+const supabaseDirect = 'db.abcdefghijklmnopqrst.supabase.co';
+const ipv6Hint =
+    "Supabase's direct connection (db.<ref>.supabase.co) is IPv6-only unless the project has the IPv4 add-on, and this network can't reach it. In Supabase, open Connect and copy the Session pooler string instead (port 5432).";
+equal(
+    'a Supabase direct URL drops [YOUR-PASSWORD]',
+    parsePostgresUrl(`postgresql://postgres:[YOUR-PASSWORD]@${supabaseDirect}:5432/postgres`),
+    {
+        host: supabaseDirect,
+        port: 5432,
+        database: 'postgres',
+        username: 'postgres',
+        password: '',
+        passwordPlaceholder: true,
+    },
+);
+equal(
+    'a Supabase pooler URL drops [YOUR-PASSWORD]',
+    parsePostgresUrl('postgresql://postgres.abcdefghijklmnopqrst:[YOUR-PASSWORD]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres'),
+    {
+        host: 'aws-0-eu-central-1.pooler.supabase.com',
+        port: 6543,
+        database: 'postgres',
+        username: 'postgres.abcdefghijklmnopqrst',
+        password: '',
+        passwordPlaceholder: true,
+    },
+);
+for (const placeholder of [
+    '[your-password]',
+    '[YOUR_PASSWORD]',
+    '[PASSWORD]',
+    '<password>',
+    'YOUR-PASSWORD',
+    'YOUR PASSWORD',
+    '[ YOUR-PASSWORD ]',
+    '%5BYOUR-PASSWORD%5D',
+    '%3Cpassword%3E',
+]) {
+    const parsed = parsePostgresUrl(`postgresql://postgres:${placeholder}@h/db`);
+    equal(`placeholder ${placeholder} is not a password`, parsed?.password, '');
+    check(`placeholder ${placeholder} is flagged`, parsed?.passwordPlaceholder === true);
+}
+{
+    const kept = parsePostgresUrl(`postgresql://postgres:sec[ret]@${supabaseDirect}:5432/postgres`);
+    equal('a real password with brackets is kept', kept?.password, 'sec[ret]');
+    check('and it is not a placeholder', kept?.passwordPlaceholder !== true);
+}
+equal('a password that only contains the placeholder text is kept', parsePostgresUrl('postgres://u:x[YOUR-PASSWORD]y@h/db')?.password, 'x[YOUR-PASSWORD]y');
+equal('my[password] is kept', parsePostgresUrl('postgres://u:my[password]@h/db')?.password, 'my[password]');
+equal('the word password on its own is kept', parsePostgresUrl('postgres://u:password@h/db')?.password, 'password');
+{
+    const fromQuery = parsePostgresUrl(`postgresql://postgres@${supabaseDirect}:5432/postgres?password=%5BYOUR-PASSWORD%5D`);
+    equal('a placeholder in the query string is dropped', fromQuery?.password, '');
+    check('and that one is flagged too', fromQuery?.passwordPlaceholder === true);
+}
+for (const message of [
+    'A socket operation was attempted to an unreachable network. (os error 10051)',
+    'os error 10065',
+    'No such host is known',
+    'failed to lookup address information',
+    'Network is unreachable',
+    'No route to host',
+    'ENETUNREACH',
+    'EHOSTUNREACH',
+    'connection timed out',
+    'pool timed out while waiting for an open connection',
+    'error communicating with database: A socket operation was attempted to an unreachable network. (os error 10051)',
+]) {
+    equal(`IPv6 hint for: ${message}`, pgSupabaseDirectHint(supabaseDirect, message), ipv6Hint);
+}
+equal('the pooler host gets no IPv6 hint', pgSupabaseDirectHint('aws-0-eu-central-1.pooler.supabase.com', 'Network is unreachable'), null);
+equal('another host gets no IPv6 hint', pgSupabaseDirectHint('localhost', 'os error 10051'), null);
+equal(
+    'an authentication error gets no IPv6 hint',
+    pgSupabaseDirectHint(supabaseDirect, 'error returned from database: password authentication failed for user "postgres"'),
+    null,
+);
+equal(
+    'connection refused is not the IPv6 failure',
+    pgSupabaseDirectHint(supabaseDirect, 'No connection could be made because the target machine actively refused it. (os error 10061)'),
+    null,
 );
 
 process.stdout.write('\nCSV\n');
@@ -330,6 +479,69 @@ const priced: UndoRecord = {
 equal('12.5 and "12.50" are the same number, whichever driver read them', planUndo(priced, [[1, '12.50']]).statements, [
     'UPDATE lines SET "price" = \'10.00\' WHERE "id" = 1',
 ]);
+
+process.stdout.write('\nPostgres row address\n');
+equal('a row address is its table oid and its ctid', PG_ROW_LOCATOR_EXPR, "tableoid::text || ':' || ctid::text");
+equal('it parses into the oid, the block and the offset', parsePgRowAddress('16398:(0,1)'), { oid: '16398', block: '0', offset: '1' });
+equal(
+    'and the WHERE names that one row',
+    pgLocatorWhere('16398:(0,1)'),
+    "tableoid = 16398 AND ctid = '(0,1)'::tid",
+);
+equal(
+    'the widest oid, block and offset still name one row',
+    pgLocatorWhere('4294967295:(4294967295,65535)'),
+    "tableoid = 4294967295 AND ctid = '(4294967295,65535)'::tid",
+);
+equal('a zero oid and a zero ctid are well formed', parsePgRowAddress('0:(0,0)'), { oid: '0', block: '0', offset: '0' });
+/** What a bad address is refused with. Empty when it was accepted. */
+function addressError(value: unknown): string {
+    try {
+        pgLocatorWhere(value);
+        return '';
+    } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+    }
+}
+const noAddress = 'This row has no usable address.';
+const malformed = [
+    null,
+    undefined,
+    1,
+    '',
+    '(0,1)',
+    '16398:(0,1); DROP TABLE t',
+    "16398:(0,1)' OR '1'='1",
+    '16398:(0, 1)',
+    '016398:(0,1)',
+    '16398:(00,1)',
+    '16398:(0,01)',
+    '16398:(-1,1)',
+    '16398:(0,1,2)',
+    '16398:(0,65536)',
+    '4294967296:(0,1)',
+    '1:(4294967296,1)',
+    ' 16398:(0,1)',
+    '16398:(0,1) ',
+    '16398:(0,1)\n',
+    '+16398:(0,1)',
+    '1e2:(0,1)',
+    '16398:(0,1)::tid',
+];
+check(
+    'a malformed address is refused, not written into SQL',
+    malformed.every((value) => addressError(value) === noAddress && parsePgRowAddress(value) === null),
+);
+equal(
+    'a write that would change more rows than asked is refused in plain words',
+    refusedEditMessage('Rolled back, nothing changed: this would change 2 rows, more than the 1 allowed.'),
+    'This edit would change 2 rows, so nothing was changed.',
+);
+equal(
+    'and so is one whose count cannot be read',
+    refusedEditMessage('rolled back'),
+    'This edit would change more rows than intended, so nothing was changed.',
+);
 
 process.stdout.write('\nWhere Text to SQL puts its SQL\n');
 /** The script after placing `sql` with the cursor at `offset`, and the placed text read back. */

@@ -38,6 +38,18 @@ const EMPTY_RESULT: StatementResult = {
 /** Rows per INSERT when importing. SQLite caps a VALUES list at 500 terms. */
 const IMPORT_CHUNK_ROWS = 200;
 
+/**
+ * What the grid says when a write would change more rows than the user
+ * picked. The engine's own text is "Rolled back, nothing changed: this would
+ * change N rows, more than the M allowed."
+ */
+export function refusedEditMessage(engineMessage: string): string {
+    const count = /would change (\d+) rows/.exec(engineMessage)?.[1];
+    return count
+        ? `This edit would change ${count} rows, so nothing was changed.`
+        : 'This edit would change more rows than intended, so nothing was changed.';
+}
+
 export function rowsToObjects(result: StatementResult): RowData[] {
     return result.rows.map((row) => {
         const obj: RowData = {};
@@ -283,8 +295,9 @@ export abstract class DbClient {
         if (changed.length === 0) return null;
         const set = changed.map(([column, value]) => `${quoteIdent(column, 'column')} = ${sqlLiteral(value, this.dialect)}`).join(', ');
         const sql = `UPDATE ${this.qualified(table)} SET ${set} WHERE ${this.keyWhere(keyColumns, oldRow)}`;
-        const result = await this.query(sql);
-        if (result.rowsAffected === 0) {
+        const response = await this.runRowWrites([sql], 1);
+        const affected = response.results[response.results.length - 1]?.rowsAffected ?? 0;
+        if (affected === 0) {
             throw new Error('The row no longer exists. It may have been changed or deleted elsewhere.');
         }
         return sql;
@@ -297,9 +310,24 @@ export abstract class DbClient {
         const keyColumns = primaryKeyColumns(await this.getColumns(table));
         const from = this.qualified(table);
         const statements = rows.map((row) => `DELETE FROM ${from} WHERE ${this.keyWhere(keyColumns, row)}`);
-        const response = await this.run(statements, { transaction: true });
-        if (response.errors.length > 0) throw new QueryError(response.errors[0]);
+        await this.runRowWrites(statements, rows.length);
         return statements;
+    }
+
+    /**
+     * Grid writes that name rows with `keyWhere`. `expected` is how many rows
+     * the user meant to change. Both engines roll the transaction back when
+     * more than that would change, so one address shared by every partition,
+     * or a key that is not unique, cannot rewrite the rest.
+     */
+    private async runRowWrites(statements: string[], expected: number): Promise<RunResponse> {
+        const response = await this.run(statements, { transaction: true, maxChanges: expected });
+        const error = response.errors[0];
+        if (error) {
+            if (error.code === 'TooManyChanges') throw new Error(refusedEditMessage(error.message));
+            throw new QueryError(error);
+        }
+        return response;
     }
 
     /**

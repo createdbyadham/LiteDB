@@ -36,8 +36,10 @@ same tools itself: point your agent at `LiteDB --mcp` (Settings → **Agents**
 copies the command for your install), with no Node involved. This package is
 for machines without the app, CI, a server, and keeps working alongside it.
 
-If LiteDB is running, the server follows whatever you have open. Quitting the
-app clears the handoff (and any Postgres password in it). In the app:
+If LiteDB is running, the server follows whatever you have open. Disconnecting
+or quitting deletes the handoff, Postgres password included. A crash or a
+killed process can leave that file until the next time the LiteDB window
+opens, which deletes it on startup. In the app:
 Settings → **Agents**, or the status-bar **MCP** chip. Step-by-step for each
 host: [Connect an agent](../docs/connect-an-agent.md). Requires **Node.js 22.5+**
 with `npx` on the PATH that Claude, Cursor, or VS Code uses. LiteDB does not
@@ -99,7 +101,7 @@ For PostgreSQL, swap the env block:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| *(none)* | the app's currently open database | Handoff file next to the audit log. Removed when the app quits. |
+| *(none)* | the app's currently open database | `mcp-handoff.json` beside the `audit` folder. Removed on disconnect and when the app quits. A crash can leave it until the next time the window opens. |
 | `LITEDB_SQLITE_PATH` |, | Path to a SQLite file. Mutually exclusive with the next. Wins over the app. |
 | `LITEDB_DATABASE_URL` |, | `postgres://…` connection string. Wins over the app. |
 | `LITEDB_POLICY` | app dropdown, or `read-only` for env | `read-only`, `guarded`, or `unrestricted`. |
@@ -111,8 +113,9 @@ For PostgreSQL, swap the env block:
 **Following the app.** Connect in LiteDB and the agent uses that database. The
 status-bar dropdown is the policy. SQLite is the file on disk, not the
 editor's unsaved buffer, save first if you have been editing. An in-memory
-database cannot be shared; save it to a file. Quitting LiteDB deletes the
-handoff file, so this is the *open* connection, not the last one.
+database cannot be shared; save it to a file. Disconnecting or quitting
+deletes the handoff file, so this is the *open* connection, not the last one.
+A crash or a killed process can leave it until the next time the window opens.
 
 **The env default is `read-only`,** which is the opposite of the desktop app's
 `guarded` default and deliberately so. The app's first job is editing tables
@@ -126,13 +129,24 @@ If the app is in YOLO, the handoff maps that down to `guarded`. Setting
 `LITEDB_POLICY=yolo` refuses to start and says why.
 
 **The Postgres password.** Sharing a connection means sharing the credential.
-The handoff file stores it in plaintext in your app-data directory, the same
-exposure as putting it in `claude_desktop_config.json`, in a less
-screenshot-prone place, and out of a file you might sync between machines.
-Disconnecting or quitting the app deletes the file. The cleaner version would
-read it back out of the OS keychain where LiteDB already put it, but that
-needs a native module and would cost the package its "22 MB, no native deps"
-property.
+`LiteDB --mcp` does not: its queries run on the app's own connection, so it
+never hands the password to the agent. This package is separate. While a
+Postgres connection is on screen, the app writes `mcp-handoff.json` with the
+password in plaintext so `litedb-mcp`, started on its own, can follow that
+connection instead of a URL pasted into the host config. Same exposure as
+putting it in `claude_desktop_config.json`, in a less screenshot-prone place,
+and out of a file you might sync between machines. The file is in the app's
+local data folder, beside the `audit` folder:
+
+- Windows: `%LOCALAPPDATA%\com.adhamehab.litedb\mcp-handoff.json`
+- macOS: `~/Library/Application Support/com.adhamehab.litedb/mcp-handoff.json`
+- Linux: `~/.local/share/com.adhamehab.litedb/mcp-handoff.json` (`$XDG_DATA_HOME/com.adhamehab.litedb/mcp-handoff.json` when that variable is set)
+
+Disconnecting, or quitting the app, deletes the file. A crash or a killed
+process can leave it until the next time the LiteDB window opens, which
+deletes it on startup. The cleaner version would read the password back out
+of the OS keychain where LiteDB already put it, but that needs a native
+module and would cost the package its "22 MB, no native deps" property.
 
 ## Tools
 

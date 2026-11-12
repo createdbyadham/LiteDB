@@ -7,9 +7,22 @@ you have open. There is nothing else to install: no Node, no npm package.
 The agent follows the connection on screen, no path, no URL, no restart when
 you switch databases. The status-bar policy is the agent's policy (YOLO maps
 down to guarded), and a connection tagged production starts read-only for the
-agent as well. Its queries run on the app's own connection, so a Postgres
-password stays in the app, and a database behind SSH is reached through the
-app's tunnel while LiteDB has it open.
+agent as well. Its queries run on the app's own connection, so `LiteDB --mcp`
+never hands a Postgres password to the agent. A database behind SSH is reached
+through the app's tunnel while LiteDB has it open.
+
+While a Postgres connection is on screen, the app also writes that connection,
+password included in plaintext, to `mcp-handoff.json`, so the standalone
+package `litedb-mcp` can follow it. A connection through SSH is written as the
+tunnel's local end, so that package uses the app's tunnel while it is open.
+The file is
+`%LOCALAPPDATA%\com.adhamehab.litedb\mcp-handoff.json` on Windows,
+`~/Library/Application Support/com.adhamehab.litedb/mcp-handoff.json` on macOS,
+and `~/.local/share/com.adhamehab.litedb/mcp-handoff.json` on Linux
+(`$XDG_DATA_HOME/com.adhamehab.litedb/mcp-handoff.json` when that variable is
+set). Disconnecting, or closing the window, deletes it. Switching to another
+database rewrites it. A crash or a killed process can leave it, password
+included, until the next time the LiteDB window opens, which deletes it on startup.
 
 While LiteDB is closed, the agent still sees its tools, and every call says to
 open LiteDB. Once the window is up, the next call goes through.
@@ -61,7 +74,8 @@ MCP servers load at host startup. Add the entry, then start a **new** session.
 On a machine without LiteDB, CI, a server, the same tools ship as the npm
 package `litedb-mcp` (Node 22.5+ with `npx` on the host's PATH): set
 `LITEDB_SQLITE_PATH` or `LITEDB_DATABASE_URL`. Run alongside the app, it
-follows the window through a handoff file instead. Details:
+follows the window through `mcp-handoff.json` instead, Postgres password
+included while you are connected. Details:
 [`mcp/README.md`](../mcp/README.md).
 
 ## Tutorial: two prompts

@@ -13,11 +13,12 @@ use sqlx::postgres::{
     PgSslMode,
 };
 use sqlx::{Column, Connection as _, Either, Executor, Row, Statement as _, TypeInfo, ValueRef};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -56,9 +57,104 @@ pub fn ssl_mode(config: &PgConnectConfig) -> Result<PgSslMode, String> {
     })
 }
 
+/// Transaction-mode pooling: each transaction can run on a different backend.
+///
+/// Supabase's shared pooler (`*.pooler.supabase.com`) and dedicated pooler
+/// (`db.<ref>.supabase.co`) do this on port 6543, and so does any PgBouncer or
+/// Supavisor on that port. Neon pooled hosts do it on whatever port they
+/// publish; the first label ends in `-pooler`.
+///
+/// Judged from the host the user configured, not the SSH tunnel's local end.
+pub fn is_transaction_pooler(host: &str, port: u16) -> bool {
+    let host = normalize_host(host);
+    port == 6543 || neon_pooled_host(&host)
+}
+
+/// A pooler, including Supabase's session mode on port 5432.
+///
+/// Session mode keeps one backend per client, so cancel-by-pid still works,
+/// but every client counts against a small project limit.
+pub fn is_pooled_host(host: &str, port: u16) -> bool {
+    let host = normalize_host(host);
+    supabase_shared_pooler(&host)
+        || (port == 6543 && supabase_dedicated_pooler(&host))
+        || neon_pooled_host(&host)
+}
+
+/// Pool size, and how long an idle connection may hold a pooler slot.
+///
+/// `(max_connections, idle_timeout)`. `None` leaves sqlx's default idle timeout.
+fn pool_settings(host: &str, port: u16) -> (u32, Option<Duration>) {
+    if is_pooled_host(host, port) {
+        // The editor session is one more connection on top of the pool.
+        (3, Some(Duration::from_secs(60)))
+    } else {
+        (8, None)
+    }
+}
+
+fn normalize_host(host: &str) -> String {
+    host.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn supabase_shared_pooler(host: &str) -> bool {
+    match host.strip_suffix(".pooler.supabase.com") {
+        Some(prefix) => !prefix.is_empty() && !prefix.ends_with('.'),
+        None => false,
+    }
+}
+
+/// `db.<ref>.supabase.co`
+fn supabase_dedicated_pooler(host: &str) -> bool {
+    let mut parts = host.split('.');
+    matches!(
+        (
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next()
+        ),
+        (Some("db"), Some(reference), Some("supabase"), Some("co"), None) if !reference.is_empty()
+    )
+}
+
+fn neon_pooled_host(host: &str) -> bool {
+    host.split('.')
+        .next()
+        .is_some_and(|label| label.ends_with("-pooler"))
+}
+
 struct Session {
     conn: PgConnection,
-    pid: i32,
+    /// None through a transaction pooler: the next transaction is a different
+    /// process, so this number cannot name the session.
+    pid: Option<i32>,
+}
+
+/// What a run needs besides the statements. Split out so the signature stays short.
+struct RunCtx<'a> {
+    pool: &'a PgPool,
+    /// Backend pid for `pg_cancel_backend`. None when it would hit the wrong process.
+    pid: Option<i32>,
+    cancelled: &'a AtomicBool,
+    /// Set when the user hits Cancel on a transaction pooler.
+    stop: Option<&'a Notify>,
+    transaction_pooler: bool,
+}
+
+struct Executed {
+    response: RunResponse,
+    /// The connection must not be used again. Either the protocol was left
+    /// mid-message, or Cancel on a transaction pooler threw it away.
+    discard: bool,
+}
+
+fn finished(response: RunResponse) -> Executed {
+    Executed {
+        response,
+        discard: false,
+    }
 }
 
 pub struct PgConn {
@@ -67,6 +163,8 @@ pub struct PgConn {
     /// The editor's own connection, opened on first use.
     session: Mutex<Option<Session>>,
     tunnel: Option<ssh::SshTunnel>,
+    /// From the configured host and port, not the tunnel's local address.
+    transaction_pooler: bool,
 }
 
 impl PgConn {
@@ -119,14 +217,26 @@ impl PgConn {
             options = options.ssl_root_cert(cert);
         }
 
-        let pool = PgPoolOptions::new()
-            .max_connections(8)
-            .acquire_timeout(Duration::from_secs(30))
+        // The dial address may be the tunnel's local end. Pooler behaviour
+        // follows the host the user configured.
+        let transaction_pooler = is_transaction_pooler(&config.host, config.port);
+        let (max_connections, idle_timeout) = pool_settings(&config.host, config.port);
+        let mut pool_options = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .acquire_timeout(Duration::from_secs(30));
+        if let Some(idle) = idle_timeout {
+            pool_options = pool_options.idle_timeout(idle);
+        }
+        let pool = pool_options
             .connect_with(options.clone())
             .await
             .map_err(|e| e.to_string())?;
 
+        // Unnamed statements. sqlx's named cache (`sqlx_s_1`) collides on a
+        // transaction pooler, and these errors used to be swallowed, so the
+        // version came back empty.
         let version: String = sqlx::query_scalar("SHOW server_version")
+            .persistent(false)
             .fetch_one(&pool)
             .await
             .unwrap_or_default();
@@ -134,11 +244,20 @@ impl PgConn {
         let read_only: bool = sqlx::query_scalar(
             "SELECT pg_is_in_recovery() OR current_setting('default_transaction_read_only') = 'on'",
         )
+        .persistent(false)
         .fetch_one(&pool)
         .await
         .unwrap_or(false);
         if read_only {
             notices.push("The server only accepts reads (a standby, or a read-only role).".into());
+        }
+        if transaction_pooler {
+            notices.push(
+                "This is a transaction pooler. Cancel stops waiting but cannot stop the server. \
+                 SET and temporary tables do not carry between runs. For a desktop app, Supabase \
+                 recommends the session pooler (same host, port 5432)."
+                    .into(),
+            );
         }
 
         let info = OpenInfo {
@@ -156,6 +275,7 @@ impl PgConn {
                 options,
                 session: Mutex::new(None),
                 tunnel,
+                transaction_pooler,
             },
             info,
         ))
@@ -189,27 +309,36 @@ impl PgConn {
                     let mut conn = PgConnection::connect_with(&self.options)
                         .await
                         .map_err(|e| e.to_string())?;
-                    let pid = backend_pid(&mut conn).await?;
+                    let pid = if self.transaction_pooler {
+                        None
+                    } else {
+                        Some(backend_pid(&mut conn).await?)
+                    };
                     *guard = Some(Session { conn, pid });
                 }
-                let session = guard.as_mut().expect("session was just opened");
-                state.register(
-                    &opts.query_id,
-                    Canceller::Postgres {
-                        pool: self.pool.clone(),
-                        pid: session.pid,
-                        cancelled: cancelled.clone(),
-                    },
-                );
-                let mut response = run_statements(
-                    &mut session.conn,
-                    Some(session.pid),
-                    &self.pool,
-                    statements,
-                    opts,
-                    &cancelled,
-                )
-                .await;
+                let pid = guard.as_ref().and_then(|session| session.pid);
+                let stop = self.arm_cancel(state, opts, &cancelled, pid);
+                let ctx = RunCtx {
+                    pool: &self.pool,
+                    pid,
+                    cancelled: &cancelled,
+                    stop: stop.as_deref(),
+                    transaction_pooler: self.transaction_pooler,
+                };
+                let executed = {
+                    let session = guard.as_mut().expect("session was just opened");
+                    run_statements(&mut session.conn, statements, opts, &ctx).await
+                };
+                if executed.discard {
+                    // Mid-protocol, or Cancel on a pooler. The next run connects again.
+                    // Dropped, not closed: see `discard_pooled`.
+                    drop(guard.take());
+                    let mut response = executed.response;
+                    response.in_transaction = false;
+                    return Ok(response);
+                }
+                let session = guard.as_mut().expect("session still open");
+                let mut response = executed.response;
                 response.in_transaction = in_transaction(&mut session.conn).await;
                 if !response.errors.is_empty() && session.conn.ping().await.is_err() {
                     // The server went away; reconnect on the next run.
@@ -220,27 +349,32 @@ impl PgConn {
             }
 
             let mut conn = self.pool.acquire().await.map_err(|e| e.to_string())?;
-            let pid = if opts.query_id.is_some() {
-                let pid = backend_pid(&mut conn).await?;
-                state.register(
-                    &opts.query_id,
-                    Canceller::Postgres {
-                        pool: self.pool.clone(),
-                        pid,
-                        cancelled: cancelled.clone(),
-                    },
-                );
-                Some(pid)
-            } else {
+            let pid = if self.transaction_pooler || opts.query_id.is_none() {
                 None
+            } else {
+                Some(backend_pid(&mut conn).await?)
+            };
+            let stop = self.arm_cancel(state, opts, &cancelled, pid);
+            let ctx = RunCtx {
+                pool: &self.pool,
+                pid,
+                cancelled: &cancelled,
+                stop: stop.as_deref(),
+                transaction_pooler: self.transaction_pooler,
             };
             if opts.read_only {
-                return Ok(
-                    run_read_only(&mut conn, pid, &self.pool, statements, opts, &cancelled).await,
-                );
+                let executed = run_read_only(&mut conn, statements, opts, &ctx).await;
+                if executed.discard {
+                    discard_pooled(conn);
+                }
+                return Ok(executed.response);
             }
-            let mut response =
-                run_statements(&mut conn, pid, &self.pool, statements, opts, &cancelled).await;
+            let executed = run_statements(&mut conn, statements, opts, &ctx).await;
+            if executed.discard {
+                discard_pooled(conn);
+                return Ok(executed.response);
+            }
+            let mut response = executed.response;
             // A pooled connection must not go back with a transaction open, or the
             // next caller would run inside it.
             let opens_transaction = statements.iter().any(|s| {
@@ -253,6 +387,44 @@ impl PgConn {
             }
             Ok(response)
         })
+    }
+
+    /// Register whatever `db_cancel` needs for this run.
+    ///
+    /// A transaction pooler gets a `Notify` instead of a pid. The returned
+    /// handle has to stay alive until the run finishes, or the permit is dropped
+    /// with it.
+    fn arm_cancel(
+        &self,
+        state: &DbState,
+        opts: &RunOptions,
+        cancelled: &Arc<AtomicBool>,
+        pid: Option<i32>,
+    ) -> Option<Arc<Notify>> {
+        opts.query_id.as_ref()?;
+        if self.transaction_pooler {
+            let notify = Arc::new(Notify::new());
+            state.register(
+                &opts.query_id,
+                Canceller::PostgresDetach {
+                    notify: Arc::clone(&notify),
+                    cancelled: Arc::clone(cancelled),
+                },
+            );
+            Some(notify)
+        } else if let Some(pid) = pid {
+            state.register(
+                &opts.query_id,
+                Canceller::Postgres {
+                    pool: self.pool.clone(),
+                    pid,
+                    cancelled: Arc::clone(cancelled),
+                },
+            );
+            None
+        } else {
+            None
+        }
     }
 }
 
@@ -273,12 +445,26 @@ fn backend_pid(conn: &mut PgConnection) -> BoxFuture<'_, Result<i32, String>> {
 }
 
 pub async fn cancel_backend(pool: &PgPool, pid: i32) -> Result<(), String> {
+    // Unnamed. A named statement is cached on whichever backend drew the
+    // previous transaction, and the next one answers `already exists`.
     sqlx::query("SELECT pg_cancel_backend($1)")
+        .persistent(false)
         .bind(pid)
         .execute(pool)
         .await
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// Drop a pooled connection instead of returning it.
+///
+/// A ping on the way back into the pool would wait for the statement we
+/// stopped reading. Dropping closes the socket at once. `close_hard` does not
+/// over TLS: it sends close_notify and then waits to read, and the server
+/// sends nothing until the statement we stopped waiting for has finished,
+/// which made Cancel on Supabase's pooler take as long as the query.
+fn discard_pooled(conn: sqlx::pool::PoolConnection<sqlx::Postgres>) {
+    drop(conn.detach());
 }
 
 /// `now()` is fixed at the start of the transaction; `statement_timestamp()`
@@ -296,12 +482,27 @@ fn in_transaction(conn: &mut PgConnection) -> BoxFuture<'_, bool> {
     })
 }
 
-fn set_columns(result: &mut StatementResult, row: &PgRow) {
+/// Simple-protocol results name an extension type "?". Blank until the catalog
+/// lookup below replaces it. The oid is how that lookup finds the name.
+fn column_type(col: &sqlx::postgres::PgColumn) -> (String, Option<u32>) {
+    let info = col.type_info();
+    if info.name() == "?" {
+        (String::new(), info.oid().map(|oid| oid.0))
+    } else {
+        (info.name().to_string(), None)
+    }
+}
+
+fn set_columns(result: &mut StatementResult, row: &PgRow) -> Vec<Option<u32>> {
     result.returns_rows = true;
+    let mut oids = Vec::with_capacity(row.columns().len());
     for col in row.columns() {
         result.columns.push(col.name().to_string());
-        result.column_types.push(col.type_info().name().to_string());
+        let (name, oid) = column_type(col);
+        result.column_types.push(name);
+        oids.push(oid);
     }
+    oids
 }
 
 /// One row as JSON values, in column order.
@@ -330,7 +531,7 @@ fn cell(row: &PgRow, i: usize) -> Value {
         return value::float_value(v);
     }
     if let Ok(v) = row.try_get::<f32, _>(i) {
-        return value::float_value(v as f64);
+        return value::float32_value(v);
     }
     if let Ok(v) = row.try_get::<bool, _>(i) {
         return Value::Bool(v);
@@ -401,6 +602,29 @@ fn may_hold_several(sql: &str) -> bool {
     sql.trim_end().trim_end_matches(';').contains(';')
 }
 
+fn stopped_waiting(statement: usize) -> RunError {
+    RunError {
+        statement,
+        // Starts with "Cancelled." so the editor does not offer to "fix" it.
+        message:
+            "Cancelled. LiteDB stopped waiting, but the server may still finish this statement."
+                .into(),
+        code: None,
+        cancelled: true,
+        position: None,
+    }
+}
+
+fn several_statements(statement: usize) -> RunError {
+    RunError {
+        statement,
+        message: "A transaction pooler cannot check a string that may hold several statements. Send one statement per call.".into(),
+        code: None,
+        cancelled: false,
+        position: None,
+    }
+}
+
 /// A run that changes nothing: in a READ ONLY transaction, always rolled back.
 ///
 /// Each string must be one statement. The simple query protocol runs several,
@@ -410,100 +634,141 @@ fn may_hold_several(sql: &str) -> bool {
 /// anything runs; the run itself stays on the simple protocol, which sends
 /// values as the text the grid shows.
 ///
+/// A transaction pooler cannot prepare at all (the statement is named), so a
+/// string that might hold several is refused here instead of being sent.
+///
 /// A single statement cannot escape: a COMMIT ends a transaction that changed
 /// nothing, and a SET is undone by the rollback.
 fn run_read_only<'a>(
     conn: &'a mut PgConnection,
-    pid: Option<i32>,
-    pool: &'a PgPool,
     statements: &'a [String],
     opts: &'a RunOptions,
-    cancelled: &'a AtomicBool,
-) -> BoxFuture<'a, RunResponse> {
+    ctx: &'a RunCtx<'a>,
+) -> BoxFuture<'a, Executed> {
     Box::pin(async move {
         for (index, sql) in statements.iter().enumerate() {
             // Most reads have no semicolon, and skip the round trip to the server.
             if !may_hold_several(sql) {
                 continue;
             }
+            if ctx.transaction_pooler {
+                let mut response = RunResponse::default();
+                response.errors.push(several_statements(index));
+                return finished(response);
+            }
             if let Err(e) = (&mut *conn).prepare(sql.as_str()).await {
                 let mut response = RunResponse::default();
-                response.errors.push(run_error(index, &e, cancelled));
-                return response;
+                response.errors.push(run_error(index, &e, ctx.cancelled));
+                return finished(response);
             }
         }
         if let Err(e) = (&mut *conn).execute("BEGIN READ ONLY").await {
             let mut response = RunResponse::default();
-            response.errors.push(run_error(0, &e, cancelled));
-            return response;
+            response.errors.push(run_error(0, &e, ctx.cancelled));
+            return finished(response);
         }
         let inner = RunOptions {
             transaction: false,
             session: false,
             ..opts.clone()
         };
-        let response = run_statements(conn, pid, pool, statements, &inner, cancelled).await;
+        let executed = run_statements(conn, statements, &inner, ctx).await;
+        if executed.discard {
+            // The connection is mid-protocol. ROLLBACK would wait on it.
+            return executed;
+        }
         // Always. There is nothing to commit, and the connection goes back to
         // the pool.
         let _ = (&mut *conn).execute("ROLLBACK").await;
-        response
+        executed
     })
 }
 
 fn run_statements<'a>(
     conn: &'a mut PgConnection,
-    pid: Option<i32>,
-    pool: &'a PgPool,
     statements: &'a [String],
     opts: &'a RunOptions,
-    cancelled: &'a AtomicBool,
-) -> BoxFuture<'a, RunResponse> {
+    ctx: &'a RunCtx<'a>,
+) -> BoxFuture<'a, Executed> {
     Box::pin(async move {
         let mut response = RunResponse::default();
         let stop_on_error = opts.transaction || !opts.continue_on_error;
         let max = opts.max_rows.unwrap_or(usize::MAX);
         let single = statements.len() == 1;
+        let mut discard = false;
+        // One future for the whole run. Recreating it per row drops a
+        // notification that arrived while the previous one was polled.
+        let mut stop_fut = ctx.stop.map(|notify| {
+            Box::pin(async move {
+                let mut notified = std::pin::pin!(notify.notified());
+                let _ = notified.as_mut().enable();
+                notified.await;
+            })
+        });
 
         if opts.transaction {
             if let Err(e) = (&mut *conn).execute("BEGIN").await {
-                response.errors.push(run_error(0, &e, cancelled));
-                return response;
+                response.errors.push(run_error(0, &e, ctx.cancelled));
+                return finished(response);
             }
         }
 
         for (index, sql) in statements.iter().enumerate() {
-            if cancelled.load(Ordering::SeqCst) {
-                response.errors.push(RunError {
-                    statement: index,
-                    message: "Cancelled.".into(),
-                    code: None,
-                    cancelled: true,
-                    position: None,
+            if ctx.cancelled.load(Ordering::SeqCst) {
+                response.errors.push(if ctx.transaction_pooler {
+                    stopped_waiting(index)
+                } else {
+                    RunError {
+                        statement: index,
+                        message: "Cancelled.".into(),
+                        code: None,
+                        cancelled: true,
+                        position: None,
+                    }
                 });
+                discard = ctx.transaction_pooler;
                 break;
             }
 
             let started = Instant::now();
             let results_before = response.results.len();
             let mut current = StatementResult::new(index);
+            let mut current_oids: Vec<Option<u32>> = Vec::new();
+            let mut pending: Vec<(usize, Vec<Option<u32>>)> = Vec::new();
             let mut stop_sent = false;
             let mut failure: Option<RunError> = None;
             {
                 let mut stream = (&mut *conn).fetch_many(sql.as_str());
                 loop {
-                    match stream.try_next().await {
+                    let next = if let Some(stop_fut) = stop_fut.as_mut() {
+                        tokio::select! {
+                            biased;
+                            _ = stop_fut.as_mut() => {
+                                failure = Some(stopped_waiting(index));
+                                discard = true;
+                                break;
+                            }
+                            next = stream.try_next() => next,
+                        }
+                    } else {
+                        stream.try_next().await
+                    };
+                    match next {
                         Ok(Some(Either::Right(row))) => {
                             if !current.returns_rows {
-                                set_columns(&mut current, &row);
+                                current_oids = set_columns(&mut current, &row);
                             }
                             if current.rows.len() >= max {
                                 current.truncated = true;
                                 // Without this the server keeps sending every row
                                 // of a large table, only for it to be dropped here.
+                                // No pid on a transaction pooler: the number would
+                                // name some other client's backend. Rows past the
+                                // limit are dropped here and the server finishes.
                                 if opts.stop_at_limit && single && !stop_sent {
-                                    if let Some(pid) = pid {
+                                    if let Some(pid) = ctx.pid {
                                         stop_sent = true;
-                                        let pool = pool.clone();
+                                        let pool = ctx.pool.clone();
                                         tokio::spawn(async move {
                                             let _ = cancel_backend(&pool, pid).await;
                                         });
@@ -516,9 +781,14 @@ fn run_statements<'a>(
                         Ok(Some(Either::Left(done))) => {
                             current.rows_affected = done.rows_affected();
                             current.elapsed_ms = started.elapsed().as_millis() as u64;
+                            let oids = std::mem::take(&mut current_oids);
+                            let idx = response.results.len();
                             response
                                 .results
                                 .push(std::mem::replace(&mut current, StatementResult::new(index)));
+                            if oids.iter().any(Option::is_some) {
+                                pending.push((idx, oids));
+                            }
                         }
                         Ok(None) => break,
                         Err(e) => {
@@ -526,7 +796,7 @@ fn run_statements<'a>(
                                 && e.as_database_error().and_then(|d| d.code()).as_deref()
                                     == Some("57014");
                             if !own_stop {
-                                failure = Some(run_error(index, &e, cancelled));
+                                failure = Some(run_error(index, &e, ctx.cancelled));
                             }
                             break;
                         }
@@ -534,16 +804,37 @@ fn run_statements<'a>(
                 }
             }
 
+            if discard {
+                // The stream was dropped mid-message. Nothing else may be sent
+                // on this connection.
+                if current.returns_rows {
+                    current.elapsed_ms = started.elapsed().as_millis() as u64;
+                    response.results.push(current);
+                }
+                if let Some(error) = failure {
+                    response.errors.push(error);
+                }
+                break;
+            }
+
             // Rows kept before our own stop, or before an error mid-stream.
             if current.returns_rows {
                 current.elapsed_ms = started.elapsed().as_millis() as u64;
+                let oids = std::mem::take(&mut current_oids);
+                let idx = response.results.len();
                 response.results.push(current);
+                if failure.is_none() && oids.iter().any(Option::is_some) {
+                    pending.push((idx, oids));
+                }
             }
 
             // An empty result carries no row to read column names from.
             // Prepared rather than described: describe also asks the catalog
             // which columns can be null, two more round trips for nothing used.
-            if failure.is_none()
+            // `prepare` is a named statement, which a transaction pooler rejects,
+            // so there the result simply has no column names.
+            if !ctx.transaction_pooler
+                && failure.is_none()
                 && response.results.len() == results_before + 1
                 && looks_like_query(sql)
             {
@@ -553,13 +844,27 @@ fn run_statements<'a>(
                         if !prepared.columns().is_empty() {
                             last.returns_rows = true;
                             last.rows_affected = 0;
+                            let mut oids = Vec::new();
                             for col in prepared.columns() {
                                 last.columns.push(col.name().to_string());
-                                last.column_types.push(col.type_info().name().to_string());
+                                let (name, oid) = column_type(col);
+                                last.column_types.push(name);
+                                oids.push(oid);
+                            }
+                            if oids.iter().any(Option::is_some) {
+                                pending.push((response.results.len() - 1, oids));
                             }
                         }
                     }
                 }
+            }
+
+            // A failed statement may have aborted the transaction. The catalog
+            // query would error, so unknown types stay blank. Only the editor
+            // (its session) shows type names; the grid and the app's own
+            // catalog reads would pay a round trip per page for nothing.
+            if opts.session && failure.is_none() && !pending.is_empty() {
+                fill_column_types(conn, &mut response.results, &pending).await;
             }
 
             if let Some(error) = failure {
@@ -568,6 +873,16 @@ fn run_statements<'a>(
                     break;
                 }
             }
+        }
+
+        if discard {
+            if opts.transaction {
+                response.rolled_back = true;
+            }
+            return Executed {
+                response,
+                discard: true,
+            };
         }
 
         if let (true, true, Some(limit)) = (
@@ -600,9 +915,11 @@ fn run_statements<'a>(
                 "ROLLBACK"
             };
             if let Err(e) = (&mut *conn).execute(finish).await {
-                response
-                    .errors
-                    .push(run_error(statements.len().saturating_sub(1), &e, cancelled));
+                response.errors.push(run_error(
+                    statements.len().saturating_sub(1),
+                    &e,
+                    ctx.cancelled,
+                ));
                 if finish == "COMMIT" {
                     let _ = (&mut *conn).execute("ROLLBACK").await;
                     response.rolled_back = true;
@@ -610,8 +927,86 @@ fn run_statements<'a>(
             }
         }
 
-        response
+        finished(response)
     })
+}
+
+/// One catalog query for the columns whose type name arrived as "?".
+///
+/// Runs after the statement's rows are in hand, on the same connection. Simple
+/// query protocol, so a transaction pooler never sees a named statement. Any
+/// failure leaves the blank names and does not fail the run.
+async fn fill_column_types(
+    conn: &mut PgConnection,
+    results: &mut [StatementResult],
+    pending: &[(usize, Vec<Option<u32>>)],
+) {
+    let mut unique = Vec::new();
+    for (_, oids) in pending {
+        for oid in oids.iter().flatten().copied() {
+            if !unique.contains(&oid) {
+                unique.push(oid);
+            }
+        }
+    }
+    if unique.is_empty() {
+        return;
+    }
+    let sql = type_lookup_sql(&unique);
+    let Ok(rows) = (&mut *conn).fetch_all(sql.as_str()).await else {
+        return;
+    };
+    let mut names = HashMap::new();
+    for row in rows {
+        let Some(oid_text) = text_cell(&row, 0) else {
+            continue;
+        };
+        let Some(name) = text_cell(&row, 1) else {
+            continue;
+        };
+        let Ok(oid) = oid_text.parse::<u32>() else {
+            continue;
+        };
+        if !name.is_empty() {
+            names.insert(oid, name);
+        }
+    }
+    for (idx, oids) in pending {
+        let Some(result) = results.get_mut(*idx) else {
+            continue;
+        };
+        for (col, oid) in oids.iter().enumerate() {
+            let Some(oid) = oid else { continue };
+            let Some(name) = names.get(oid) else { continue };
+            if let Some(slot) = result.column_types.get_mut(col) {
+                *slot = name.clone();
+            }
+        }
+    }
+}
+
+fn text_cell(row: &PgRow, index: usize) -> Option<String> {
+    if let Ok(value) = row.try_get::<String, _>(index) {
+        return Some(value);
+    }
+    row.try_get_raw(index)
+        .ok()
+        .filter(|raw| !raw.is_null())
+        .and_then(|raw| raw.as_str().ok().map(|text| text.to_string()))
+}
+
+fn type_lookup_sql(oids: &[u32]) -> String {
+    let mut sql = String::from(
+        "SELECT oid::text, format_type(oid, NULL) FROM pg_catalog.pg_type WHERE oid IN (",
+    );
+    for (i, oid) in oids.iter().enumerate() {
+        if i > 0 {
+            sql.push(',');
+        }
+        sql.push_str(&oid.to_string());
+    }
+    sql.push(')');
+    sql
 }
 
 #[cfg(test)]
@@ -673,6 +1068,76 @@ mod tests {
         assert!(may_hold_several("SELECT ';'"));
     }
 
+    #[test]
+    fn transaction_poolers_are_recognized_from_the_configured_host() {
+        assert!(is_transaction_pooler(
+            "aws-0-eu-central-1.pooler.supabase.com",
+            6543
+        ));
+        assert!(!is_transaction_pooler(
+            "aws-0-eu-central-1.pooler.supabase.com",
+            5432
+        ));
+        assert!(is_transaction_pooler(
+            "db.abcdefghijklmnopqrst.supabase.co",
+            6543
+        ));
+        assert!(!is_transaction_pooler(
+            "db.abcdefghijklmnopqrst.supabase.co",
+            5432
+        ));
+        assert!(is_transaction_pooler(
+            "ep-cool-darkness-pooler.us-east-2.aws.neon.tech",
+            5432
+        ));
+        assert!(!is_transaction_pooler(
+            "ep-cool-darkness.us-east-2.aws.neon.tech",
+            5432
+        ));
+        assert!(is_transaction_pooler("EP-ABC-POOLER.neon.tech.", 5432));
+        assert!(!is_transaction_pooler("ep-name.pooler.neon.tech", 5432));
+        assert!(is_transaction_pooler("127.0.0.1", 6543));
+        assert!(is_transaction_pooler("localhost", 6543));
+        assert!(!is_transaction_pooler("127.0.0.1", 5432));
+        assert!(!is_transaction_pooler("db.supabase.co", 5432));
+    }
+
+    #[test]
+    fn pooler_hosts_keep_a_small_pool_even_in_session_mode() {
+        let small = Some(Duration::from_secs(60));
+        assert_eq!(
+            pool_settings("aws-0-us-east-1.pooler.supabase.com", 5432),
+            (3, small)
+        );
+        assert_eq!(
+            pool_settings("aws-0-us-east-1.pooler.supabase.com", 6543),
+            (3, small)
+        );
+        assert_eq!(pool_settings("db.abc.supabase.co", 6543), (3, small));
+        assert_eq!(pool_settings("db.abc.supabase.co", 5432), (8, None));
+        assert_eq!(
+            pool_settings("ep-x-pooler.c-3.us-east-1.aws.neon.tech", 5432),
+            (3, small)
+        );
+        assert_eq!(
+            pool_settings("ep-x.c-3.us-east-1.aws.neon.tech", 5432),
+            (8, None)
+        );
+        // Port 6543 is transaction mode, but only the named pooler hosts shrink the pool.
+        assert_eq!(pool_settings("127.0.0.1", 6543), (8, None));
+        assert_eq!(pool_settings("localhost", 5432), (8, None));
+    }
+
+    fn direct_ctx<'a>(pool: &'a PgPool, cancelled: &'a AtomicBool) -> RunCtx<'a> {
+        RunCtx {
+            pool,
+            pid: None,
+            cancelled,
+            stop: None,
+            transaction_pooler: false,
+        }
+    }
+
     /// Skipped unless EVAL_POSTGRES_URL points at a throwaway database.
     ///
     /// Answers the question that matters: whether a `numeric` or `date`
@@ -700,18 +1165,19 @@ mod tests {
         .unwrap();
 
         let mut conn = pool.acquire().await.unwrap();
+        let cancelled = AtomicBool::new(false);
+        let ctx = direct_ctx(&pool, &cancelled);
         let r = run_statements(
             &mut conn,
-            None,
-            &pool,
             &[
                 "SELECT label, amount, happened_on, at, flag, payload, absent FROM row_json_probe"
                     .into(),
             ],
             &RunOptions::default(),
-            &AtomicBool::new(false),
+            &ctx,
         )
-        .await;
+        .await
+        .response;
         assert!(r.errors.is_empty(), "{:?}", r.errors);
         let row = &r.results[0].rows[0];
         assert_eq!(row[0], json!("hello"));
@@ -725,20 +1191,17 @@ mod tests {
         // Empty results still name their columns.
         let empty = run_statements(
             &mut conn,
-            None,
-            &pool,
             &["SELECT label, amount FROM row_json_probe WHERE false".into()],
             &RunOptions::default(),
-            &AtomicBool::new(false),
+            &ctx,
         )
-        .await;
+        .await
+        .response;
         assert_eq!(empty.results[0].columns, vec!["label", "amount"]);
 
         // A failed statement in a transaction rolls the run back.
         let tx = run_statements(
             &mut conn,
-            None,
-            &pool,
             &[
                 "UPDATE row_json_probe SET label = 'changed'".into(),
                 "SELECT nope FROM row_json_probe".into(),
@@ -747,15 +1210,17 @@ mod tests {
                 transaction: true,
                 ..Default::default()
             },
-            &AtomicBool::new(false),
+            &ctx,
         )
-        .await;
+        .await
+        .response;
         assert!(tx.rolled_back);
         assert!(
             tx.errors[0].position.is_some(),
             "error position is reported"
         );
         let label: String = sqlx::query_scalar("SELECT label FROM row_json_probe")
+            .persistent(false)
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -764,16 +1229,15 @@ mod tests {
         // max_rows keeps the first rows and flags the rest.
         let many = run_statements(
             &mut conn,
-            None,
-            &pool,
             &["SELECT generate_series(1, 5000)".into()],
             &RunOptions {
                 max_rows: Some(10),
                 ..Default::default()
             },
-            &AtomicBool::new(false),
+            &ctx,
         )
-        .await;
+        .await
+        .response;
         assert_eq!(many.results[0].rows.len(), 10);
         assert!(many.results[0].truncated);
 
@@ -784,13 +1248,12 @@ mod tests {
         };
         let read = run_read_only(
             &mut conn,
-            None,
-            &pool,
             &["SELECT label FROM row_json_probe".into()],
             &read_only,
-            &AtomicBool::new(false),
+            &ctx,
         )
-        .await;
+        .await
+        .response;
         assert!(read.errors.is_empty(), "{:?}", read.errors);
         assert_eq!(read.results[0].rows[0][0], json!("hello"));
         for sql in [
@@ -798,18 +1261,13 @@ mod tests {
             "COMMIT; DELETE FROM row_json_probe",
             "SELECT 1; DELETE FROM row_json_probe",
         ] {
-            let refused = run_read_only(
-                &mut conn,
-                None,
-                &pool,
-                &[sql.into()],
-                &read_only,
-                &AtomicBool::new(false),
-            )
-            .await;
+            let refused = run_read_only(&mut conn, &[sql.into()], &read_only, &ctx)
+                .await
+                .response;
             assert_eq!(refused.errors.len(), 1, "{sql} was not refused");
         }
         let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM row_json_probe")
+            .persistent(false)
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -827,34 +1285,320 @@ mod tests {
             "INSERT INTO row_json_probe (label) VALUES ('a'), ('b')".into(),
             "SELECT * FROM row_json_probe".into(),
         ];
-        let over = run_statements(
-            &mut conn,
-            None,
-            &pool,
-            &statements,
-            &limited(1),
-            &AtomicBool::new(false),
-        )
-        .await;
+        let over = run_statements(&mut conn, &statements, &limited(1), &ctx)
+            .await
+            .response;
         assert!(over.rolled_back);
         assert_eq!(over.errors[0].code.as_deref(), Some("TooManyChanges"));
-        let within = run_statements(
-            &mut conn,
-            None,
-            &pool,
-            &statements,
-            &limited(2),
-            &AtomicBool::new(false),
-        )
-        .await;
+        let within = run_statements(&mut conn, &statements, &limited(2), &ctx)
+            .await
+            .response;
         assert!(within.errors.is_empty(), "{:?}", within.errors);
         let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM row_json_probe")
+            .persistent(false)
             .fetch_one(&pool)
             .await
             .unwrap();
         assert_eq!(rows, 3);
 
+        // float4 must not widen into the f32 binary expansion.
+        let real = run_statements(
+            &mut conn,
+            &["SELECT 0.1::real".into()],
+            &RunOptions::default(),
+            &ctx,
+        )
+        .await
+        .response;
+        assert!(real.errors.is_empty(), "{:?}", real.errors);
+        assert_eq!(real.results[0].rows[0][0], json!(0.1));
+
+        // An enum's type name is "?" on the simple protocol until the catalog lookup.
+        pool.execute(
+            "DROP TYPE IF EXISTS pooler_direct_mood;
+             CREATE TYPE pooler_direct_mood AS ENUM ('ok', 'no');",
+        )
+        .await
+        .unwrap();
+        // Outside the editor the name is left blank, never "?", and no lookup runs.
+        let plain = run_statements(
+            &mut conn,
+            &["SELECT 'ok'::pooler_direct_mood".into()],
+            &RunOptions::default(),
+            &ctx,
+        )
+        .await
+        .response;
+        assert!(plain.errors.is_empty(), "{:?}", plain.errors);
+        assert_eq!(plain.results[0].column_types, vec![String::new()]);
+        let mood = run_statements(
+            &mut conn,
+            &["SELECT 'ok'::pooler_direct_mood".into()],
+            &RunOptions {
+                session: true,
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .await
+        .response;
+        assert!(mood.errors.is_empty(), "{:?}", mood.errors);
+        assert!(
+            mood.results[0].column_types[0].contains("pooler_direct_mood"),
+            "{:?}",
+            mood.results[0].column_types
+        );
+
         drop(conn);
         pool.execute("DROP TABLE row_json_probe").await.unwrap();
+        pool.execute("DROP TYPE pooler_direct_mood").await.unwrap();
+    }
+
+    /// Skipped unless EVAL_POOLER_URL points at a transaction-mode pooler.
+    ///
+    /// Proves the three things that break on Supabase port 6543: opening still
+    /// reports the server version, a row-limit stop does not cancel another
+    /// client's statement, and Cancel returns without signalling any backend.
+    #[tokio::test]
+    async fn transaction_pooler_does_not_cancel_another_client() {
+        let Ok(url) = std::env::var("EVAL_POOLER_URL") else {
+            eprintln!("skipping: EVAL_POOLER_URL not set");
+            return;
+        };
+        crate::install_crypto_provider();
+        let config = config_from_url(&url);
+        let known_hosts = std::env::temp_dir().join("litedb-pooler-known-hosts");
+        let (conn, info) = PgConn::open(config, known_hosts).await.unwrap();
+        assert!(
+            info.server_version
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit()),
+            "open did not report a server version: {info:?}"
+        );
+        assert!(
+            info.notices
+                .iter()
+                .any(|n| n.contains("transaction pooler")),
+            "{:?}",
+            info.notices
+        );
+
+        let state = DbState::default();
+        let setup = conn
+            .run(
+                &state,
+                &[
+                    "DROP TYPE IF EXISTS pooler_mood".into(),
+                    "CREATE TYPE pooler_mood AS ENUM ('ok', 'no')".into(),
+                ],
+                &RunOptions::default(),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert!(setup.errors.is_empty(), "{:?}", setup.errors);
+
+        let typed = conn
+            .run(
+                &state,
+                &["SELECT 'ok'::pooler_mood AS mood, 0.1::real AS amount".into()],
+                &RunOptions {
+                    session: true,
+                    ..Default::default()
+                },
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert!(typed.errors.is_empty(), "{:?}", typed.errors);
+        assert!(
+            typed.results[0].column_types[0].contains("pooler_mood"),
+            "{:?}",
+            typed.results[0].column_types
+        );
+        assert_eq!(typed.results[0].rows[0][1], json!(0.1));
+
+        let empty = conn
+            .run(
+                &state,
+                &["SELECT 1 AS n WHERE false".into()],
+                &RunOptions::default(),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert!(empty.errors.is_empty(), "{:?}", empty.errors);
+        assert!(
+            empty.results[0].columns.is_empty(),
+            "a pooler cannot prepare, so an empty result has no column names: {empty:?}"
+        );
+
+        let refused = conn
+            .run(
+                &state,
+                &["SELECT 1; SELECT 2".into()],
+                &RunOptions {
+                    read_only: true,
+                    ..Default::default()
+                },
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(refused.errors.len(), 1, "{:?}", refused.errors);
+        assert!(
+            refused.errors[0].message.contains("one statement"),
+            "{:?}",
+            refused.errors[0].message
+        );
+
+        // The editor session's early stop must not land on the other client.
+        // rows_affected is the server's completion count: a pid cancel ends
+        // the stream before CommandComplete and leaves it at 0.
+        let rows = 3_000_000u64;
+        let victim = tokio::spawn({
+            let url = url.clone();
+            async move { sleep_on(&url, 3).await }
+        });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let limited = conn
+            .run(
+                &state,
+                &[format!("SELECT generate_series(1, {rows})")],
+                &RunOptions {
+                    session: true,
+                    max_rows: Some(10),
+                    stop_at_limit: true,
+                    query_id: Some("pooler-limit".into()),
+                    ..Default::default()
+                },
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert!(limited.errors.is_empty(), "{:?}", limited.errors);
+        assert_eq!(limited.results[0].rows.len(), 10);
+        assert!(limited.results[0].truncated);
+        assert_eq!(
+            limited.results[0].rows_affected, rows,
+            "the select must run to completion; cancelling it leaves no row count"
+        );
+        let (slept, sleep_error) = victim.await.unwrap();
+        assert!(
+            sleep_error.is_none(),
+            "row-limit stop cancelled another client: {sleep_error:?}"
+        );
+        assert!(
+            slept >= Duration::from_secs(2),
+            "the other client's sleep returned early: {slept:?}"
+        );
+
+        // Cancel on a pooled run returns without signalling any backend.
+        let victim = tokio::spawn({
+            let url = url.clone();
+            async move { sleep_on(&url, 3).await }
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let query_id = "pooler-cancel";
+        let statements = vec!["SELECT pg_sleep(30)".to_string()];
+        let opts = RunOptions {
+            query_id: Some(query_id.to_string()),
+            ..Default::default()
+        };
+        let run = conn.run(&state, &statements, &opts, Arc::new(AtomicBool::new(false)));
+        tokio::pin!(run);
+        let deadline = tokio::time::sleep(Duration::from_secs(5));
+        tokio::pin!(deadline);
+        loop {
+            if state.is_running(query_id) {
+                break;
+            }
+            tokio::select! {
+                biased;
+                result = &mut run => panic!("run ended before it could be cancelled: {result:?}"),
+                _ = &mut deadline => panic!("canceller was not registered"),
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+            }
+        }
+        // Keep polling so the statement is actually sent, then let it sit on the server.
+        let settle = tokio::time::sleep(Duration::from_millis(300));
+        tokio::pin!(settle);
+        tokio::select! {
+            biased;
+            result = &mut run => panic!("pg_sleep ended before cancel: {result:?}"),
+            _ = &mut settle => {}
+        }
+        let started = Instant::now();
+        assert!(state.cancel(query_id).await.unwrap());
+        let response = run.await.unwrap();
+        let waited = started.elapsed();
+        assert!(
+            waited < Duration::from_secs(2),
+            "cancel did not return promptly: {waited:?}"
+        );
+        assert_eq!(response.errors.len(), 1, "{:?}", response.errors);
+        assert!(response.errors[0].cancelled);
+        assert!(
+            response.errors[0].message.contains("stopped waiting"),
+            "{:?}",
+            response.errors[0].message
+        );
+        let (slept, sleep_error) = victim.await.unwrap();
+        assert!(
+            sleep_error.is_none(),
+            "cancel cancelled another client: {sleep_error:?}"
+        );
+        assert!(
+            slept >= Duration::from_secs(2),
+            "the other client's sleep returned early: {slept:?}"
+        );
+
+        let _ = conn
+            .run(
+                &state,
+                &["DROP TYPE IF EXISTS pooler_mood".into()],
+                &RunOptions::default(),
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await;
+        conn.close().await;
+    }
+
+    fn config_from_url(raw: &str) -> PgConnectConfig {
+        let parsed = url::Url::parse(raw).expect("postgres url");
+        PgConnectConfig {
+            host: parsed.host_str().unwrap_or("localhost").to_string(),
+            port: parsed.port().unwrap_or(5432),
+            database: parsed.path().trim_start_matches('/').to_string(),
+            username: parsed.username().to_string(),
+            password: parsed.password().unwrap_or("").to_string(),
+            ssl: Some(false),
+            // `?sslmode=require` runs this against a TLS pooler (Supabase's is one).
+            ssl_mode: Some(
+                parsed
+                    .query_pairs()
+                    .find(|(key, _)| key == "sslmode")
+                    .map(|(_, value)| value.into_owned())
+                    .unwrap_or_else(|| "disable".into()),
+            ),
+            ssl_root_cert: None,
+            ssh: None,
+        }
+    }
+
+    async fn sleep_on(url: &str, seconds: u64) -> (Duration, Option<String>) {
+        let started = Instant::now();
+        let mut conn = match PgConnection::connect(url).await {
+            Ok(conn) => conn,
+            Err(e) => return (started.elapsed(), Some(e.to_string())),
+        };
+        // Simple query. A named prepared statement is what the pooler rejects.
+        let error = (&mut conn)
+            .execute(format!("SELECT pg_sleep({seconds})").as_str())
+            .await
+            .err()
+            .map(|e| e.to_string());
+        (started.elapsed(), error)
     }
 }

@@ -10,7 +10,7 @@ import { AlertCircle, Check, FolderOpen, Link2, Loader2, ShieldAlert } from 'luc
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { tauriService } from '@/lib/tauri';
-import { pgSslHint } from '@/lib/pgSslHint';
+import { pgSslHint, pgSupabaseDirectHint } from '@/lib/pgSslHint';
 import { clearPolicyFor } from '@/lib/queryGate';
 import { postgresConnectionId, sqliteConnectionId } from '@/lib/connectionId';
 import { SSL_MODES, parsePostgresUrl, type SslMode } from '@/lib/db/pgUrl';
@@ -206,11 +206,16 @@ export function ConnectionDialog({ open, onOpenChange, initial, prefillUrl, onCo
       port: String(parsed.port),
       database: parsed.database,
       username: parsed.username || f.username,
-      password: parsed.password || f.password,
+      // A placeholder is not a password, and must not wipe one already typed.
+      password: parsed.passwordPlaceholder ? f.password : parsed.password || f.password,
       sslMode: parsed.sslMode ?? (/(neon\.tech|supabase\.co|supabase\.com|rds\.amazonaws\.com|render\.com|railway\.app|azure\.com|aivencloud\.com|digitalocean\.com)/i.test(parsed.host) ? 'require' : f.sslMode),
       sslRootCert: parsed.sslRootCert ?? f.sslRootCert,
     }));
-    setUrlNote(`Filled in from the URL${parsed.password ? ', password included' : ''}.`);
+    setUrlNote(
+      parsed.passwordPlaceholder
+        ? 'Filled in from the URL. Type your database password: the URL has a placeholder.'
+        : `Filled in from the URL${parsed.password ? ', password included' : ''}.`,
+    );
   }
 
   const defaultName = useMemo(
@@ -253,7 +258,7 @@ export function ConnectionDialog({ open, onOpenChange, initial, prefillUrl, onCo
 
   const describeError = (e: unknown): string => {
     const message = e instanceof Error ? e.message : String(e);
-    const hint = pgSslHint(message, form.sslMode !== 'disable');
+    const hint = pgSslHint(message, form.sslMode !== 'disable') ?? pgSupabaseDirectHint(form.host, message);
     return hint ? `${hint}\n\n${message}` : message;
   };
 
@@ -304,7 +309,7 @@ export function ConnectionDialog({ open, onOpenChange, initial, prefillUrl, onCo
       },
     );
     // Turning the tag on should mean read-only now, not whatever was chosen before.
-    if (form.production && !initial?.production) clearPolicyFor(postgresConnectionId(saved.host!, saved.port!, saved.database!));
+    if (form.production && !initial?.production) clearPolicyFor(postgresConnectionId(saved.host!, saved.port!, saved.database!, saved.username ?? ''));
     updateOpenConnectionMeta(saved.id, { name: saved.name, color: saved.color, production: saved.production });
     return saved;
   };

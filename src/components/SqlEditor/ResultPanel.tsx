@@ -199,6 +199,12 @@ export function ResultPanel({ outcome, running, onCancel, onFix, onExplainError,
         </div>
       </div>
 
+      {error?.cancelled && error.message !== 'Cancelled.' && (
+        <div className="border-b bg-destructive/5 px-3 py-2 text-xs">
+          <pre className="whitespace-pre-wrap break-words font-mono text-destructive">{error.message}</pre>
+        </div>
+      )}
+
       {error && !error.cancelled && (
         <div className="border-b bg-destructive/5 px-3 py-2 text-xs">
           <div className="flex items-start gap-3">
