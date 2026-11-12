@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-11-12
+
+### Fixed
+
+- Claude (Anthropic) requests no longer fail with "401 CORS requests must set 'anthropic-dangerous-direct-browser-access' header". The localhost Origin header meant for Ollama is now sent only to local providers.
+- Without Ollama running, AI errors say Ollama could not be reached and point to OpenAI, Claude or Gemini, with a button to AI settings, instead of a bare "Connection error." Settings → AI says the same when Ollama is chosen.
+- The log file records each AI request's host, status and the provider's error message, and no longer fills with HTTP and TLS trace output.
+
 ## [2.6.0] - 2026-11-10
 
 ### Added
@@ -147,6 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.6.1]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1
 [2.6.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.0
 [2.5.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0
 [2.4.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.4.0

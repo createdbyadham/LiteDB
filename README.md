@@ -11,9 +11,9 @@ editing, saved connections, SSH tunnels and production tags.
 
 <div align="center">
 
-[![Download for macOS](https://img.shields.io/badge/macOS-Download-111111?style=for-the-badge&logo=apple)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.0)
-[![Download for Windows](https://img.shields.io/badge/Windows-Download-0078D4?style=for-the-badge&logo=windows)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.0)
-[![Download for Linux](https://img.shields.io/badge/Linux-Download-E95420?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.0)
+[![Download for macOS](https://img.shields.io/badge/macOS-Download-111111?style=for-the-badge&logo=apple)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1)
+[![Download for Windows](https://img.shields.io/badge/Windows-Download-0078D4?style=for-the-badge&logo=windows)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1)
+[![Download for Linux](https://img.shields.io/badge/Linux-Download-E95420?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1)
 
 </div>
 
