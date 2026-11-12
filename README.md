@@ -11,9 +11,9 @@ editing, saved connections, SSH tunnels and production tags.
 
 <div align="center">
 
-[![Download for macOS](https://img.shields.io/badge/macOS-Download-111111?style=for-the-badge&logo=apple)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1)
-[![Download for Windows](https://img.shields.io/badge/Windows-Download-0078D4?style=for-the-badge&logo=windows)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1)
-[![Download for Linux](https://img.shields.io/badge/Linux-Download-E95420?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1)
+[![Download for macOS](https://img.shields.io/badge/macOS-Download-111111?style=for-the-badge&logo=apple)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.2)
+[![Download for Windows](https://img.shields.io/badge/Windows-Download-0078D4?style=for-the-badge&logo=windows)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.2)
+[![Download for Linux](https://img.shields.io/badge/Linux-Download-E95420?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.2)
 
 </div>
 
@@ -35,7 +35,7 @@ Download the installer for your platform from the [latest release](https://githu
 
 Homebrew, winget, Scoop, AUR and Flathub packages are on the way; until they are listed, use the downloads above.
 
-The installers are not code-signed yet. On Windows, SmartScreen may warn: choose **More info**, then **Run anyway**. On macOS, if LiteDB is called damaged, run `xattr -cr /Applications/LiteDB.app` once and open it again.
+The macOS app is signed and notarized by Apple. The Windows installers are not code-signed yet, so SmartScreen may warn: choose **More info**, then **Run anyway**.
 
 ## Features
 

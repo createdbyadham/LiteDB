@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-11-12
+
+### Changed
+
+- The macOS app is signed with a Developer ID and notarized by Apple, so it opens without the "app is damaged" warning or the `xattr` workaround.
+
 ## [2.6.1] - 2026-11-12
 
 ### Fixed
@@ -155,6 +161,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.6.2]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.2
 [2.6.1]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1
 [2.6.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.0
 [2.5.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.5.0
