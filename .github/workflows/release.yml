@@ -102,6 +102,11 @@ jobs:
           APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
         run: bash packaging/publish/export-apple-credentials.sh
 
+      # The tag's CHANGELOG.md section; fails the release if there is none.
+      - name: Release notes
+        id: notes
+        run: bash packaging/publish/release-notes.sh
+
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -111,10 +116,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: LiteDB v__VERSION__
-          releaseBody: |
-            Installers for this version are attached to this tag. The README download badge and the changelog use the same tag.
-
-            The installers are not code-signed yet. On Windows, SmartScreen may warn: choose More info, then Run anyway. On macOS, if LiteDB is called damaged, run `xattr -cr /Applications/LiteDB.app` once and open it again.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
