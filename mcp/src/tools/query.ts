@@ -281,7 +281,7 @@ export async function runQuery(ctx: ToolContext, sql: string, options: QueryOpti
     // Provenance is always 'ai'. That is not a default, it is what MCP means,
     // and it is what holds generated SQL to the policy floor no matter how
     // permissively the server was started.
-    const decision = evaluateScript(sql, ctx.config.policy, 'ai');
+    const decision = evaluateScript(sql, ctx.config.policy, 'ai', ctx.config.readOnlyCopy ?? false);
 
     if (decision.action === 'block') {
         await record(ctx, {

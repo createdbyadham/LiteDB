@@ -36,6 +36,11 @@ export interface ActiveConnection {
     dialect: SqlDialect;
     /** Absolute path of the open file. Null for an in-memory database. */
     sqlitePath?: string | null;
+    /**
+     * A CSV, Excel or JSON file read into memory: always read-only, and
+     * agents read it through the app's own connection, `id`.
+     */
+    dataFile?: boolean;
     /** Addressing plus password, so the MCP server can follow this connection. */
     postgres?: HandoffPostgres;
     /** Tagged production: read-only unless someone chooses otherwise. */
@@ -65,7 +70,22 @@ function readPolicies(): Record<string, SafetyPolicy> {
  * click away for the case it is meant for: pointing the app at production.
  */
 export function policyFor(connectionId: string): SafetyPolicy {
+    if (lockedReadOnly.has(connectionId)) return 'read-only';
     return readPolicies()[connectionId] ?? defaultPolicies.get(connectionId) ?? DEFAULT_POLICY;
+}
+
+// Connections that can only ever be read, whatever mode was chosen for them: a
+// CSV or Excel file opened as a read-only copy. The engine refuses writes too;
+// this keeps the app from offering them.
+const lockedReadOnly = new Set<string>();
+
+export function setReadOnlyLock(connectionId: string, locked: boolean): void {
+    if (locked) lockedReadOnly.add(connectionId);
+    else lockedReadOnly.delete(connectionId);
+}
+
+export function isReadOnlyLocked(connectionId: string): boolean {
+    return lockedReadOnly.has(connectionId);
 }
 
 // What a connection starts in when nobody has chosen a mode for it. A
@@ -92,6 +112,7 @@ export function clearPolicyFor(connectionId: string): void {
 }
 
 export function setPolicyFor(connectionId: string, policy: SafetyPolicy): void {
+    if (lockedReadOnly.has(connectionId)) return;
     try {
         const policies = readPolicies();
         policies[connectionId] = policy;

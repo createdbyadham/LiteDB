@@ -170,7 +170,12 @@ const TableEditor = ({
   onInspectVector,
   onFindSimilar,
 }: TableEditorProps) => {
-  const { columns, rows: rowObjects, total: totalRows, rowLocator, readOnly = false, totalEstimated } = page;
+  const { columns, rows: rowObjects, total: totalRows, rowLocator, totalEstimated } = page;
+  // A view, or a CSV/Excel/JSON file opened as a read-only copy: nothing to edit.
+  const readOnly = (page.readOnly ?? false) || conn.dataFile;
+  const readOnlyReason = conn.dataFile
+    ? `${conn.name} is open as a read-only copy. Import it into a SQLite database to edit it.`
+    : `${tableName} is a view, so it is read-only.`;
   const [searchInput, setSearchInput] = useState(query.search ?? '');
   const [editingRow, setEditingRow] = useState<RowData | null>(null);
   const [insertValues, setInsertValues] = useState<RowData | null>(null);
@@ -272,7 +277,7 @@ const TableEditor = ({
     if (!canAddressRows) {
       toast({
         title: "Rows can't be edited here",
-        description: readOnly ? `${tableName} is a view, so it is read-only.` : 'This table has no primary key, so a single row cannot be addressed. Use the SQL editor.',
+        description: readOnly ? readOnlyReason : 'This table has no primary key, so a single row cannot be addressed. Use the SQL editor.',
       });
       return;
     }
@@ -323,11 +328,11 @@ const TableEditor = ({
 
   const openInsert = useCallback((prefill: RowData = {}) => {
     if (readOnly) {
-      toast({ title: 'Read-only', description: `${tableName} is a view.` });
+      toast({ title: 'Read-only', description: readOnlyReason });
       return;
     }
     setInsertValues(prefill);
-  }, [readOnly, tableName]);
+  }, [readOnly, readOnlyReason]);
 
   const lastInsertRequest = useRef(insertRequest);
   useEffect(() => {
@@ -601,7 +606,7 @@ const TableEditor = ({
           <div className="flex items-center gap-2 min-w-0">
             <Database strokeWidth={1.5} className="h-4 w-4 shrink-0 text-muted-foreground" />
             <h1 className="truncate text-sm font-medium">{tableName}</h1>
-            {readOnly && <span className="shrink-0 text-xs text-muted-foreground">view · read-only</span>}
+            {readOnly && <span className="shrink-0 text-xs text-muted-foreground">{conn.dataFile ? 'read-only copy' : 'view · read-only'}</span>}
             <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums" title={totalEstimated ? "The planner's estimate: too many rows to count on every page" : undefined}>
               {totalEstimated ? '≈ ' : ''}
               {totalRows.toLocaleString()} {totalRows === 1 ? 'row' : 'rows'}
@@ -624,9 +629,11 @@ const TableEditor = ({
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button variant="outline" size="sm" className="h-8 text-xs text-destructive hover:text-destructive" onClick={() => setShowDeleteDialog(true)}>
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete {selectedRows.size}
-                </Button>
+                {!readOnly && (
+                  <Button variant="outline" size="sm" className="h-8 text-xs text-destructive hover:text-destructive" onClick={() => setShowDeleteDialog(true)}>
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete {selectedRows.size}
+                  </Button>
+                )}
               </>
             )}
             <div className="relative w-56">

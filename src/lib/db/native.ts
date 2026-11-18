@@ -152,6 +152,11 @@ export async function dbOpenSqlite(id: string, path: string, create = false, rea
     return invoke<OpenInfo>('db_open_sqlite', { id, path, create, readOnly });
 }
 
+/** A CSV, Excel or JSON file, read into a read-only in-memory database. */
+export async function dbOpenFile(id: string, path: string): Promise<OpenInfo> {
+    return invoke<OpenInfo>('db_open_file', { id, path });
+}
+
 export async function dbOpenPostgres(id: string, config: PgConnectConfig): Promise<OpenInfo> {
     return invoke<OpenInfo>('db_open_postgres', { id, config });
 }

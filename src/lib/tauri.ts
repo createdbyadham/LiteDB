@@ -2,6 +2,7 @@
 
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeFile } from '@tauri-apps/plugin-fs';
+import { DATA_FILE_EXTENSIONS } from '@/lib/db/dataFiles';
 
 const SQLITE_EXTENSIONS = ['db', 'sqlite', 'sqlite3', 'db3', 's3db', 'sl3'];
 
@@ -45,13 +46,15 @@ export const tauriService = {
     }
   },
 
-  /** Pick an existing SQLite file. */
+  /** Pick an existing SQLite database, or a CSV, Excel or JSON file to open read-only. */
   openSqliteDialog: async (): Promise<string | null> => {
     try {
       const selected = await open({
         multiple: false,
         filters: [
+          { name: 'Databases and data files', extensions: [...SQLITE_EXTENSIONS, ...DATA_FILE_EXTENSIONS] },
           { name: 'SQLite Database', extensions: SQLITE_EXTENSIONS },
+          { name: 'CSV, Excel and JSON', extensions: DATA_FILE_EXTENSIONS },
           { name: 'All files', extensions: ['*'] },
         ],
       });

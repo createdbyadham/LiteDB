@@ -88,6 +88,16 @@ impl SqliteConn {
         ))
     }
 
+    /// Wrap a connection made elsewhere, such as the in-memory copy of a CSV
+    /// or Excel file (`datafile.rs`).
+    pub fn from_connection(conn: Connection) -> Self {
+        let interrupt = Arc::new(conn.get_interrupt_handle());
+        Self {
+            conn: Arc::new(Mutex::new(conn)),
+            interrupt,
+        }
+    }
+
     /// Skipped while a query holds the connection: the poll asks again soon,
     /// and waiting here would queue it behind a long-running statement.
     pub fn data_version(&self) -> Option<i64> {

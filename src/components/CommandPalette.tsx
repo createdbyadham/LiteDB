@@ -11,6 +11,7 @@ import {
   FilePlus2,
   FolderOpen,
   GitBranch,
+  FileSpreadsheet,
   HardDrive,
   ListPlus,
   Monitor,
@@ -36,6 +37,7 @@ import { toast } from '@/hooks/use-toast';
 import { emitAppCommand, setPendingCommand, shortcutLabel, type AppCommand } from '@/lib/commands';
 import { activateConnection, closeConnection, openSqliteFile, useConnections, visibleTables } from '@/lib/db/connections';
 import { colorSwatch, describeSaved, listSavedConnections } from '@/lib/db/savedConnections';
+import { isDataFile } from '@/lib/db/dataFiles';
 import { tauriService } from '@/lib/tauri';
 import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 import type { SafetyPolicy } from '@/lib/sqlPolicy';
@@ -114,7 +116,8 @@ export function CommandPalette() {
       const path = create ? await tauriService.newSqliteDialog() : await tauriService.openSqliteDialog();
       if (!path) return;
       try {
-        await openSqliteFile(path, { create });
+        const conn = await openSqliteFile(path, { create });
+        for (const notice of conn.info.notices) toast({ title: conn.name, description: notice });
         navigate('/database');
       } catch (error) {
         toast({ title: 'Could not open the file', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
@@ -208,7 +211,7 @@ export function CommandPalette() {
                 .filter((s) => !connections.some((c) => c.profileId === s.id))
                 .map((s) => (
                   <CommandItem key={s.id} value={`connect ${s.name} ${describeSaved(s)}`} onSelect={() => connectSaved(s.id)}>
-                    {colorSwatch(s.color) ? <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colorSwatch(s.color)! }} /> : s.kind === 'postgres' ? <Server /> : <HardDrive />}
+                    {colorSwatch(s.color) ? <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colorSwatch(s.color)! }} /> : s.kind === 'postgres' ? <Server /> : s.path && isDataFile(s.path) ? <FileSpreadsheet /> : <HardDrive />}
                     <span className="truncate">{s.name}</span>
                     <span className="truncate text-xs text-muted-foreground">{describeSaved(s)}</span>
                   </CommandItem>
@@ -222,8 +225,8 @@ export function CommandPalette() {
               })}>
                 <Server /> New Postgres connection…
               </CommandItem>
-              <CommandItem value="open sqlite file" onSelect={() => openFile(false)}>
-                <FolderOpen /> Open SQLite file…
+              <CommandItem value="open file sqlite csv excel json spreadsheet" onSelect={() => openFile(false)}>
+                <FolderOpen /> Open file…
               </CommandItem>
               <CommandItem value="new sqlite database" onSelect={() => openFile(true)}>
                 <FilePlus2 /> New SQLite database…

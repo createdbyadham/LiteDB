@@ -34,6 +34,11 @@ interface AiQueryDialogProps {
   validate?: (sql: string) => Promise<string | null>;
   /** Text the prompt starts with when the dialog opens: a table dropped on Star. */
   seed?: string;
+  /**
+   * Where focus goes when the dialog closes. Without it focus falls to the
+   * page, and Ctrl+Enter on the SQL just placed in the editor does nothing.
+   */
+  onClosed?: () => void;
 }
 
 /** Roughly where the caret is, so Star can watch the words being typed. */
@@ -57,6 +62,7 @@ export function AiQueryDialog({
   onQueryGenerated,
   validate,
   seed = '',
+  onClosed,
 }: AiQueryDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -94,21 +100,42 @@ export function AiQueryDialog({
     couldGenerate.current = canGenerate;
   }, [canGenerate]);
 
-  const handleGenerate = async () => {
-    if (!prompt.trim()) return;
+  // Closing the dialog while a request is out abandons it: its SQL must not
+  // land in the editor seconds later, and in YOLO run, after the user walked
+  // away from it. Each request remembers which opening of the dialog it
+  // belongs to, and closing starts a new one.
+  const session = useRef(0);
+  const handleOpenChange = (next: boolean) => {
+    if (!next) {
+      session.current += 1;
+      if (isLoading) {
+        setIsLoading(false);
+        mascot.setMood('idle');
+        mascot.say(null);
+      }
+    }
+    onOpenChange(next);
+  };
 
+  const handleGenerate = async () => {
+    if (!prompt.trim() || isLoading) return;
+
+    const mine = session.current;
+    const abandoned = () => session.current !== mine;
     setIsLoading(true);
     const tables = aiService.getSchema()?.tables.length ?? 0;
     mascot.setMood('thinking');
     mascot.say(tables ? `Reading ${tables} ${tables === 1 ? 'table' : 'tables'}` : 'Thinking', 60_000);
     try {
       const query = await aiService.generateSqlQuery(prompt, validate, { compact });
+      if (abandoned()) return;
       mascot.setMood('happy', 1600);
       mascot.say('Here is your SQL', 1800);
       onQueryGenerated(query, prompt);
       onOpenChange(false);
       setPrompt('');
     } catch (error) {
+      if (abandoned()) return;
       console.error('Failed to generate query:', error);
       mascot.setMood('error', 1800);
       mascot.say('That did not work', 2200);
@@ -119,21 +146,35 @@ export function AiQueryDialog({
         action: (
           <ToastAction
             altText="Open AI settings"
-            onClick={() => window.dispatchEvent(new CustomEvent('openSettings', { detail: { tab: 'ai' } }))}
+            onClick={() => {
+              // This dialog sits above Settings (z-61), so it has to close
+              // first or it covers it. The question stays for when it reopens.
+              handleOpenChange(false);
+              window.dispatchEvent(new CustomEvent('openSettings', { detail: { tab: 'ai' } }));
+            }}
           >
             AI settings
           </ToastAction>
         ),
       });
     } finally {
-      setIsLoading(false);
+      if (!abandoned()) setIsLoading(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       {/* Above Star's body (z-60), below its fingertips (z-62): it peeks over this edge. */}
-      <DialogContent data-mascot-perch="ai" className="z-[61] sm:max-w-[480px]">
+      <DialogContent
+        data-mascot-perch="ai"
+        className="z-[61] sm:max-w-[480px]"
+        onCloseAutoFocus={(event) => {
+          // Not when Settings opened from the error toast: focus belongs there.
+          if (!onClosed || document.querySelector('[role="dialog"]')) return;
+          event.preventDefault();
+          onClosed();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Text to SQL</DialogTitle>
           <DialogDescription>

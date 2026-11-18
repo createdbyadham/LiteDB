@@ -253,6 +253,22 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
   const [editorFraction, setEditorFraction] = useState(0.5);
   const splitRef = useRef<HTMLDivElement>(null);
 
+  // The toolbar advertises Ctrl/Cmd+K for the whole page, so it has to work
+  // with the focus on a toolbar button or the results too, not only in the
+  // editor (which handles it itself and marks the event handled).
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+      if (event.key !== 'k' && event.key !== 'K') return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      event.preventDefault();
+      setAiOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active]);
+
   useEffect(() => {
     if (!requestAiDialog) return;
     setAiSeed(requestAiDialog.seed);
@@ -504,7 +520,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
       toast({ title: 'Nothing to run', description: 'Write a statement first.' });
       return;
     }
-    const decision = evaluateScript(script, activePolicy(), origin.provenance);
+    const decision = evaluateScript(script, activePolicy(), origin.provenance, conn.dataFile);
     if (decision.statements.length === 0) {
       toast({ title: 'Nothing to run', description: 'No SQL statements found.' });
       return;
@@ -711,6 +727,10 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
     if (!editor) return;
     const doc = editor.getValue();
     const range = f.range && doc.slice(f.range.from, f.range.to) === f.range.sql ? f.range : null;
+    // A statement's range stops before its `;`, which stays in the editor;
+    // the model ends its fix with one too, and two read as an empty statement.
+    const keepsSemicolon = !!range && /^\s*;/.test(doc.slice(range.to));
+    if (keepsSemicolon) fixed = fixed.replace(/;\s*$/, '');
     if (range) editor.replaceRange(range.from, range.to, fixed);
     else editor.replaceRange(0, doc.length, fixed);
     const prompt = `Fix this error: ${f.error}`;
@@ -1087,6 +1107,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
         }}
         seed={aiSeed}
         validate={validateGeneratedSql}
+        onClosed={() => editorRef.current?.focus()}
         onQueryGenerated={placeGenerated}
       />
 

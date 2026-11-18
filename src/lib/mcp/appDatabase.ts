@@ -121,6 +121,43 @@ export class AppSqliteDatabase extends SqliteCatalog {
     }
 }
 
+/**
+ * A CSV, Excel or JSON file the app read into memory. There is no file for a
+ * connection of the agent's own, so reads run on the app's connection, each
+ * one refused a write by Rust (`readOnly`) on a connection that is already
+ * `query_only`. Writes never get that far.
+ */
+const FILE_READ_ONLY_MESSAGE =
+    'LiteDB has a CSV, Excel or JSON file open as a read-only copy, so nothing can change it. ' +
+    'To change the data, import the file into a SQLite database in LiteDB and open that.';
+
+export class AppFileDatabase extends SqliteCatalog {
+    constructor(
+        /** The app's own connection; closing it is the app's to do. */
+        private readonly id: string,
+    ) {
+        super();
+    }
+
+    async read(sql: string): Promise<QueryResult> {
+        return perStatement(await dbRun(this.id, [sql], READ), 1)[0];
+    }
+
+    async write(): Promise<QueryResult> {
+        throw new Error(FILE_READ_ONLY_MESSAGE);
+    }
+
+    async writeAll(): Promise<QueryResult[]> {
+        throw new Error(FILE_READ_ONLY_MESSAGE);
+    }
+
+    async flushWrites(): Promise<void> {}
+
+    async release(): Promise<void> {}
+
+    async close(): Promise<void> {}
+}
+
 export class AppPostgresDatabase extends PostgresCatalog {
     constructor(
         /** The app's own connection; the agent uses its pool. */

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-11-17
+
+### Added
+
+- **Open CSV, Excel and JSON files.** *Open file*, the command palette or a drop on the home screen now takes `.csv`, `.tsv`, `.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods`, `.json`, `.jsonl` and `.ndjson` as well as SQLite databases. The file is read into a copy in memory and opens like any SQLite database: browse and filter it in the grid, query it in the SQL editor, ask Text to SQL about it, draw its schema and export it. A CSV becomes one table named after the file; each worksheet becomes a table named after its sheet; a JSON array of objects becomes a table with a column per key, and an object holding such arrays becomes a table per array.
+  - Columns are typed from the data: INTEGER, REAL, BOOLEAN for a file's own true and false values, TEXT otherwise. Zip codes and other numbers with a leading zero stay text, Excel dates become ISO 8601 text, formulas give their last calculated value, and nested JSON is kept as JSON text. Empty cells are NULL.
+  - The delimiter is guessed (comma, semicolon, tab or pipe). In a semicolon-separated file, as Excel writes where the comma is the decimal separator, `2,50` is the number 2.5. Text that is not UTF-8 is read as UTF-16 when it has a byte-order mark, otherwise as Windows-1252, and LiteDB says so.
+  - A file opens on its first table, in the file's own order: the first sheet of a workbook, the first array of a JSON file.
+  - It is a read-only copy, and the file on disk is never written: the safety mode stays read-only and SQLite itself refuses writes. Open the file again to pick up changes made to it since. To edit the data, import the CSV into a SQLite database as before.
+  - Agents connected over MCP can read it too, through the app's connection. Their writes are refused.
+  - Files are saved to the connection list like SQLite files, with their own icon. Text files up to 1 GB and workbooks up to 256 MB open; larger ones are refused with a reason rather than running the app out of memory.
+
+### Fixed
+
+- **Text to SQL with Qwen and other local models.** Requests from Text to SQL, *Explain* and *Fix* sent the instructions and the schema as separate system messages, which Qwen, Mistral and Gemma chat templates refuse with `400 System message must be at the beginning`. Every request now goes out with one system message, first.
+- **AI settings from a failed Text to SQL.** The toast's *AI settings* button opened Settings underneath the Text to SQL dialog. The dialog now closes first, and keeps the question for when it reopens.
+- **Reasoning models in Text to SQL, Fix and Explain.** A `<think>` block in the reply went into the editor with the SQL, or into the explanation. It is now left out, and a reply that ran out of tokens while reasoning says so instead of placing an empty statement.
+- **Replies that are not SQL.** When the model answered in a sentence ("I cannot answer that, there is no orders table") or sent back nothing, the sentence or a lone `;` went into the editor. Text to SQL and Fix now show the model's words in the error instead. SQL wrapped in a sentence with a code block is taken from the block.
+- **Closing Text to SQL while it works** abandons the request. Before, its SQL still landed in the editor seconds later, and in YOLO mode ran.
+- **Readable AI errors.** A failed request said `401 Invalid API key provided.`, or showed a gateway's whole HTML error page. It now says what happened in a sentence (the key was refused, the model was not found, the provider is limiting requests or had a problem), with the server's own message when it has one. The connection test in Settings uses the same wording.
+- **Fix with AI** no longer leaves a double `;` after the corrected statement.
+- **Ctrl+K** opens Text to SQL from anywhere on the SQL editor page, not only from inside the editor, and after Text to SQL places a query the editor has focus again, so Ctrl+Enter runs it.
+
 ## [2.6.2] - 2026-11-12
 
 ### Changed
@@ -161,6 +184,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Download badge and release links updated to v2.1.0
 
+[2.7.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.7.0
 [2.6.2]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.2
 [2.6.1]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.1
 [2.6.0]: https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.0

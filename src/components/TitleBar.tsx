@@ -1,4 +1,4 @@
-import { Minus, X, Copy, Plus, HardDrive, Server, Search, ShieldAlert } from 'lucide-react';
+import { Minus, X, Copy, Plus, HardDrive, FileSpreadsheet, Server, Search, ShieldAlert } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from './ui/button';
 import { SettingsDialog } from "./ui/settings-dialog";
@@ -54,7 +54,7 @@ const TitleBar = () => {
           {connections.map((conn) => {
             const selected = onDatabase && conn.id === activeId;
             const swatch = colorSwatch(conn.color);
-            const Icon = conn.dialect === 'postgres' ? Server : HardDrive;
+            const Icon = conn.dialect === 'postgres' ? Server : conn.dataFile ? FileSpreadsheet : HardDrive;
             return (
               <button
                 key={conn.id}

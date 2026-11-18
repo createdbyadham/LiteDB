@@ -6,7 +6,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { postgresConnectionId, sqliteConnectionId } from '@/lib/connectionId';
-import { clearActiveConnection, setActiveConnection, setDefaultPolicy } from '@/lib/queryGate';
+import { clearActiveConnection, setActiveConnection, setDefaultPolicy, setReadOnlyLock } from '@/lib/queryGate';
 import type { HandoffPostgres } from '@/lib/mcpHandoff';
 import { aiService, type DatabaseSchema, type TableSchema } from '@/lib/aiService';
 import type { SqlDialect } from '@/lib/schemaTypes';
@@ -14,7 +14,8 @@ import type { TableInfo } from '@/lib/types';
 import type { DbClient } from './client';
 import { SqliteClient } from './sqliteClient';
 import { PgClient, type VectorColumnInfo } from './pgClient';
-import { dbClose, dbDataVersion, dbOpenPostgres, dbOpenSqlite, inTauri, type OpenInfo, type PgConnectConfig } from './native';
+import { dbClose, dbDataVersion, dbOpenFile, dbOpenPostgres, dbOpenSqlite, inTauri, type OpenInfo, type PgConnectConfig } from './native';
+import { isDataFile } from './dataFiles';
 import { fileName, findSqliteConnection, saveConnection, touchConnection, type SavedConnection } from './savedConnections';
 
 export interface OpenConnection {
@@ -40,6 +41,13 @@ export interface OpenConnection {
     handoff: HandoffPostgres | null;
     /** The editor left a transaction open on this connection. */
     inTransaction: boolean;
+    /**
+     * A CSV, Excel or JSON file read into an in-memory copy: always
+     * read-only, and nothing outside the app can change it.
+     */
+    dataFile: boolean;
+    /** A data file's first table in the file's own order (sheet, CSV, JSON key), to open on. */
+    firstTable: string | null;
 }
 
 export interface ConnectMeta {
@@ -151,7 +159,8 @@ function restartWatch(): void {
     if (watchTimer) clearInterval(watchTimer);
     watchTimer = null;
     const conn = activeOpenConnection();
-    if (!conn || conn.dialect !== 'sqlite' || !inTauri()) return;
+    // A file's in-memory copy has no other writer to watch for.
+    if (!conn || conn.dialect !== 'sqlite' || conn.dataFile || !inTauri()) return;
     let last: number | null = null;
     watchTimer = setInterval(() => {
         void dbDataVersion(conn.id)
@@ -178,7 +187,10 @@ function applyActive(): void {
         id: conn.id,
         label: conn.label,
         dialect: conn.dialect,
-        sqlitePath: conn.dialect === 'sqlite' ? conn.detail : undefined,
+        // A file's copy is in memory: there is no database file to hand an
+        // agent, which reads it through this connection instead.
+        sqlitePath: conn.dialect === 'sqlite' ? (conn.dataFile ? null : conn.detail) : undefined,
+        dataFile: conn.dataFile,
         postgres: conn.handoff ?? undefined,
         production: conn.production,
     });
@@ -195,10 +207,15 @@ function add(conn: OpenConnection): void {
     // Read-only by default when tagged production, or when the file or role
     // refuses writes anyway, so the status bar says what will happen.
     setDefaultPolicy(conn.id, conn.production || conn.info.readOnly ? 'read-only' : null);
+    setReadOnlyLock(conn.id, conn.dataFile);
     emit({ connections: [...state.connections, conn], activeId: conn.id });
     applyActive();
 }
 
+/**
+ * Open a file: a SQLite database in place, or a CSV, Excel or JSON file as a
+ * read-only copy (src/lib/db/dataFiles.ts), chosen by its extension.
+ */
 export async function openSqliteFile(
     path: string,
     options: { create?: boolean; profile?: SavedConnection } = {},
@@ -209,10 +226,21 @@ export async function openSqliteFile(
         activateConnection(id);
         return existing;
     }
-    const info = await dbOpenSqlite(id, path, options.create ?? false);
+    // Reopened later, a database named data.csv would be read as a CSV.
+    if (options.create && isDataFile(path)) {
+        throw new Error(`${fileName(path)} is the name of a CSV, Excel or JSON file. Give the new database a name ending in .db.`);
+    }
+    const dataFile = isDataFile(path);
+    const info = dataFile ? await dbOpenFile(id, path) : await dbOpenSqlite(id, path, options.create ?? false);
     const client = new SqliteClient(id, id, path);
+    let firstTable: string | null = null;
     try {
         await client.refreshTables();
+        if (dataFile) {
+            // The sidebar sorts by name; the file's first sheet is the one to show.
+            const first = await client.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY rowid LIMIT 1");
+            firstTable = first.rows[0]?.[0] == null ? null : String(first.rows[0][0]);
+        }
     } catch (error) {
         await dbClose(id).catch(() => undefined);
         throw error;
@@ -232,7 +260,7 @@ export async function openSqliteFile(
         dialect: 'sqlite',
         client,
         info,
-        label: `sqlite:${fileName(path)}`,
+        label: `${dataFile ? 'file' : 'sqlite'}:${fileName(path)}`,
         detail: path,
         tables: client.tables,
         schemaFilter: 'all',
@@ -240,6 +268,8 @@ export async function openSqliteFile(
         vectorColumns: [],
         handoff: null,
         inTransaction: false,
+        dataFile,
+        firstTable,
     };
     add(conn);
     return conn;
@@ -305,6 +335,8 @@ export async function openPostgres(config: PgConnectConfig, meta: ConnectMeta): 
         vectorColumns: client.vectorColumns,
         handoff,
         inTransaction: false,
+        dataFile: false,
+        firstTable: null,
     };
     add(conn);
     return conn;

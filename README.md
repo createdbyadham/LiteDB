@@ -11,9 +11,9 @@ editing, saved connections, SSH tunnels and production tags.
 
 <div align="center">
 
-[![Download for macOS](https://img.shields.io/badge/macOS-Download-111111?style=for-the-badge&logo=apple)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.2)
-[![Download for Windows](https://img.shields.io/badge/Windows-Download-0078D4?style=for-the-badge&logo=windows)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.2)
-[![Download for Linux](https://img.shields.io/badge/Linux-Download-E95420?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.6.2)
+[![Download for macOS](https://img.shields.io/badge/macOS-Download-111111?style=for-the-badge&logo=apple)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.7.0)
+[![Download for Windows](https://img.shields.io/badge/Windows-Download-0078D4?style=for-the-badge&logo=windows)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.7.0)
+[![Download for Linux](https://img.shields.io/badge/Linux-Download-E95420?style=for-the-badge&logo=linux&logoColor=white)](https://github.com/createdbyadham/LiteDB/releases/tag/v2.7.0)
 
 </div>
 
@@ -50,6 +50,7 @@ The macOS app is signed and notarized by Apple. The Windows installers are not c
 - **AI in the editor**: **Ask AI** (`Ctrl/Cmd+K`) opens Text to SQL from the editor, **Explain** describes a query with its plan, and a failed query offers **Explain** and **Fix with AI**, shown side by side before anything changes.
 - **Inline suggestions** (off by default): the model's continuation as grey text after the cursor, `Tab` to accept, `Esc` to dismiss. Fill-in-the-middle on Ollama, chat elsewhere. Never on a production connection, and accepted text counts as AI-written for the safety gate.
 - **Table editor**: double-click a cell to edit it, insert and duplicate rows, filter by any column, follow a foreign key to the row it points at (or see what points here), view and edit JSON, and copy rows as TSV, CSV, JSON, INSERT statements or Markdown. Results scroll smoothly however many rows come back.
+- **CSV, Excel and JSON files**: open a `.csv`, `.tsv`, `.xlsx`, `.xls`, `.ods`, `.json` or `.jsonl` file like a database, a table per file, sheet or JSON array, with column types read from the data. Browse it, query it with SQL or Text to SQL, and export it. It is a read-only copy; the file is never written.
 - **CSV import**: into a new table with inferred column types, or into an existing one with columns matched by name, in one transaction.
 - **Command palette**: `Ctrl/Cmd+P` jumps to any table, connection or action.
 - **Light and dark themes**, or follow the OS.
@@ -467,7 +468,8 @@ npm run tauri build
 
 ### Connecting
 
-- **SQLite**: *Open SQLite file*, drop a file anywhere on the home screen, or *New SQLite database* for an empty one. Files you open are saved to the list for next time.
+- **SQLite**: *Open file*, drop a file anywhere on the home screen, or *New SQLite database* for an empty one. Files you open are saved to the list for next time.
+- **CSV, Excel and JSON**: *Open file* or drop it, as for SQLite. It opens read-only, as it is at that moment; open it again to see later changes. To edit the rows, import the CSV into a SQLite database instead (**Import** in the table editor).
 - **PostgreSQL**: *Connect to Postgres*, or paste a `postgres://` URL anywhere on the home screen. Give it a name and a colour, tag it production if it is, choose the SSL mode, and turn on *Connect through SSH* for a database behind a bastion. *Test* checks it without saving.
 - Saved connections reopen with one click. Several can be open at once; each is a tab in the title bar, and `+` goes back to the list.
 

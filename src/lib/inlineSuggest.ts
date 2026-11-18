@@ -12,7 +12,7 @@
 // components/SqlEditor/ghostText.ts. This file is free of CodeMirror and
 // browser imports so the self-test can run it.
 
-import type { ChatMessage } from './promptBuilder';
+import { withoutThinking, type ChatMessage } from './promptBuilder';
 import type { SqlDialect } from './schemaTypes';
 import { findTable, tablesIn, type CatalogColumn, type CatalogTable, type ColumnCatalog } from './sqlComplete';
 import { tokenize } from './sqlTokenizer';
@@ -277,19 +277,6 @@ export function inlineChatMessages(prompt: InlinePrompt): ChatMessage[] {
 }
 
 // --- reasoning models -------------------------------------------------------------------
-
-/**
- * The answer without reasoning written into it: `<think>` blocks as some
- * servers return them, one cut off by the token limit, and the end of one
- * whose start was in the prompt template.
- */
-function withoutThinking(text: string): string {
-    let rest = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
-    const close = rest.indexOf('</think>');
-    if (close !== -1) rest = rest.slice(close + '</think>'.length);
-    // The break after the reasoning is not part of the answer.
-    return rest === text ? text : rest.replace(/^\s*\n/, '');
-}
 
 /** A chat model's reply, as far as a suggestion is concerned. */
 export interface ChatReply {

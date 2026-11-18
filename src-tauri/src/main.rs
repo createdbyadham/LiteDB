@@ -279,6 +279,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             db::db_open_sqlite,
+            db::db_open_file,
             db::db_open_postgres,
             db::db_close,
             db::db_run,

@@ -34,6 +34,11 @@ export interface ToolConfig {
      * absent: every write waits for approval.
      */
     directWrites?: DirectWrites | null;
+    /**
+     * A CSV, Excel or JSON file the app opened as a read-only copy: no mode
+     * makes it writable, so a refusal says so instead of suggesting one.
+     */
+    readOnlyCopy?: boolean;
 }
 
 /**

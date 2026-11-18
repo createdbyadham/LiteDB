@@ -7,7 +7,10 @@ import {
   buildFixQueryMessages,
   buildRepairMessages,
   buildTextToSqlMessages,
+  forProvider,
+  looksLikeSql,
   stripSqlFences,
+  withoutThinking,
   type ChatMessage,
 } from './promptBuilder';
 import { attachSampleValues, type QueryRunner } from './schemaSamples';
@@ -351,16 +354,84 @@ const PROVIDER_NAMES: Record<AIProvider, string> = {
  * without Ollama reads as "AI does not work here". Say what was tried and
  * that the hosted providers need nothing installed.
  */
-export function describeAIError(error: unknown): string {
-  const provider = getSettings().activeProvider;
+export function describeAIError(
+  error: unknown,
+  // The settings dialog tests a provider it has not saved yet.
+  target: { provider: AIProvider; endpoint?: string } = { provider: getSettings().activeProvider },
+): string {
+  const provider = target.provider;
   const message = error instanceof Error ? error.message : String(error ?? '');
   const unreachable = error instanceof OpenAI.APIConnectionError || /^connection error\.?$/i.test(message.trim());
   if (unreachable && provider === 'ollama') {
-    const endpoint = getSettings().configs.ollama.endpoint || defaultSettings.configs.ollama.endpoint;
+    const endpoint = target.endpoint || getSettings().configs.ollama.endpoint || defaultSettings.configs.ollama.endpoint;
     return `Could not reach Ollama at ${endpoint}. Start Ollama, or choose OpenAI, Claude or Gemini in Settings → AI and paste an API key.`;
   }
   if (unreachable) return `Could not reach ${PROVIDER_NAMES[provider]}. Check your network and the provider in Settings → AI.`;
+  if (error instanceof OpenAI.APIError && typeof error.status === 'number') {
+    return describeStatus(PROVIDER_NAMES[provider], error.status, serverMessage(error.message));
+  }
   return message || 'Check your AI provider in Settings → AI and try again.';
+}
+
+/**
+ * The server's own words from an SDK error, readable in a toast. The SDK puts
+ * the status first ("401 Invalid API key"), and a proxy or gateway in front
+ * of a model answers with an HTML page, which is markup, not a message.
+ */
+function serverMessage(message: string): string {
+  let text = message.replace(/^\d{3}\s+/, '');
+  if (/<\/?[a-z][^>]*>/i.test(text)) {
+    // An error page: its heading or title says it, the rest is decoration.
+    const heading = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(text) ?? /<title[^>]*>([\s\S]*?)<\/title>/i.exec(text);
+    text = (heading ? heading[1] : text.replace(/<(head|script|style)[\s\S]*?<\/\1>/gi, ' ')).replace(/<[^>]+>/g, ' ');
+  }
+  text = text.replace(/\s+/g, ' ').trim().replace(/^\d{3}\s+(?=[A-Za-z])/, '');
+  if (/^(status code|\d{3} status code)/i.test(text) || /^\(no body\)$/i.test(text)) text = '';
+  return text.length > 220 ? `${text.slice(0, 219)}…` : text;
+}
+
+function describeStatus(name: string, status: number, said: string): string {
+  const who = name.charAt(0).toUpperCase() + name.slice(1);
+  const detail = said ? ` It said: ${said.replace(/\.?$/, '.')}` : '';
+  if (status === 401 || status === 403) return `${who} refused the API key (${status}).${detail} Check the key in Settings → AI.`;
+  if (status === 404) return `${who} could not find the model or the address (404).${detail} Check the model name and endpoint in Settings → AI.`;
+  if (status === 408 || status === 504) return `${who} took too long to answer (${status}). Try again, or try a smaller model.`;
+  if (status === 413) return `The request is too large for ${name} (413). Turn on Compact in the context meter and try again.`;
+  if (status === 429) return `${who} is limiting requests (429).${detail} Wait a moment and try again.`;
+  if (status >= 500) return `${who} had a problem on its side (${status}).${detail} Try again in a moment.`;
+  return `${who} refused the request (${status}).${detail}`;
+}
+
+/**
+ * The SQL in a reply, or an error saying why there is none. A reply that is
+ * empty, or is a sentence rather than a query, is never handed to the editor:
+ * the user would find a lone `;` or the model's apology in their script.
+ */
+function sqlFrom(reply: ChatReply): string {
+  const sql = stripSqlFences(reply.text);
+  if (!sql) {
+    throw new Error(
+      spentOnThinking(reply)
+        ? 'The model spent its whole reply reasoning and wrote no SQL. Try again, or choose a model without thinking in Settings → AI.'
+        : 'The model sent back an empty reply. Try again, or try another model in Settings → AI.',
+    );
+  }
+  if (!looksLikeSql(sql)) {
+    const said = sql.replace(/\s+/g, ' ');
+    throw new Error(`The model answered in words instead of SQL: “${said.length > 240 ? `${said.slice(0, 239)}…` : said}”`);
+  }
+  return sql;
+}
+
+/** Prose from a reply, without reasoning, or an error saying why there is none. */
+function proseFrom(reply: ChatReply): string {
+  const text = withoutThinking(reply.text).trim();
+  if (text) return text;
+  throw new Error(
+    spentOnThinking(reply)
+      ? 'The model spent its whole reply reasoning and wrote no explanation. Try again, or choose a model without thinking in Settings → AI.'
+      : 'The model returned an empty explanation.',
+  );
 }
 
 function createClient() {
@@ -537,7 +608,7 @@ async function chat(
   const model = options.model || settings.configs[provider].modelName || defaultModelFor(provider);
   const stop = stopFor(provider, options.stop);
   const body = {
-    messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    messages: forProvider(messages) as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     ...samplingFor(provider, temperature),
     max_tokens: maxTokens,
     model,
@@ -571,16 +642,6 @@ function inlineHintsFor(settings: AISettings): Record<string, unknown> | undefin
   if (host !== 'openrouter.ai' && !host.endsWith('.openrouter.ai')) return undefined;
   // `low`, not `none`: a model that must reason (gpt-oss) refuses `none`.
   return { provider: { sort: 'latency' }, reasoning: { effort: 'low' } };
-}
-
-/** The text of one chat completion; see chat. */
-async function complete(
-  messages: ChatMessage[],
-  maxTokens: number,
-  temperature: number,
-  options: { model?: string; stop?: string[]; maxRetries?: number } = {},
-): Promise<string> {
-  return (await chat(messages, maxTokens, temperature, options)).text;
 }
 
 /** The model inline suggestions use: their own if one is set, otherwise the provider's. */
@@ -784,7 +845,7 @@ export const aiService = {
       return {
         ok: false,
         model,
-        error: error instanceof Error ? error.message : String(error),
+        error: describeAIError(error, { provider, endpoint: config.endpoint }),
       };
     }
   },
@@ -850,15 +911,14 @@ export const aiService = {
       let sql = '';
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const response = await client.chat.completions.create({
-          messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-          ...samplingFor(settings.activeProvider, 0),
-          max_tokens: REPLY_TOKENS,
-          model: modelName
-        });
-
-        sql = stripSqlFences(response.choices[0].message.content || '');
-        if (!validate || attempt === maxAttempts - 1) return sql;
+        const reply = await chat(messages, REPLY_TOKENS, 0, { model: modelName });
+        const last = !validate || attempt === maxAttempts - 1;
+        // Prose on the first attempt goes back through validation, whose
+        // syntax error tells the model to answer in SQL. On the last it is
+        // refused rather than placed in the editor.
+        sql = last ? sqlFrom(reply) : stripSqlFences(reply.text);
+        if (!sql) sql = sqlFrom(reply);
+        if (last) return sql;
 
         // No read-only gate here, deliberately. `validate` compiles the
         // statement instead of running it, so a write is as safe to check as
@@ -881,9 +941,7 @@ export const aiService = {
    * real error and the schema, so it can point at the column that does exist.
    */
   async explainError(sql: string, error: string): Promise<string> {
-    const text = await complete(buildExplainErrorMessages(sql, error, currentSchema), EXPLAIN_TOKENS, 0.2);
-    if (!text.trim()) throw new Error('The model returned an empty explanation.');
-    return text.trim();
+    return proseFrom(await chat(buildExplainErrorMessages(sql, error, currentSchema), EXPLAIN_TOKENS, 0.2));
   },
   /**
    * A corrected version of a query that failed, keeping its intent. When
@@ -895,9 +953,11 @@ export const aiService = {
     const attempts = validate ? 2 : 1;
     let fixed = '';
     for (let attempt = 0; attempt < attempts; attempt++) {
-      fixed = stripSqlFences(await complete(messages, REPLY_TOKENS, 0));
-      if (!fixed) throw new Error('The model returned no SQL.');
-      if (!validate || attempt === attempts - 1) break;
+      const reply = await chat(messages, REPLY_TOKENS, 0);
+      const last = !validate || attempt === attempts - 1;
+      fixed = last ? sqlFrom(reply) : stripSqlFences(reply.text);
+      if (!fixed) fixed = sqlFrom(reply);
+      if (last) break;
       const failure = await validate(fixed);
       if (!failure) break;
       messages = buildRepairMessages(messages, fixed, failure);
@@ -911,8 +971,6 @@ export const aiService = {
    */
   async explainQuery(sql: string, plan: string | null): Promise<string> {
     const schema = currentSchema ? withoutSampleValues(currentSchema) : null;
-    const text = await complete(buildExplainQueryMessages(sql, plan, schema), 700, 0.2);
-    if (!text.trim()) throw new Error('The model returned an empty explanation.');
-    return text.trim();
+    return proseFrom(await chat(buildExplainQueryMessages(sql, plan, schema), 700, 0.2));
   }
 };

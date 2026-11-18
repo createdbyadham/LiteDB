@@ -80,7 +80,8 @@ app imports is free of Node, and the self-tests run the shared parts in Node.
 
 - **Rust** (`src-tauri/src/`): `main.rs` (window, the HTTP proxy AI providers
   go through, keychain access), and `db/`: `mod.rs` (the `db_*` commands and
-  the SQLite file allowlist), `sqlite.rs`, `postgres.rs` (a small pool plus one
+  the SQLite file allowlist), `sqlite.rs`, `datafile.rs` (CSV, Excel and JSON
+  files read into a read-only in-memory SQLite copy), `postgres.rs` (a small pool plus one
   session for the editor, so `SET` and transactions carry over), `ssh.rs`
   (tunnels, host keys checked against `known_hosts`), `value.rs` (how cells
   cross into JSON).

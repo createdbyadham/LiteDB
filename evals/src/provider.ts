@@ -5,7 +5,7 @@
 // not exist outside the desktop shell.
 
 import OpenAI from 'openai';
-import type { ChatMessage } from '../../src/lib/promptBuilder';
+import { forProvider, type ChatMessage } from '../../src/lib/promptBuilder';
 
 export interface ProviderConfig {
     provider: string;
@@ -137,7 +137,7 @@ export async function generate(
         // notes, because it makes that run less reproducible.
         const params: Record<string, unknown> = {
             model: config.model,
-            messages,
+            messages: forProvider(messages),
             [shape.tokenParam]: 1000,
         };
         if (shape.sampling) {

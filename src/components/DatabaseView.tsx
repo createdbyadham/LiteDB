@@ -59,7 +59,11 @@ function reportError(title: string, error: unknown) {
 function Workspace({ conn }: { conn: OpenConnection }) {
   const memory = remembered.get(conn.id);
   const client = conn.client;
-  const [selectedTable, setSelectedTable] = useState<string>(memory?.table ?? '');
+  // A CSV, workbook or JSON file opens on its first table, as a spreadsheet
+  // opens on its first sheet.
+  const [selectedTable, setSelectedTable] = useState<string>(
+    memory?.table ?? conn.firstTable ?? '',
+  );
   const [activeTab, setActiveTab] = useState<Tab>(memory?.tab ?? 'browse');
   const [tableQuery, setTableQuery] = useState<TableQuery>(memory?.query ?? DEFAULT_QUERY);
   const [tableColumns, setTableColumns] = useState<ColumnInfo[]>([]);
@@ -360,15 +364,18 @@ function Workspace({ conn }: { conn: OpenConnection }) {
             <Button variant="ghost" size="sm" onClick={() => void handleRefresh()} className="h-8" title="Refresh" aria-label="Refresh">
               <RefreshCw className="w-4 h-4" />
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setImportTarget({ table: activeTab === 'browse' ? selectedTable || undefined : undefined })}
-              className="h-8"
-            >
-              <Upload className="w-4 h-4 mr-1.5" />
-              Import
-            </Button>
+            {/* A CSV or Excel file's copy takes no rows. */}
+            {!conn.dataFile && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setImportTarget({ table: activeTab === 'browse' ? selectedTable || undefined : undefined })}
+                className="h-8"
+              >
+                <Upload className="w-4 h-4 mr-1.5" />
+                Import
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => setExportDialogOpen(true)} className="h-8">
               <Download className="w-4 h-4 mr-1.5" />
               Export

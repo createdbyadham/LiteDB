@@ -30,7 +30,7 @@ import { inTauri } from '@/lib/db/native';
 import { mcpPolicyFromApp } from '@/lib/mcpHandoff';
 import { activeConnection, policyFor } from '@/lib/queryGate';
 import { serializeUndo, UNDO_FOLDER, type UndoRecord } from '@/lib/undoWrite';
-import { AppPostgresDatabase, AppSqliteDatabase } from './appDatabase';
+import { AppFileDatabase, AppPostgresDatabase, AppSqliteDatabase } from './appDatabase';
 
 type McpEvent =
     | { kind: 'open'; session: number }
@@ -135,22 +135,25 @@ class Target {
     private async resolve(): Promise<{ db: Database; config: ToolConfig }> {
         const active = activeConnection();
         if (!active) throw new Error(NO_CONNECTION_MESSAGE);
-        if (active.dialect === 'sqlite' && !active.sqlitePath) throw new Error(IN_MEMORY_MESSAGE);
+        if (active.dialect === 'sqlite' && !active.sqlitePath && !active.dataFile) throw new Error(IN_MEMORY_MESSAGE);
 
-        const policy = mcpPolicyFromApp(policyFor(active.id));
+        // A CSV or Excel file's copy is always read-only (queryGate locks it).
+        const policy = active.dataFile ? 'read-only' : mcpPolicyFromApp(policyFor(active.id));
         // A token is bound to this. For Postgres the role is part of it, so a
         // preview taken as one user cannot run as another.
-        const target =
-            active.dialect === 'sqlite'
-                ? (active.sqlitePath as string)
-                : `${active.postgres?.username ?? ''}@${active.id}`;
+        const target = active.dataFile
+            ? `memory:${active.id}`
+            : active.dialect === 'sqlite'
+              ? (active.sqlitePath as string)
+              : `${active.postgres?.username ?? ''}@${active.id}`;
         const fingerprint = [active.dialect, active.id, target, policy].join('\0');
         if (!this.db || this.fingerprint !== fingerprint) {
             const writable = policy !== 'read-only';
-            const next =
-                active.dialect === 'sqlite'
-                    ? new AppSqliteDatabase(target, writable)
-                    : new AppPostgresDatabase(active.id, writable);
+            const next = active.dataFile
+                ? new AppFileDatabase(active.id)
+                : active.dialect === 'sqlite'
+                  ? new AppSqliteDatabase(target, writable)
+                  : new AppPostgresDatabase(active.id, writable);
             const previous = this.db;
             this.db = next;
             this.fingerprint = fingerprint;
@@ -168,6 +171,7 @@ class Target {
                 // Read on every call, like the policy: turning it off applies
                 // to the agent's next write. Never on a production connection.
                 directWrites: policy === 'read-only' ? null : directWritesFor(active.id, active.production),
+                readOnlyCopy: active.dataFile ?? false,
             },
         };
     }

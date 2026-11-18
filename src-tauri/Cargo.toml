@@ -1,6 +1,6 @@
 [package]
 name = "LiteDB"
-version = "2.6.2"
+version = "2.7.0"
 description = "LiteDB - A simple and lightweight database viewer/editor for your projects"
 authors = ["Adham Ehab"]
 edition = "2021"
@@ -39,6 +39,11 @@ log = "0.4"
 # as Tauri finds it, without starting Tauri, and the endpoint's secrets.
 dirs = "7"
 getrandom = "0.3"
+# Opening CSV, Excel and JSON files as read-only databases (src/db/datafile.rs).
+# encoding_rs is already in the tree through reqwest.
+csv = "1.4"
+calamine = "0.38"
+encoding_rs = "0.8"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Server, HardDrive, Check, Eye, Flame, Plug, ShieldAlert, ShieldCheck, ShieldOff, KeyRound, GitBranch } from 'lucide-react';
+import { Server, HardDrive, FileSpreadsheet, Check, Eye, Flame, Plug, ShieldAlert, ShieldCheck, ShieldOff, KeyRound, GitBranch } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +21,7 @@ import { useSafetyPolicy } from '@/hooks/useSafetyPolicy';
 import { acknowledgeYolo, hasAcknowledgedYolo } from '@/lib/queryGate';
 import type { SafetyPolicy } from '@/lib/sqlPolicy';
 import type { OpenConnection } from '@/lib/db/connections';
+import { dataFileKind } from '@/lib/db/dataFiles';
 import { cn } from '@/lib/utils';
 
 /**
@@ -61,6 +62,7 @@ interface StatusBarProps {
 }
 
 function engineLabel(conn: OpenConnection): string {
+  if (conn.dataFile) return `${dataFileKind(conn.detail) ?? 'File'}, read-only copy`;
   const version = conn.info.serverVersion.split(' ')[0];
   const name = conn.dialect === 'postgres' ? 'PostgreSQL' : 'SQLite';
   return version ? `${name} ${version}` : name;
@@ -82,6 +84,8 @@ const StatusBar = ({ conn, tableCount = 0 }: StatusBarProps) => {
    */
   const choosePolicy = (next: SafetyPolicy) => {
     if (next === policy) return;
+    // A file's in-memory copy cannot be written, whatever the mode says.
+    if (conn.dataFile) return;
     if (conn.production && policy === 'read-only' && next !== 'read-only') {
       setConfirmingProduction(next);
       return;
@@ -108,7 +112,13 @@ const StatusBar = ({ conn, tableCount = 0 }: StatusBarProps) => {
         </div>
         <div className="h-3 w-px bg-border" />
         <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground" title={conn.detail}>
-          {conn.dialect === 'postgres' ? <Server className="w-3 h-3 shrink-0" /> : <HardDrive className="w-3 h-3 shrink-0" />}
+          {conn.dialect === 'postgres' ? (
+            <Server className="w-3 h-3 shrink-0" />
+          ) : conn.dataFile ? (
+            <FileSpreadsheet className="w-3 h-3 shrink-0" />
+          ) : (
+            <HardDrive className="w-3 h-3 shrink-0" />
+          )}
           <span className="max-w-[220px] truncate">{conn.name}</span>
           <span className="hidden md:inline text-muted-foreground/70">{engineLabel(conn)}</span>
         </div>
@@ -120,7 +130,7 @@ const StatusBar = ({ conn, tableCount = 0 }: StatusBarProps) => {
         {tableCount > 0 && (
           <>
             <div className="h-3 w-px bg-border" />
-            <span className="text-muted-foreground">{tableCount} tables</span>
+            <span className="text-muted-foreground">{tableCount} {tableCount === 1 ? 'table' : 'tables'}</span>
           </>
         )}
         {conn.production && (
@@ -155,6 +165,7 @@ const StatusBar = ({ conn, tableCount = 0 }: StatusBarProps) => {
                 return (
                   <DropdownMenuItem
                     key={option}
+                    disabled={conn.dataFile && option !== 'read-only'}
                     onClick={() => choosePolicy(option)}
                     className={cn('flex items-start gap-2.5 px-2.5 py-2', option === policy && 'bg-accent')}
                   >
@@ -168,7 +179,11 @@ const StatusBar = ({ conn, tableCount = 0 }: StatusBarProps) => {
                 );
               })}
               <div className="px-2.5 py-2 text-xs text-muted-foreground border-t mt-1">
-                Remembered for <span className="font-mono text-foreground/80">{connection.label}</span>
+                {conn.dataFile ? (
+                  <>A copy of <span className="font-mono text-foreground/80">{connection.label.replace(/^file:/, '')}</span> read into memory, so it stays read-only. The file itself is never changed.</>
+                ) : (
+                  <>Remembered for <span className="font-mono text-foreground/80">{connection.label}</span></>
+                )}
                 {conn.production && <span className="block mt-1">Tagged production: starts read-only.</span>}
               </div>
             </DropdownMenuContent>

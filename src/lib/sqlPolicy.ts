@@ -124,6 +124,8 @@ export function evaluateScript(
     script: string,
     connectionPolicy: SafetyPolicy,
     provenance: Provenance,
+    /** The connection can never be written (a CSV or Excel file's copy), so no mode change helps. */
+    locked = false,
 ): GateDecision {
     const { statements, kind, worst } = classifyScript(script);
     // YOLO opts out of the floor. Every other policy applies it to generated
@@ -174,9 +176,11 @@ export function evaluateScript(
             action: 'block',
             reason:
                 `${authored} contains a ${KIND_LABEL[kind]} and this connection is read-only. ` +
-                (floored
-                    ? 'Generated SQL is never run unattended.'
-                    : 'Switch the connection out of read-only mode to run it.'),
+                (locked
+                    ? 'It is a read-only copy of a file; import the file into a SQLite database to change the data.'
+                    : floored
+                      ? 'Generated SQL is never run unattended.'
+                      : 'Switch the connection out of read-only mode to run it.'),
             requireTypedConfirmation: false,
         };
     }

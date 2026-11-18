@@ -23,6 +23,13 @@ import {
     isSampleCandidate,
     normalizeSamples,
 } from '../../src/lib/schemaSamples';
+import {
+    buildExplainErrorMessages,
+    buildTextToSqlMessages,
+    forProvider,
+    looksLikeSql,
+    stripSqlFences,
+} from '../../src/lib/promptBuilder';
 import type { ProviderConfig } from './provider';
 import { applicableCases, referenceSqlFor, runCase } from './runner';
 import type { EvalCase, Outcome } from './types';
@@ -838,6 +845,38 @@ async function main(): Promise<void> {
         await fixture.close();
     }
 
+    // Chat templates such as Qwen's answer 400 to a system message after the
+    // first, so every request goes out with exactly one, at the start.
+    {
+        const schema = fixture.schema;
+        const built = buildExplainErrorMessages('SELECT x FROM orders', 'no such column: x', schema);
+        const textToSql = buildTextToSqlMessages('top customers', schema, { fewShot: 2, now: new Date('2024-09-01T00:00:00Z') });
+        for (const [name, messages] of [['explain error', built], ['text to sql with examples', textToSql]] as const) {
+            const sent = forProvider(messages);
+            check(
+                `${name}: one system message, first`,
+                sent[0].role === 'system' && sent.filter((m) => m.role === 'system').length === 1,
+            );
+            check(
+                `${name}: nothing dropped or reordered`,
+                sent[0].content === messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n') &&
+                    JSON.stringify(sent.slice(1)) === JSON.stringify(messages.filter((m) => m.role !== 'system')),
+            );
+        }
+        check('no system message adds none', forProvider([{ role: 'user', content: 'hi' }]).length === 1);
+    }
+
+    // What a model's reply turns into before it reaches the editor.
+    {
+        const sql = 'SELECT name FROM customers;';
+        check('reasoning is dropped from a reply', stripSqlFences(`<think>count them</think>\n${sql}`) === sql);
+        check('reasoning cut off by the limit leaves nothing', stripSqlFences('<think>still going') === '');
+        check('a fenced block inside prose is the answer', stripSqlFences(`Sure! Here it is:\n\n\`\`\`sql\n${sql}\n\`\`\`\n\nThis lists names.`) === sql);
+        check('a bare fenced reply still unwraps', stripSqlFences(`\`\`\`sql\n${sql}\n\`\`\``) === sql);
+        check('plain SQL is unchanged', stripSqlFences(sql) === sql);
+        check('SQL reads as SQL', looksLikeSql(sql) && looksLikeSql('with x as (select 1) select * from x') && looksLikeSql('-- top ones\nSELECT 1') && looksLikeSql('(SELECT 1) UNION (SELECT 2)'));
+        check('a refusal does not read as SQL', !looksLikeSql('I cannot answer that, there is no orders table.') && !looksLikeSql('Sorry, which table?') && !looksLikeSql(''));
+    }
 
     console.log('');
     console.log(failures === 0 ? 'self-test passed' : `self-test FAILED (${failures})`);

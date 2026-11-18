@@ -23,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Database, FilePlus2, FolderOpen, HardDrive, Loader2, MoreHorizontal, Plus, Search, Server, ShieldAlert, Upload } from 'lucide-react';
+import { Database, FilePlus2, FileSpreadsheet, FolderOpen, HardDrive, Loader2, MoreHorizontal, Plus, Search, Server, ShieldAlert, Upload } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import icon from '/titlebaricon2.png';
@@ -32,6 +32,7 @@ import { pgSslHint, pgSupabaseDirectHint } from '@/lib/pgSslHint';
 import { formatPostgresUrl, looksLikePostgresUrl } from '@/lib/db/pgUrl';
 import { inTauri, type PgConnectConfig } from '@/lib/db/native';
 import { activateConnection, openPostgres, openSqliteFile, useConnections } from '@/lib/db/connections';
+import { isDataFile } from '@/lib/db/dataFiles';
 import {
   colorSwatch,
   deleteConnection,
@@ -85,7 +86,8 @@ const ConnectionsView = () => {
     async (path: string, create = false) => {
       setConnecting(path);
       try {
-        await openSqliteFile(path, { create });
+        const conn = await openSqliteFile(path, { create });
+        for (const notice of conn.info.notices) toast({ title: conn.name, description: notice });
         navigate('/database');
       } catch (error) {
         toast({
@@ -195,7 +197,7 @@ const ConnectionsView = () => {
     }
   });
 
-  // Drop a SQLite file anywhere on the screen.
+  // Drop a SQLite, CSV, Excel or JSON file anywhere on the screen.
   useEffect(() => {
     if (!inTauri()) return;
     let active = true;
@@ -272,7 +274,7 @@ const ConnectionsView = () => {
       {isDragging && (
         <div className="pointer-events-none fixed inset-0 z-50 m-3 flex items-center justify-center rounded-2xl border-2 border-dashed border-key/70 bg-key/5">
           <div className="flex items-center gap-2 text-sm font-medium text-key">
-            <Upload className="h-4 w-4" /> Drop to open the SQLite file
+            <Upload className="h-4 w-4" /> Drop to open the file
           </div>
         </div>
       )}
@@ -282,7 +284,7 @@ const ConnectionsView = () => {
           <div className="flex-1">
             <h1 className="text-lg font-semibold">Connections</h1>
             <p className="text-sm text-muted-foreground">
-              Open a SQLite file, or connect to PostgreSQL. Your data stays on this machine.
+              Open a file or drop one here, or connect to PostgreSQL. Your data stays on this machine.
             </p>
           </div>
         </div>
@@ -295,8 +297,8 @@ const ConnectionsView = () => {
           >
             <span className="rounded-lg bg-secondary p-2"><FolderOpen className="h-4 w-4" /></span>
             <span>
-              <span className="block text-sm font-medium">Open SQLite file</span>
-              <span className="block text-xs text-muted-foreground">or drop one anywhere</span>
+              <span className="block text-sm font-medium">Open file</span>
+              <span className="block text-xs text-muted-foreground">SQLite, CSV, Excel, JSON</span>
             </span>
           </button>
           <button
@@ -346,7 +348,7 @@ const ConnectionsView = () => {
               {filtered.map((entry) => {
                 const swatch = colorSwatch(entry.color);
                 const isOpen = open.some((c) => c.profileId === entry.id);
-                const Icon = entry.kind === 'postgres' ? Server : HardDrive;
+                const Icon = entry.kind === 'postgres' ? Server : entry.path && isDataFile(entry.path) ? FileSpreadsheet : HardDrive;
                 const busy = connecting === entry.id || connecting === entry.path;
                 return (
                   <li key={entry.id} className="group relative flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
@@ -440,7 +442,7 @@ const ConnectionsView = () => {
             <AlertDialogTitle>Remove {confirmDelete?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
               {confirmDelete?.kind === 'sqlite'
-                ? 'It leaves this list. The database file itself is not touched.'
+                ? 'It leaves this list. The file itself is not touched.'
                 : 'It leaves this list, and any password saved for it is deleted from the keychain. The database is not touched.'}
             </AlertDialogDescription>
           </AlertDialogHeader>

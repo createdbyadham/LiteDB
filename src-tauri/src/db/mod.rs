@@ -9,6 +9,7 @@
 //! session per connection for the SQL editor, so a `BEGIN` typed in the editor
 //! stays on the connection that will see the `COMMIT`.
 
+pub mod datafile;
 pub mod postgres;
 pub mod sqlite;
 pub mod ssh;
@@ -294,7 +295,8 @@ fn remember_file(app: &AppHandle, path: &Path) {
     }
 }
 
-/// Only files the user picked (dialog, drop) are reachable, as plugin-fs
+/// Only files the user picked (dialog, drop) are reachable, SQLite databases
+/// and the CSV, Excel and JSON files `db_open_file` reads alike, as plugin-fs
 /// enforces for the webview. A file picked once stays reachable after a
 /// restart through a remembered list, so saved connections can reopen it
 /// without widening access to anything the user never chose.
@@ -331,6 +333,27 @@ pub async fn db_open_sqlite(
     })
     .await
     .map_err(|e| e.to_string())??;
+    let info = OpenInfo {
+        id: id.clone(),
+        ..info
+    };
+    state.insert(id, Connection::Sqlite(conn)).await;
+    Ok(info)
+}
+
+/// Open a CSV, Excel or JSON file as a read-only database: a copy in memory,
+/// read now. The same access rule as a SQLite file: the user picked it.
+#[tauri::command]
+pub async fn db_open_file(
+    app: AppHandle,
+    state: State<'_, DbState>,
+    id: String,
+    path: String,
+) -> Result<OpenInfo, String> {
+    let path = check_sqlite_path(&app, &path)?;
+    let (conn, info) = tauri::async_runtime::spawn_blocking(move || datafile::open(&path))
+        .await
+        .map_err(|e| e.to_string())??;
     let info = OpenInfo {
         id: id.clone(),
         ..info

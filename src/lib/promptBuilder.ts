@@ -163,15 +163,70 @@ ${serializeSchema(schema, options.qualifyColumns)}
 }
 
 /**
- * Models ignore the "no code fences" constraint often enough that stripping is
- * mandatory, not defensive. Handles ```sql / ``` on either end.
+ * The messages as a provider will accept them: every system message joined
+ * into one, at the start, with the other turns in their order.
+ *
+ * The builders keep instructions, schema and the examples note as separate
+ * system messages because the context meter measures them apart. Many chat
+ * templates refuse that: Qwen, Mistral and Gemma served through llama.cpp,
+ * LM Studio or vLLM answer 400 "System message must be at the beginning"
+ * to any system message after the first. Every request goes through this.
+ */
+export function forProvider(messages: ChatMessage[]): ChatMessage[] {
+    const system = messages.filter((m) => m.role === 'system').map((m) => m.content);
+    const rest = messages.filter((m) => m.role !== 'system');
+    return system.length === 0 ? rest : [{ role: 'system', content: system.join('\n\n') }, ...rest];
+}
+
+/**
+ * The answer without reasoning written into it: `<think>` blocks as some
+ * servers return them (Qwen3, DeepSeek R1 and others through llama.cpp, LM
+ * Studio or vLLM), one cut off by the token limit, and the end of one whose
+ * start was in the prompt template.
+ */
+export function withoutThinking(text: string): string {
+    let rest = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '');
+    const close = rest.indexOf('</think>');
+    if (close !== -1) rest = rest.slice(close + '</think>'.length);
+    // The break after the reasoning is not part of the answer.
+    return rest === text ? text : rest.replace(/^\s*\n/, '');
+}
+
+/**
+ * The SQL in a model's reply. Models ignore the "no code fences" constraint
+ * often enough that stripping is mandatory, not defensive, and small ones
+ * wrap the query in a sentence ("Here is the query: ```sql ... ```"), so a
+ * fenced block anywhere in the reply is taken as the answer.
  */
 export function stripSqlFences(content: string): string {
-    return content
-        .replace(/^```sql\s*/i, '')
-        .replace(/^```\s*/i, '')
+    const text = withoutThinking(content).trim();
+    const fenced = /```[a-z]*[ \t]*\r?\n?([\s\S]*?)```/i.exec(text);
+    if (fenced && fenced[1].trim()) return fenced[1].trim();
+    return text
+        .replace(/^```[a-z]*\s*/i, '')
         .replace(/\s*```$/, '')
         .trim();
+}
+
+const SQL_START = new Set([
+    'select', 'with', 'insert', 'update', 'delete', 'replace', 'merge', 'upsert', 'values', 'table',
+    'create', 'alter', 'drop', 'truncate', 'rename', 'comment', 'grant', 'revoke',
+    'explain', 'analyze', 'analyse', 'pragma', 'vacuum', 'reindex', 'attach', 'detach',
+    'begin', 'start', 'commit', 'end', 'rollback', 'savepoint', 'release',
+    'show', 'describe', 'set', 'reset', 'call', 'do', 'copy', 'refresh', 'cluster', 'listen', 'notify', 'lock',
+]);
+
+/**
+ * Whether a reply reads as SQL rather than prose. Only the first word is
+ * judged: a model that cannot answer says so in a sentence ("I cannot answer
+ * that, there is no orders table"), and that sentence must not land in the
+ * editor as if it were a query.
+ */
+export function looksLikeSql(text: string): boolean {
+    const body = text.replace(/^(\s*(--[^\n]*(\n|$)|\/\*[\s\S]*?\*\/))*/, '').trimStart();
+    if (body.startsWith('(')) return true;
+    const word = /^[a-z_]+/i.exec(body)?.[0].toLowerCase();
+    return !!word && SQL_START.has(word);
 }
 
 /**

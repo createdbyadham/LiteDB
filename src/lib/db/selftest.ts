@@ -11,6 +11,7 @@ import { formatPostgresUrl, looksLikePostgresUrl, parsePostgresUrl } from './pgU
 import { postgresConnectionId } from '../connectionId';
 import { pgSupabaseDirectHint } from '../pgSslHint';
 import { detectDelimiter, headerNames, inferColumnType, parseCsv, sqlTypeFor } from './csv';
+import { DATA_FILE_EXTENSIONS, dataFileKind, isDataFile } from './dataFiles';
 import { cellText, formatRows, sqlLiteral } from './sqlLiteral';
 import { refusedEditMessage } from './client';
 import { PG_ROW_LOCATOR_EXPR, parsePgRowAddress, pgLocatorWhere } from './pgClient';
@@ -707,6 +708,17 @@ async function suggesterChecks(): Promise<void> {
     const hung = new InlineSuggester(() => new Promise<string | null>(() => undefined), { timeoutMs: 20 });
     check('a request that never answers frees the slot', (await hung.suggest(prompt('f'))).kind === 'failed');
 }
+
+process.stdout.write('\nCSV, Excel and JSON files opened read-only\n');
+check('a .csv is a data file', isDataFile('C:\\data\\sales 2024.csv'));
+check('extensions are read without regard to case', isDataFile('/home/me/Report.XLSX') && dataFileKind('/home/me/Report.XLSX') === 'Excel');
+check('JSON Lines is named as such', dataFileKind('events.ndjson') === 'JSON Lines' && dataFileKind('events.jsonl') === 'JSON Lines');
+check('TSV under either extension', dataFileKind('a.tsv') === 'TSV' && dataFileKind('a.tab') === 'TSV');
+check('SQLite files are not data files', !isDataFile('app.db') && !isDataFile('app.sqlite3') && dataFileKind('app.db') === null);
+check('a folder named like a file does not count', !isDataFile('/tmp/x.csv/app.db'));
+check('a hidden file with no extension does not count', !isDataFile('/tmp/.csv'));
+check('no extension at all', !isDataFile('/tmp/README'));
+check('every extension has a name', DATA_FILE_EXTENSIONS.every((ext) => dataFileKind(`f.${ext}`) !== null));
 
 process.stdout.write('\nSSL handed to the MCP server\n');
 const base = { host: 'h', port: 5432, database: 'd', username: 'u', password: 'p', ssl: false };
