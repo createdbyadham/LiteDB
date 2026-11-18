@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The SQL editor remembers the divider position between the query and results panes.
+
 ## [2.7.0] - 2026-11-17
 
 ### Added

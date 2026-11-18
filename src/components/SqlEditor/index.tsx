@@ -107,6 +107,19 @@ const WHOA_EVERY = 10 * 60_000;
 let lastWhoa = -Infinity;
 const LIMIT_KEY = 'editorRowLimit';
 const SCRIPTS_KEY = 'savedScripts';
+const EDITOR_FRACTION_KEY = 'editorSplitFraction';
+const MIN_EDITOR_FRACTION = 0.15;
+const MAX_EDITOR_FRACTION = 0.85;
+
+function readEditorFraction(): number {
+  try {
+    const fraction = Number(localStorage.getItem(EDITOR_FRACTION_KEY));
+    if (fraction >= MIN_EDITOR_FRACTION && fraction <= MAX_EDITOR_FRACTION) return fraction;
+  } catch {
+    // The editor still works when storage is unavailable.
+  }
+  return 0.5;
+}
 
 function readLimit(): number | null {
   try {
@@ -250,7 +263,7 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
   // Suggestions are always off on production; say so when the user expects them.
   const inlineSuggestionsOn = useInlineSuggestionsSetting();
 
-  const [editorFraction, setEditorFraction] = useState(0.5);
+  const [editorFraction, setEditorFraction] = useState(readEditorFraction);
   const splitRef = useRef<HTMLDivElement>(null);
 
   // The toolbar advertises Ctrl/Cmd+K for the whole page, so it has to work
@@ -936,14 +949,24 @@ const SqlEditor = ({ conn, refreshTables, requestAiDialog = null, onAiDialogRequ
     const container = splitRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    let draggedFraction: number | undefined;
     const onMove = (e: MouseEvent) => {
       const fraction = (e.clientY - rect.top) / rect.height;
-      setEditorFraction(Math.min(0.85, Math.max(0.15, fraction)));
+      draggedFraction = Math.min(MAX_EDITOR_FRACTION, Math.max(MIN_EDITOR_FRACTION, fraction));
+      setEditorFraction(draggedFraction);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
+      if (draggedFraction !== undefined) {
+        try {
+          localStorage.setItem(EDITOR_FRACTION_KEY, String(draggedFraction));
+        } catch {
+          // Keep the resized layout for this session even if it cannot be saved.
+        }
+      }
     };
     document.body.style.cursor = 'row-resize';
     window.addEventListener('mousemove', onMove);
